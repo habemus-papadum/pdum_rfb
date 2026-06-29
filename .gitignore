@@ -83,7 +83,11 @@ node_modules/
 .pnpm-store/
 pnpm-debug.log*
 widgets/dist/
+widgets/dist-demo/
 widgets/coverage/
+widgets/test-results/
+widgets/playwright-report/
+widgets/.vite/
 badges/
 
 # IPython

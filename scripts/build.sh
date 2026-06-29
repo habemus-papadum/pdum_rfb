@@ -33,7 +33,12 @@ echo "2. Installing Python dependencies..."
 uv sync --frozen
 
 echo ""
-echo "3. (Skipped) No TypeScript widgets configured"
+echo "3. Building TypeScript widgets..."
+if [ -d "widgets" ] && command -v pnpm >/dev/null 2>&1; then
+    (cd widgets && pnpm install --frozen-lockfile && pnpm build)
+else
+    echo "   (Skipped) widgets/ directory or pnpm not available"
+fi
 
 echo ""
 echo "============================================="

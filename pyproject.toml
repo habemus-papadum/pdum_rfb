@@ -18,12 +18,21 @@ authors = [
     { name = "Nehal Patel", email = "nehal@alum.mit.edu" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.0",
+    "pillow>=12.2.0",
+    "websockets>=16.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/habemus-papadum/pdum_rfb"
 Repository = "https://github.com/habemus-papadum/pdum_rfb"
 Documentation = "https://github.com/habemus-papadum/pdum_rfb"
+
+[project.optional-dependencies]
+h264 = [
+    "av>=17.1.0",
+]
 
 
 [build-system]
@@ -49,6 +58,8 @@ dev = [
     "inquirerpy>=0.3.4",
     "pre-commit>=3.7.0",
     "watchdog>=3.0.0",
+    "av>=17.1.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.ruff]
@@ -63,6 +74,7 @@ ignore = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-s"
+asyncio_mode = "auto"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

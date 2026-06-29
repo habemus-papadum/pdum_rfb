@@ -1,0 +1,38 @@
+{
+  "name": "pdum-rfb-widgets",
+  "version": "0.1.0-alpha",
+  "description": "Framework-agnostic remote framebuffer browser client (Web Worker decoding).",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --emitDeclarationOnly -p tsconfig.json && vite build",
+    "demo:build": "vite build --config vite.demo.config.ts",
+    "demo:preview": "vite preview --config vite.demo.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "gen:fixtures": "cd .. && uv run python -m pdum.rfb.testing widgets/tests/fixtures/protocol"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "happy-dom": "^15.7.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^4.2.0",
+    "vitest": "^2.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

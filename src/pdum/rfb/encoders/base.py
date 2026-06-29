@@ -1,0 +1,84 @@
+"""Encoder registry and the ``build_encoder`` factory.
+
+The registry is the extension seam for additional video encoders. The CPU
+H.264 (PyAV/libx264) backend registers itself lazily so importing this module
+never imports PyAV. A future NVENC backend registers itself the same way and
+:func:`pdum.rfb.protocol.select_transport` flips ``has_nvenc`` to prefer it.
+"""
+
+from __future__ import annotations
+
+from typing import Callable
+
+from ..protocol import BackendSelection
+from ..types import EncoderBackend
+from .image import ImageEncoder
+
+#: A factory takes keyword args (width, height, fps, bitrate, codec, ...) and
+#: returns an :class:`~pdum.rfb.types.EncoderBackend`.
+EncoderFactory = Callable[..., EncoderBackend]
+
+_VIDEO_ENCODERS: dict[str, EncoderFactory] = {}
+
+
+def register_video_encoder(name: str, factory: EncoderFactory) -> None:
+    """Register a video :class:`EncoderBackend` factory under ``name``."""
+    _VIDEO_ENCODERS[name] = factory
+
+
+def available_video_encoders() -> list[str]:
+    """Return the names of registered video encoders."""
+    return sorted(_VIDEO_ENCODERS)
+
+
+def _pyav_factory(**kwargs) -> EncoderBackend:
+    # Imported lazily so PyAV is only required when an H.264 encoder is built.
+    from .pyav_h264 import PyAvH264Encoder
+
+    return PyAvH264Encoder(**kwargs)
+
+
+# The CPU H.264 backend is always *registered*; whether it can be *built* still
+# depends on PyAV being importable (handled by select_transport via has_h264).
+register_video_encoder("pyav", _pyav_factory)
+
+
+def build_encoder(
+    selection: BackendSelection,
+    *,
+    width: int,
+    height: int,
+    fps: int = 30,
+    bitrate: int = 12_000_000,
+    video_encoder: str = "pyav",
+) -> EncoderBackend:
+    """Build the encoder backend described by ``selection``.
+
+    Parameters
+    ----------
+    selection:
+        The result of :func:`pdum.rfb.protocol.select_transport`.
+    width, height, fps, bitrate:
+        Encoder configuration (ignored by the image encoder except where noted).
+    video_encoder:
+        Which registered video encoder to use for the H.264 transport.
+    """
+    if selection.transport == "image":
+        return ImageEncoder(mode=selection.image_mode or "jpeg")
+
+    if selection.transport == "h264":
+        try:
+            factory = _VIDEO_ENCODERS[video_encoder]
+        except KeyError as exc:
+            raise ValueError(
+                f"unknown video encoder {video_encoder!r}; available: {available_video_encoders()}"
+            ) from exc
+        return factory(
+            width=width,
+            height=height,
+            fps=fps,
+            bitrate=bitrate,
+            codec_string=selection.codec,
+        )
+
+    raise ValueError(f"unsupported transport: {selection.transport!r}")

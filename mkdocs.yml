@@ -12,7 +12,15 @@ theme:
 
 nav:
   - Home: index.md
+  - Overview: remote_framebuffer.md
+  - Python Guide: guide_python.md
+  - JavaScript Guide: guide_javascript.md
+  - Internals: internals.md
+  - Roadmap: roadmap.md
   - API: reference.md
+  - Design Notes:
+      - Implementation Guide: remote_framebuffer_implementation_guide.md
+      - Addendum: remote_framebuffer_addendum.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs

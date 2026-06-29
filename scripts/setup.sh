@@ -32,6 +32,21 @@ echo ""
 echo "2. Installing Python dependencies..."
 uv sync --frozen
 
+echo ""
+echo "3. Installing widget (TypeScript) dependencies..."
+if [ -d "widgets" ]; then
+    if command -v corepack >/dev/null 2>&1; then
+        corepack enable >/dev/null 2>&1 || true
+    fi
+    if command -v pnpm >/dev/null 2>&1; then
+        (cd widgets && pnpm install --frozen-lockfile)
+    else
+        echo "   ⚠ pnpm not found; skipping widget install (Node.js + pnpm needed for the browser client)"
+    fi
+else
+    echo "   Skipping (no widgets/ directory)"
+fi
+
 if [ -f ".pre-commit-config.yaml" ]; then
     echo ""
     echo "5. Installing pre-commit hooks..."

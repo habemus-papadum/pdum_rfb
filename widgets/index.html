@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pdum.rfb demo</title>
+    <link rel="stylesheet" href="/demo/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Remote Framebuffer demo</h1>
+      <p>
+        Run the Python server:
+        <code>uv run python -m pdum.rfb.server --pattern bouncing_box</code>
+      </p>
+    </header>
+    <main>
+      <div id="stage"></div>
+      <aside>
+        <h2>stats</h2>
+        <pre id="stats">connecting…</pre>
+      </aside>
+    </main>
+    <script type="module" src="/demo/main.ts"></script>
+  </body>
+</html>
