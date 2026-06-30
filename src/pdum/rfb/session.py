@@ -49,6 +49,7 @@ class RfbSession:
         bitrate: int = 12_000_000,
         fps: int = 30,
         adaptive: AdaptiveQualityController | None = None,
+        still_after: float | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.source = source
@@ -59,6 +60,7 @@ class RfbSession:
         self.bitrate = bitrate
         self.fps = fps
         self.adaptive = adaptive
+        self.still_after = still_after
         self._clock = clock or time.monotonic
 
         self.force_keyframe = True
@@ -68,6 +70,16 @@ class RfbSession:
         self._enc_size: tuple[int, int] | None = None
         self._send_times: dict[int, float] = {}
         self.metrics = SessionMetrics(started_at=self._clock(), target_bitrate=bitrate, target_fps=fps)
+
+        # "Still after interaction settles": when the scene goes quiet (no new
+        # published frame for ``still_after`` seconds), re-send the resting frame
+        # at higher quality — a lossless PNG on the image path, a clean IDR on the
+        # video path. Opt-in, and only when both the source can produce a still
+        # and the encoder knows how to encode one (otherwise a silent no-op).
+        self._still_pending = False
+        self._stills_enabled = (
+            still_after is not None and hasattr(encoder, "encode_still") and hasattr(source, "still_frame")
+        )
 
     def metrics_snapshot(self) -> dict:
         """Return a JSON-serializable snapshot of this session's metrics."""
@@ -146,11 +158,22 @@ class RfbSession:
             self._enc_size = size
 
     async def _encode_step(self) -> str:
-        """Run one encode iteration. Returns ``"sent"``, ``"dropped"`` or ``"stopped"``."""
+        """Run one encode iteration.
+
+        Returns ``"sent"``, ``"dropped"``, ``"still"`` or ``"stopped"``.
+        """
         try:
-            frame = await self.source.next_frame()
+            frame = await self._next_frame_or_idle()
         except StopAsyncIteration:
             return "stopped"
+
+        if frame is None:
+            # The scene settled: upgrade the resting frame to a high-quality still.
+            await self._send_still()
+            return "still"
+
+        # A fresh frame supersedes any still we were about to send; arm the next.
+        self._still_pending = self._stills_enabled
 
         # Latest-frame-wins: if the client is behind, drop this frame before
         # spending encode time and force the next sent one to be a keyframe.
@@ -171,6 +194,43 @@ class RfbSession:
             await self.send_payload(payload)
         await self._maybe_adapt()
         return "sent"
+
+    async def _next_frame_or_idle(self) -> Any:
+        """Park for the next frame; surface a settle window as ``None``.
+
+        When stills are enabled and one is pending, the wait is bounded by
+        ``still_after`` so that ``still_after`` seconds without a new published
+        frame returns ``None`` ("the scene settled — send a still"). Otherwise it
+        blocks until the next frame, exactly like the plain pull. The pending flag
+        is cleared once a still fires, so the bounded wait happens at most once per
+        settle and the loop reverts to a blocking park (no busy-loop on idle).
+        """
+        if not (self._stills_enabled and self._still_pending):
+            return await self.source.next_frame()
+        try:
+            return await asyncio.wait_for(self.source.next_frame(), self.still_after)
+        except TimeoutError:
+            return None
+
+    async def _send_still(self) -> None:
+        """Encode and send a lossless / high-quality still of the settled frame.
+
+        The still re-sends the *current latest* frame (the one the client is
+        resting on) with a fresh per-client ``seq`` and as a self-contained
+        keyframe, so a client that dropped deltas during a flurry also jumps
+        straight to the latest. A one-shot nicety, so it is skipped (rather than
+        queued) when the client is still catching up.
+        """
+        self._still_pending = False
+        still = self.source.still_frame()  # type: ignore[attr-defined]
+        if still is None or len(self.inflight) >= self.max_inflight:
+            return
+        self._ensure_encoder_for(still.width, still.height)
+        t0 = self._clock()
+        payloads = await asyncio.to_thread(self.encoder.encode_still, still)  # type: ignore[attr-defined]
+        self.metrics.record_encode((self._clock() - t0) * 1000, now=self._clock())
+        for payload in payloads:
+            await self.send_payload(payload)
 
     async def _maybe_adapt(self) -> None:
         """Apply an adaptive-quality decision, if the controller requests one."""

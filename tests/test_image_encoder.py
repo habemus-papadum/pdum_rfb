@@ -39,6 +39,21 @@ def test_rgba_jpeg_drops_alpha():
     assert img.size == (32, 32)
 
 
+@pytest.mark.parametrize("mode", ["jpeg", "png", "webp"])
+def test_encode_still_is_lossless_png_regardless_of_mode(mode):
+    # The "still after settle" upgrade re-sends the resting frame pixel-exact as
+    # PNG, even when the live stream is lossy JPEG/WebP.
+    frame = _rgb_frame(seq=3, w=64, h=48)
+    out = ImageEncoder(mode=mode).encode_still(frame)
+    assert len(out) == 1
+    payload = out[0]
+    assert payload.mime == "image/png"
+    assert payload.keyframe is True
+    assert payload.seq == 3  # carries the still's (fresh) seq
+    decoded = np.asarray(Image.open(BytesIO(payload.payload)).convert("RGB"))
+    np.testing.assert_array_equal(decoded, frame.data)  # bit-exact round-trip
+
+
 def test_unsupported_pixel_format_raises():
     frame = RawFrame(0, 4, 4, 0, "nv12", "cpu", np.zeros((6, 4), dtype=np.uint8))
     with pytest.raises(ValueError):

@@ -291,6 +291,22 @@ class _ClientFeed:
             self._event.clear()
             await self._event.wait()
 
+    def still_frame(self) -> RawFrame | None:
+        """Return the current latest frame with a fresh per-client ``seq``.
+
+        Used by the session's "still after settle" path to re-send the resting
+        frame at higher quality. It assigns a new ``seq`` (so the client acks it
+        distinctly) but does **not** advance ``_last_seen``, so a frame published
+        after the still is still delivered normally by :meth:`next_frame`. Returns
+        ``None`` if nothing has been published yet.
+        """
+        latest = self._display._latest
+        if latest is None:
+            return None
+        frame = dataclasses.replace(latest, seq=self._seq)
+        self._seq += 1
+        return frame
+
     async def handle_event(self, event: EventDict) -> None:
         if event.get("type") in ("resize", "set_viewport"):
             # Informational only in a shared display: the publisher owns the

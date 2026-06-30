@@ -130,6 +130,11 @@ class NvencGpuPdumEncoder:
         keyframe = force_keyframe or _contains_idr(data)
         return [self._payload(frame.seq, frame.timestamp_us, data, keyframe)]
 
+    def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
+        """Settled-scene still: a forced **IDR** of the resting frame (see the CPU
+        backend's :meth:`~pdum.rfb.encoders.h264_cpu.H264CpuEncoder.encode_still`)."""
+        return self.encode(frame, force_keyframe=True)
+
     def flush(self) -> list[EncodedPayload]:
         data = self._enc.flush()
         if not data:

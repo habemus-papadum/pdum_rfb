@@ -73,6 +73,19 @@ def test_bitstream_decodes_back_with_pyav():
     assert all(f.width == W and f.height == H for f in frames)
 
 
+def test_encode_still_emits_a_self_contained_idr():
+    # The "still after settle" upgrade on the video path is a clean IDR (SPS+PPS+
+    # IDR slice) of the resting frame, so a client can decode it standalone.
+    enc = H264CpuEncoder(width=W, height=H, fps=30)
+    enc.encode(_frame(0), force_keyframe=True)
+    for seq in range(1, 4):
+        enc.encode(_frame(seq))  # build up some delta state
+    still = enc.encode_still(_frame(4))
+    enc.close()
+    assert still and all(p.keyframe for p in still)
+    assert any(has_sps_pps_idr(p.payload) for p in still)
+
+
 def test_self_test_passes():
     assert self_test() is True
 

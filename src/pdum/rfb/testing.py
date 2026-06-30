@@ -172,6 +172,23 @@ class FakeEncoder:
             )
         ]
 
+    def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
+        """A distinguishable 'still' payload for "still after settle" tests."""
+        self.calls += 1
+        return [
+            EncodedPayload(
+                seq=frame.seq,
+                kind=self.kind,  # type: ignore[arg-type]
+                timestamp_us=frame.timestamp_us,
+                width=frame.width,
+                height=frame.height,
+                payload=f"still:{frame.seq}".encode(),
+                codec="avc1.42E01F" if self.kind == "video" else None,
+                keyframe=True,
+                metadata={"bitstream": "annexb"} if self.kind == "video" else None,
+            )
+        ]
+
     def flush(self) -> list[EncodedPayload]:
         return []
 

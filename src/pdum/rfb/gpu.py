@@ -296,11 +296,21 @@ class HostFrameAdapter:
         self._inner = inner
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False):
-        if frame.memory != "cpu":
-            import dataclasses
+        return self._inner.encode(self._to_host(frame), force_keyframe=force_keyframe)
 
-            frame = dataclasses.replace(frame, data=to_host_rgb(frame), memory="cpu", pixel_format="rgb24")
-        return self._inner.encode(frame, force_keyframe=force_keyframe)
+    def encode_still(self, frame: RawFrame):
+        """Download a CUDA frame to host, then delegate the still to the wrapped
+        encoder (keeps "still after settle" working in ``serve(gpu=True)`` +
+        image-transport viewers)."""
+        return self._inner.encode_still(self._to_host(frame))
+
+    @staticmethod
+    def _to_host(frame: RawFrame) -> RawFrame:
+        if frame.memory == "cpu":
+            return frame
+        import dataclasses
+
+        return dataclasses.replace(frame, data=to_host_rgb(frame), memory="cpu", pixel_format="rgb24")
 
     def flush(self):
         return self._inner.flush()

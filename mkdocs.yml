@@ -16,6 +16,8 @@ nav:
   - Python Guide: guide_python.md
   - JavaScript Guide: guide_javascript.md
   - Internals: internals.md
+  - Features:
+      - Still after settle: still_after_settle.md
   - Repository & Development: development.md
   - Performance: performance.md
   - GPU / hardware encode:

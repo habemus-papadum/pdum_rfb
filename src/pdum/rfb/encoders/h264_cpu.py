@@ -108,6 +108,17 @@ class H264CpuEncoder:
 
         return [self._payload(frame.seq, frame.timestamp_us, pkt) for pkt in self._drain(vf)]
 
+    def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
+        """A settled-scene still for the video path: a forced **IDR** of the frame.
+
+        True lossless H.264 isn't practical over WebCodecs, so the still here is a
+        clean, self-contained intra (IDR) of the resting frame — it refreshes the
+        image and lets a client that dropped deltas during a flurry jump straight
+        to the latest. Re-encoding advances ``frame_index`` so the PTS stays
+        monotonic. For a pixel-exact settled image, use the image transport.
+        """
+        return self.encode(frame, force_keyframe=True)
+
     def flush(self) -> list[EncodedPayload]:
         return [self._payload(-1, 0, pkt) for pkt in self._drain(None)]
 

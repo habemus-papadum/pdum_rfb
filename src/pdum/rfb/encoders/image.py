@@ -69,6 +69,16 @@ class ImageEncoder:
             )
         ]
 
+    def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
+        """Encode ``frame`` losslessly as **PNG** — the "still after settle" upgrade.
+
+        Independent of the streaming ``mode``: once a scene settles, the resting
+        frame is re-sent pixel-exact so it is crisp even when the live stream is
+        lossy JPEG/WebP. Every image is already a keyframe, so the browser swaps it
+        in with no client-side changes.
+        """
+        return ImageEncoder(mode="png").encode(frame)
+
     def flush(self) -> list[EncodedPayload]:
         return []
 

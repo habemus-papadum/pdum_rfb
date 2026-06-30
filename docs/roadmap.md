@@ -6,25 +6,25 @@ hardware). **Multiple browser clients also already work** — the push `Display`
 every frame out to N viewers, each with its own `RfbSession`/encoder/backpressure.
 
 This page proposes where to go next; items carry a rough **benefit · difficulty**
-read to help triage. Near-term highest-leverage bets: §4 (notebook adapter, for
-adoption), §8 (multiple streams per server), and the small §1/§2 polish. Items
-marked _(addendum)_ come from the [design addendum](remote_framebuffer_addendum.md).
+read to help triage. Items marked _(addendum)_ come from the
+[design addendum](remote_framebuffer_addendum.md).
 
 ## Current plan
 
 Agreed execution order — the section numbers below are **stable identifiers, not the
-work order**. We proceed one item at a time, on explicit go-ahead:
+work order**. We proceed one item at a time, committing at each milestone:
 
-1. **§2** — "still after interaction settles" (small, high-impact polish)
-2. **§4** — framework & notebook adapters (adoption)
+1. ~~**§2** — "still after interaction settles"~~ ✅ **done** (`serve(still_after=)`;
+   see [Still after settle](still_after_settle.md))
+2. **§8** — multiple streams per server (named displays) — **▶ next**
 3. **§3** — ASGI / Starlette adapter (WebTransport stays deferred)
-4. **§8** — multiple streams per server (composes with the ASGI adapter)
-5. **§1** — adaptive / metrics remaining polish
+4. **§1** — adaptive / metrics remaining polish
 
-**Tabled** (revisit later): **§5** remaining (AV1 / HEVC / zero-copy interop) and
-**§6** (rendering & codec upgrades). **Done:** §7.
+**Skipped** (by request): **§4** framework & notebook adapters. **Tabled** (revisit
+later): **§5** remaining (AV1 / HEVC / zero-copy interop) and **§6** (rendering &
+codec upgrades). **Done:** §2, §7.
 
-## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ step 5 — remaining polish**
+## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ step 4 — remaining polish**
 
 - **Per-session metrics** — `metrics.py` (`SessionMetrics`): encode_ms, payload
   bytes, in-flight, ACK RTT, decode-queue depth, fps, bitrate; exposed via
@@ -39,12 +39,14 @@ work order**. We proceed one item at a time, on explicit go-ahead:
 Remaining polish: surface RTT/quality in the client `Stats` and have the worker act
 on `set_quality`; add a `fps` knob; resolution-scale adaptation.
 
-## 2. "Still after interaction settles" — **▶ step 1 (next)** _(addendum §1)_
+## 2. "Still after interaction settles" ✅ _(done)_ _(addendum §1)_
 
-For sparse/interactive viz: stream lossy JPEG/H.264 while the user interacts, then
-~100–250 ms after input stops, send one **lossless PNG** (or a high-quality IDR).
-Builds on the push `Display` (publish a high-quality frame once input settles).
-Small, high-impact polish.
+Stream lossy JPEG/H.264 while the user interacts, then — once no new frame has been
+published for `still_after` seconds — re-send each viewer a high-quality still of the
+resting frame: a **lossless PNG** on the image path, a clean **IDR** on the video
+path. Opt in with `serve(still_after=0.15)`; zero cost while interacting, no
+client-side changes. Implemented as an optional `encode_still()` encoder capability
+fed by `Display`'s `still_frame()`. See [Still after settle](still_after_settle.md).
 
 ## 3. Logical-channel transport: ASGI now, WebTransport later — **▶ step 3 (ASGI only)** _(addendum §2)_
 
@@ -76,7 +78,7 @@ WebTransportTransport: real QUIC streams for channels, datagrams for latest-wins
                        events/acks (reduces head-of-line blocking)
 ```
 
-## 4. Framework & notebook adapters — **▶ step 2**
+## 4. Framework & notebook adapters — **⏸ skipped (by request)**
 
 The core is framework-agnostic by design; add thin, optional wrappers:
 
@@ -136,7 +138,7 @@ CI (`ci.yml`). See [Repository & Development](development.md#releasing-the-pipel
 Remaining polish: a packaged non-`blob:` worker subpath export for the widgets (for
 strict-CSP sites), and broader GPU-wheel coverage (aarch64, more manylinux tags).
 
-## 8. Multiple streams per server (named displays) — **▶ step 4** _(benefit: high · difficulty: moderate)_
+## 8. Multiple streams per server (named displays) — **▶ step 2 (next)** _(benefit: high · difficulty: moderate)_
 
 Today `serve(w, h)` hosts **one** `Display` (one framebuffer). Host several from one
 port — different cameras/viewports of a simulation, a dashboard of independent plots,

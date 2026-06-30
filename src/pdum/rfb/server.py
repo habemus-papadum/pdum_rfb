@@ -78,6 +78,7 @@ class _ConnectionServer:
         bitrate: int = 12_000_000,
         max_inflight: int = 2,
         adaptive: bool = False,
+        still_after: float | None = None,
         authenticate: Authenticator | None = None,
         gpu: bool = False,
     ) -> None:
@@ -124,6 +125,7 @@ class _ConnectionServer:
         self.bitrate = bitrate
         self.max_inflight = max_inflight
         self.adaptive = adaptive
+        self.still_after = still_after
         self.authenticate = authenticate
 
     async def handler(self, connection: Any) -> None:
@@ -190,6 +192,7 @@ class _ConnectionServer:
                 bitrate=self.bitrate,
                 fps=self.fps,
                 adaptive=controller,
+                still_after=self.still_after,
             )
             self.display._register_session(session)
             closer = asyncio.create_task(_close_feed_on_disconnect(connection, feed))
@@ -252,6 +255,7 @@ async def serve(
     has_nvenc: bool | None = None,
     gpu: bool = False,
     adaptive: bool = False,
+    still_after: float | None = None,
     authenticate: Authenticator | None = None,
     origins: list[str | None] | None = None,
     record_events: bool = False,
@@ -279,6 +283,13 @@ async def serve(
         available, else the **zero-copy CUDA→NVENC** backend (PyAV >= 18). Validated
         at startup; raises if neither is usable. For the PyAV-18 path, call
         :func:`pdum.rfb.gpu.enable_cuda_context_sharing` before any CuPy use.
+    still_after:
+        Opt in to **"still after interaction settles"**: when no new frame is
+        published for ``still_after`` seconds (e.g. ``0.15``), each viewer is sent a
+        high-quality still of the resting frame — a **lossless PNG** on the image
+        path, a clean **IDR** on the video path — so the settled image is crisp even
+        though the live stream is lossy. ``None`` (default) disables it. See
+        ``docs/still_after_settle.md``.
     authenticate:
         Optional async hook (see :mod:`pdum.rfb.auth`); rejected connections are
         closed with code ``4401`` before any frame is sent.
@@ -303,6 +314,7 @@ async def serve(
         bitrate=bitrate,
         max_inflight=max_inflight,
         adaptive=adaptive,
+        still_after=still_after,
         authenticate=authenticate,
         gpu=gpu,
     )
@@ -331,6 +343,7 @@ async def _amain(args: argparse.Namespace) -> None:
         has_nvenc=False if args.no_nvenc else None,
         gpu=args.gpu,
         adaptive=args.adaptive,
+        still_after=args.still_after,
         record_events=args.record_events,
         event_log=args.event_log,
     )
@@ -390,6 +403,13 @@ def main(argv: list[str] | None = None) -> None:
         help="zero-copy CUDA→NVENC: upload pattern frames to the GPU and encode them directly (needs CuPy + PyAV>=18)",
     )
     parser.add_argument("--adaptive", action="store_true", help="enable adaptive bitrate/backpressure")
+    parser.add_argument(
+        "--still-after",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="send a lossless PNG / clean IDR still this many seconds after frames settle (e.g. 0.15)",
+    )
     parser.add_argument("--record-events", action="store_true")
     parser.add_argument("--event-log", default=None)
     parser.add_argument("--max-frames", type=int, default=None)

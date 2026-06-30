@@ -125,6 +125,7 @@ display = await serve(
     max_inflight=2,            # per-client latest-frame-wins ceiling
     has_h264=None,             # None = auto-detect PyAV; False = force image
     has_nvenc=None,            # None = auto-detect NVENC GPU; True = force; False = CPU libx264
+    still_after=None,          # seconds of quiet → resend a lossless still (see below)
     authenticate=None,         # async hook (see Authentication below)
     origins=None,              # allowed Origin values (CSWSH defense)
     record_events=False,       # also expose received events at GET /recorded-events
@@ -141,6 +142,15 @@ The same port answers a small HTTP side channel used by tests and tooling:
 - `GET /metrics` → JSON array, one object per active session
 - `GET /recorded-events` → JSON list of received input events
 - `GET /recorded-events/reset` → clears the list
+
+### Still after settle
+
+`serve(still_after=0.15)` opts in to **"still after interaction settles"**: stream
+lossy JPEG/H.264 while the user interacts, then — once no new frame has been
+published for `still_after` seconds — re-send each viewer a high-quality still of the
+resting frame (a **lossless PNG** on the image path, a clean **IDR** on the video
+path). Opt-in, zero cost while interacting, no client changes. See
+[Still after settle](still_after_settle.md) for the full write-up.
 
 ### Authentication
 

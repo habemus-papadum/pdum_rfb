@@ -5,8 +5,10 @@ helpers (``_encode_step`` / ``_handle_control``) — no real sockets or threads'
 scheduling, so the invariants are exact.
 """
 
+import numpy as np
 import pytest
 
+from pdum.rfb.display import Display
 from pdum.rfb.protocol import unpack_binary_message
 from pdum.rfb.session import RfbSession
 from pdum.rfb.testing import FakeEncoder, FakeWebSocket, SyntheticFrameSource
@@ -124,6 +126,62 @@ async def test_encoder_rebuilt_and_keyframe_forced_on_size_change():
     session._ensure_encoder_for(128, 96)  # size change -> rebuild + keyframe
     assert builds == [(128, 96, 5_000_000)]
     assert session.force_keyframe is True
+
+
+def _feed_session(*, still_after=None, max_inflight=100):
+    """A session fed by a real ``_ClientFeed`` (which provides ``still_frame``)."""
+    display = Display(64, 48)
+    feed = display._make_feed("c", None)
+    ws = FakeWebSocket()
+    session = RfbSession(feed, FakeEncoder(), ws, max_inflight=max_inflight, still_after=still_after)
+    return display, session, ws
+
+
+def _sent_payloads(ws):
+    return [unpack_binary_message(m)[1] for m in ws.sent]
+
+
+async def test_stills_disabled_without_still_after():
+    _display, session, _ = _feed_session(still_after=None)
+    assert session._stills_enabled is False
+
+
+async def test_still_after_settle_sends_one_lossless_still():
+    display, session, ws = _feed_session(still_after=0.02)
+    assert session._stills_enabled is True
+
+    display.publish(np.zeros((48, 64, 3), dtype=np.uint8))
+    assert await session._encode_step() == "sent"  # seq 0, the live (lossy) frame
+
+    # No further publish: the scene settles and exactly one still is emitted.
+    assert await session._encode_step() == "still"
+    headers = _sent_headers(ws)
+    assert len(headers) == 2
+    assert headers[1]["seq"] == 1  # fresh per-client seq, distinct from the frame
+    assert headers[1]["keyframe"] is True
+    assert _sent_payloads(ws)[1] == b"still:1"  # FakeEncoder.encode_still marker
+
+    # One-shot: pending is cleared so the loop reverts to a blocking park.
+    assert session._still_pending is False
+
+
+async def test_no_still_while_frames_keep_coming():
+    display, session, ws = _feed_session(still_after=5.0)
+    display.publish(np.zeros((48, 64, 3), dtype=np.uint8))
+    assert await session._encode_step() == "sent"  # seq 0
+    display.publish(np.full((48, 64, 3), 9, dtype=np.uint8))  # a new frame is ready
+    # The bounded wait returns the frame immediately; no still despite still_after.
+    assert await session._encode_step() == "sent"
+    assert all(not p.startswith(b"still:") for p in _sent_payloads(ws))
+
+
+async def test_still_skipped_when_client_behind():
+    display, session, ws = _feed_session(still_after=0.02, max_inflight=1)
+    display.publish(np.zeros((48, 64, 3), dtype=np.uint8))
+    assert await session._encode_step() == "sent"  # seq 0, now inflight is full
+    # Settled, but the client hasn't acked: the still is skipped, not queued.
+    assert await session._encode_step() == "still"
+    assert len(ws.sent) == 1  # only the live frame went out
 
 
 async def test_metrics_track_encode_send_and_ack_rtt():
