@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.14"
 
+[manifest]
+members = [
+    "habemus-papadum-nvenc",
+    "habemus-papadum-rfb",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -526,6 +532,20 @@ wheels = [
 ]
 
 [[package]]
+name = "freetype-py"
+version = "2.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/9c/61ba17f846b922c2d6d101cc886b0e8fb597c109cedfcb39b8c5d2304b54/freetype-py-2.5.1.zip", hash = "sha256:cfe2686a174d0dd3d71a9d8ee9bf6a2c23f5872385cf8ce9f24af83d076e2fbd", size = 851738, upload-time = "2024-08-29T18:32:26.37Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/a8/258dd138ebe60c79cd8cfaa6d021599208a33f0175a5e29b01f60c9ab2c7/freetype_py-2.5.1-py3-none-macosx_10_9_universal2.whl", hash = "sha256:d01ded2557694f06aa0413f3400c0c0b2b5ebcaabeef7aaf3d756be44f51e90b", size = 1747885, upload-time = "2024-08-29T18:32:17.604Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/93/280ad06dc944e40789b0a641492321a2792db82edda485369cbc59d14366/freetype_py-2.5.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5d2f6b3d68496797da23204b3b9c4e77e67559c80390fc0dc8b3f454ae1cd819", size = 1051055, upload-time = "2024-08-29T18:32:19.153Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/36/853cad240ec63e21a37a512ee19c896b655ce1772d803a3dd80fccfe63fe/freetype_py-2.5.1-py3-none-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:289b443547e03a4f85302e3ac91376838e0d11636050166662a4f75e3087ed0b", size = 1043856, upload-time = "2024-08-29T18:32:20.565Z" },
+    { url = "https://files.pythonhosted.org/packages/93/6f/fcc1789e42b8c6617c3112196d68e87bfe7d957d80812d3c24d639782dcb/freetype_py-2.5.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:cd3bfdbb7e1a84818cfbc8025fca3096f4f2afcd5d4641184bf0a3a2e6f97bbf", size = 1108180, upload-time = "2024-08-29T18:32:21.871Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/1b/161d3a6244b8a820aef188e4397a750d4a8196316809576d015f26594296/freetype_py-2.5.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:3c1aefc4f0d5b7425f014daccc5fdc7c6f914fb7d6a695cc684f1c09cd8c1660", size = 1106792, upload-time = "2024-08-29T18:32:23.134Z" },
+    { url = "https://files.pythonhosted.org/packages/93/6e/bd7fbfacca077bc6f34f1a1109800a2c41ab50f4704d3a0507ba41009915/freetype_py-2.5.1-py3-none-win_amd64.whl", hash = "sha256:0b7f8e0342779f65ca13ef8bc103938366fecade23e6bb37cb671c2b8ad7f124", size = 814608, upload-time = "2024-08-29T18:32:24.648Z" },
+]
+
+[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -556,6 +576,11 @@ wheels = [
 ]
 
 [[package]]
+name = "habemus-papadum-nvenc"
+version = "0.1.0a0"
+source = { editable = "packages/nvenc" }
+
+[[package]]
 name = "habemus-papadum-rfb"
 version = "0.1.0a0"
 source = { editable = "." }
@@ -578,12 +603,16 @@ gpu-cuda13 = [
 ]
 gpu-nvenc-sdk = [
     { name = "cupy-cuda13x" },
+    { name = "habemus-papadum-nvenc" },
 ]
 h264 = [
     { name = "av" },
 ]
 nvenc = [
     { name = "av" },
+]
+rendercanvas = [
+    { name = "rendercanvas" },
 ]
 
 [package.dev-dependencies]
@@ -609,6 +638,11 @@ dev = [
 gpu-dev = [
     { name = "cupy-cuda13x" },
 ]
+viz = [
+    { name = "pygfx" },
+    { name = "rendercanvas" },
+    { name = "wgpu" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -617,13 +651,15 @@ requires-dist = [
     { name = "cupy-cuda12x", marker = "extra == 'gpu-cuda12'", specifier = ">=13" },
     { name = "cupy-cuda13x", marker = "extra == 'gpu-cuda13'", specifier = ">=14" },
     { name = "cupy-cuda13x", marker = "extra == 'gpu-nvenc-sdk'", specifier = ">=14" },
+    { name = "habemus-papadum-nvenc", marker = "extra == 'gpu-nvenc-sdk'", editable = "packages/nvenc" },
     { name = "numpy", specifier = ">=2.5.0" },
     { name = "pillow", specifier = ">=12.2.0" },
+    { name = "rendercanvas", marker = "extra == 'rendercanvas'", specifier = ">=2.0" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.7" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12" },
     { name = "websockets", specifier = ">=16.0" },
 ]
-provides-extras = ["h264", "nvenc", "gpu-cuda13", "gpu-cuda12", "gpu-nvenc-sdk", "cli"]
+provides-extras = ["h264", "nvenc", "gpu-cuda13", "gpu-cuda12", "gpu-nvenc-sdk", "cli", "rendercanvas"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -646,6 +682,11 @@ dev = [
     { name = "watchdog", specifier = ">=3.0.0" },
 ]
 gpu-dev = [{ name = "cupy-cuda13x", specifier = ">=14" }]
+viz = [
+    { name = "pygfx", specifier = ">=0.2" },
+    { name = "rendercanvas", specifier = ">=2.0" },
+    { name = "wgpu", specifier = ">=0.19" },
+]
 
 [[package]]
 name = "hatch"
@@ -689,6 +730,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/63/4c/8717ccb844b4fa5a5ba6352e97d743ed24e9a22cf90b7c109c17030a46a1/hatchling-1.30.1.tar.gz", hash = "sha256:eee4fd45357f72ebb3d7a42e5d72cfb5e29ed426d79e8836288926c4258d5f2e", size = 56929, upload-time = "2026-06-02T00:09:41.487Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/49/2797ec0ef88008a653a8867bb8d1e5c223cd2df8e40390dd5c6a0279cbc5/hatchling-1.30.1-py3-none-any.whl", hash = "sha256:161eacafb3c6f91526e92116d21426369f2c36e98c36a864f11a96345ad4ee31", size = 77489, upload-time = "2026-06-02T00:09:40.139Z" },
+]
+
+[[package]]
+name = "hsluv"
+version = "5.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/81/af16607fa045724e515579d312577261b436f36f419e7c677e7e88fcc943/hsluv-5.0.4.tar.gz", hash = "sha256:2281f946427a882010042844a38c7bbe9e0d0aaf9d46babe46366ed6f169b72e", size = 543090, upload-time = "2023-09-11T21:46:52.022Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/36/5bddefea3d7adf22a64f9aa9701492f8a9fe6948223f5cf2602c22ec9be7/hsluv-5.0.4-py2.py3-none-any.whl", hash = "sha256:0138bd10038e2ee1b13eecae9a7d49d4ec8c320b1d7eb4f860832c792e3e4567", size = 5252, upload-time = "2023-09-11T21:46:50.407Z" },
 ]
 
 [[package]]
@@ -1840,12 +1890,43 @@ wheels = [
 ]
 
 [[package]]
+name = "pygfx"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "freetype-py" },
+    { name = "hsluv" },
+    { name = "jinja2" },
+    { name = "numpy" },
+    { name = "pylinalg" },
+    { name = "rendercanvas" },
+    { name = "uharfbuzz" },
+    { name = "wgpu" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/94/292a7debdd35dc6a00b2c2156fc311d7ec446c9da1dc914b959fc972d5f9/pygfx-0.16.0.tar.gz", hash = "sha256:6beed9f235b4a117cbbb29ca484b031e71c0e228bca88c3ffc78612ceda66bd9", size = 1146210, upload-time = "2026-03-03T10:07:56.131Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/da/a6b67c8c1ce854c9f08126064339d02083a625844dbb76cc19383fabad03/pygfx-0.16.0-py3-none-any.whl", hash = "sha256:02ff5ab21956e2db8b4a6d62fdef8e960286d8c2693474ce6ab486d97be26b61", size = 1229093, upload-time = "2026-03-03T10:07:54.569Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pylinalg"
+version = "0.6.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/34/2b97967f987de7de3dfb519b1f97437d5e9f53f4826c3cb7f177c812f962/pylinalg-0.6.8.tar.gz", hash = "sha256:1689d658dac078102c4df5efedfaf840c882fb434612216e29ba64852fa0d2dc", size = 16114, upload-time = "2025-10-28T10:17:03.984Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/74/cb/3027a83504373499adb52656b23fad19fc1c534517fe8c0780b70da8b899/pylinalg-0.6.8-py3-none-any.whl", hash = "sha256:b8e1c5f03384d5e72e59808eac413ff91e415b5284d93b684dd3397f9a8d0f44", size = 18531, upload-time = "2025-10-28T10:17:02.926Z" },
 ]
 
 [[package]]
@@ -2050,6 +2131,18 @@ wheels = [
 ]
 
 [[package]]
+name = "rendercanvas"
+version = "2.6.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dc/40/e162bd1eace4392d945fc8ffe90c9cceffeffd0eea227c4e60638a5f30d5/rendercanvas-2.6.3.tar.gz", hash = "sha256:c944ae7b6d89f7d25f2c72216d31cb28f0051f766ec49d049101bb961baaaaac", size = 90228, upload-time = "2026-03-12T13:43:10.272Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/b2/b06d7d89eef452ab50ad3e752604c09ec08c8eaf49484641e566a0e5141d/rendercanvas-2.6.3-py3-none-any.whl", hash = "sha256:c2defd04e3e29dcdf94b794e827045882925677bc48b04084f3b9696fd469018", size = 105194, upload-time = "2026-03-12T13:43:08.965Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.34.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2174,6 +2267,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/77/65/38ab2f90df44c2febfb63cc10ced40763d9b4bc94d173e734528663fe7f5/rpds_py-2026.5.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:b1be5c35683684d5331b93600c210e8367c254683d8a6df6bd21bd2da3a334fb", size = 581839, upload-time = "2026-05-28T12:01:48.109Z" },
     { url = "https://files.pythonhosted.org/packages/15/2d/ce1f605fe036aadd460e5822e578c6c7ec3a860936cca37d6e0f299daa77/rpds_py-2026.5.1-cp315-cp315t-win32.whl", hash = "sha256:75808f6c38ce7749bb68cc2770161aae5045e6c6f6781a9782e74b93304399df", size = 207866, upload-time = "2026-05-28T12:01:49.648Z" },
     { url = "https://files.pythonhosted.org/packages/79/cb/966040123eb102371559746908ef2c9471f4d43e17ec9a645a2258dab64b/rpds_py-2026.5.1-cp315-cp315t-win_amd64.whl", hash = "sha256:90bd6630002a1c7f09e7843dd79f0d24f3d2897cc25a753480917865d14f15b3", size = 225441, upload-time = "2026-05-28T12:01:51.408Z" },
+]
+
+[[package]]
+name = "rubicon-objc"
+version = "0.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/37/fa4718811f5f33cb43fbd9e78209b4105f86022965ae9ceed08ef23560a9/rubicon_objc-0.5.4.tar.gz", hash = "sha256:9ba5eb203df2b2e6c7f2d93f671b583ef5ea0f61b17a3ff44cd9c68673ad7916", size = 188492, upload-time = "2026-05-06T00:57:50.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/56/ba4987a64ceaae27f629644c4c52d2291eeab0755486d976c4bd1c781d86/rubicon_objc-0.5.4-py3-none-any.whl", hash = "sha256:f7c755388d5709d7079152892137b13bcc6b4bdd796c9f0d9b3a1eb5bea715c4", size = 64553, upload-time = "2026-05-06T00:57:49.032Z" },
 ]
 
 [[package]]
@@ -2386,6 +2488,21 @@ wheels = [
 ]
 
 [[package]]
+name = "uharfbuzz"
+version = "0.55.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/2d/25769d2262cafcea748aac7bfb2b9eeb0a9fe2a759b4154133a6d9f39870/uharfbuzz-0.55.0.tar.gz", hash = "sha256:a29bda4c147c35240a71051315423b1933b46eac558a72f55d9ffdc1f2bbb69f", size = 2012220, upload-time = "2026-06-03T21:18:37.553Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/05/8e4e62ee1d1f7a1060168bc5af14aa203b9d310a3eb7e97bae00d1b7dc1d/uharfbuzz-0.55.0-cp310-abi3-macosx_10_9_universal2.whl", hash = "sha256:40df0ff4d0c7af29c07a8adc614fb0dd421d9c4d8a139362a80a4ceb71e94a71", size = 2961874, upload-time = "2026-06-03T21:18:15.019Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/56/706b3f41dc72f8c578bdecda4ecf132cff3d3fa7aeab76fff64c4e6eabf2/uharfbuzz-0.55.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:13304721967d55e9718200453cae30f7952f95244af4b0fcb4561e8b456f5357", size = 1787206, upload-time = "2026-06-03T21:18:17.667Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/45/a9ad3ccc3dc731c1df8df7f4c4ae24b266c0bff71cc2a83dd28f7cdbc6d7/uharfbuzz-0.55.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d594f9e02a21745846477f02e13e900bfe9a697bad975fb3c26e241b7a8256c1", size = 1858288, upload-time = "2026-06-03T21:18:19.393Z" },
+    { url = "https://files.pythonhosted.org/packages/51/40/cc980e006c9a6ff503764fca5a6012c582a0b4b52460a7c56ea07357e80b/uharfbuzz-0.55.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:7daeb0ba227246ed8a5a59f64fa23ecec282bc0af13167752d51ae304d20852a", size = 2803129, upload-time = "2026-06-03T21:18:21.463Z" },
+    { url = "https://files.pythonhosted.org/packages/68/3e/efa383c10b79dbd28fecb3f2ef6012e5d125b6b20c3174bf046d2a127dbd/uharfbuzz-0.55.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:22415eaa87c670fac764053edfaebce1e05babd2cecb0e933170019ed3263109", size = 2907982, upload-time = "2026-06-03T21:18:23.3Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/d6/630c5c2813892f40b4a43427898685fbe75d809a68307c1e72d38f631aee/uharfbuzz-0.55.0-cp310-abi3-win32.whl", hash = "sha256:4d880af9e5b6f353945b5f5cd43c6989a01eb14ba327323b6b53f9c831ced801", size = 1089495, upload-time = "2026-06-03T21:18:25.021Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/f8/48c018bb9458243ac7dbdecbc3923d6f688c5e96a6afe75146901463cde7/uharfbuzz-0.55.0-cp310-abi3-win_amd64.whl", hash = "sha256:72f653625e33f68dda56b258b4b9dcd2ff9c9e4f21fd53c7bbff9d9620c4fba0", size = 1347256, upload-time = "2026-06-03T21:18:26.748Z" },
+]
+
+[[package]]
 name = "uri-template"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2535,6 +2652,26 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/b6/b9afed2afadddaf5ebb2afa801abf4b0868f42f8539bfe4b071b5266c9fe/websockets-16.0-cp314-cp314t-win32.whl", hash = "sha256:5a4b4cc550cb665dd8a47f868c8d04c8230f857363ad3c9caf7a0c3bf8c61ca6", size = 178085, upload-time = "2026-01-10T09:23:33.816Z" },
     { url = "https://files.pythonhosted.org/packages/9f/3e/28135a24e384493fa804216b79a6a6759a38cc4ff59118787b9fb693df93/websockets-16.0-cp314-cp314t-win_amd64.whl", hash = "sha256:b14dc141ed6d2dde437cddb216004bcac6a1df0935d79656387bd41632ba0bbd", size = 178531, upload-time = "2026-01-10T09:23:35.016Z" },
     { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
+]
+
+[[package]]
+name = "wgpu"
+version = "0.31.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+    { name = "rendercanvas" },
+    { name = "rubicon-objc", marker = "sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/51/07/c8f8ae8f092199045fdd7fd4e02bd1b394fd15ceef449a3dc241296139ca/wgpu-0.31.1.tar.gz", hash = "sha256:3d2a1d06dde4bb2e3cd9fc21296bd58d40bb0acea6ad36a396fbca244ce63c6f", size = 161874, upload-time = "2026-06-23T08:45:45.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/bf/e55adbaca00b4af2749fa2736eecb4eb195da64f94527267472096416b41/wgpu-0.31.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:db31be8ad1835a782267c8e4d4bdc3764d9d34bb72085cf85c8b6c5da11581da", size = 2793582, upload-time = "2026-06-23T08:45:34.066Z" },
+    { url = "https://files.pythonhosted.org/packages/78/e0/dee9e5d30751bd2f7b35d2fe6b8f9b4426c7cf8673014af8a0e2cb0110af/wgpu-0.31.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:7638b131aeb3fd808607ceb3bbeebf9f73bf7a2305b8d0b2097ca5c67d3db0a6", size = 2685084, upload-time = "2026-06-23T08:45:35.828Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/8b/6f39c7bb44155865186548808b4852592d34b31e46f752f90faea9f05fa7/wgpu-0.31.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:4de89e4bce6b01d5fa947afaa094dbc7eedd9697f6f7f1cfe7515bed88d46241", size = 3392467, upload-time = "2026-06-23T08:45:37.23Z" },
+    { url = "https://files.pythonhosted.org/packages/59/56/1cfc9ca1b6e9bf6c313a7dae806605b7f939152e2fb4c35e5bf4e8e73263/wgpu-0.31.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:8fb5748265fe8a3042ddbc40c2ac55718ef34880311ed088ba728ba59592aa6a", size = 3395081, upload-time = "2026-06-23T08:45:38.716Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/74/b83096797367d25e3b179112f4388d3dcc570a8161eb2594f18e74a51c0b/wgpu-0.31.1-py3-none-win32.whl", hash = "sha256:5429fc3b81ac1e4758b5f5b8a8dd04dff2d2f518effe7e4b76eaf9fbc98db7c0", size = 3062216, upload-time = "2026-06-23T08:45:40.441Z" },
+    { url = "https://files.pythonhosted.org/packages/85/54/bb02cee059e1ddb669b89f859b1f0c1b0fbe0eb78d49acfd7c4946bd2ba7/wgpu-0.31.1-py3-none-win_amd64.whl", hash = "sha256:a3027b118e52d94e26c4057fab8859b6235ca988530b484e6c559bc00f3b9ef7", size = 3243251, upload-time = "2026-06-23T08:45:42.406Z" },
+    { url = "https://files.pythonhosted.org/packages/36/93/71bc5fbe8da462f4dcc90e15b33c97dd25d39939eba96501d76931c10708/wgpu-0.31.1-py3-none-win_arm64.whl", hash = "sha256:798e67ad518a5cf8344e7fdf07dfe71935298bd0585e1e794c22a9286234f2eb", size = 3059345, upload-time = "2026-06-23T08:45:44.08Z" },
 ]
 
 [[package]]

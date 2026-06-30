@@ -294,6 +294,11 @@ class _ClientFeed:
     async def handle_event(self, event: EventDict) -> None:
         if event.get("type") in ("resize", "set_viewport"):
             # Informational only in a shared display: the publisher owns the
-            # render resolution. We record the viewport for future per-client use.
-            self.viewport = (int(event["width"]), int(event["height"]), float(event.get("pixel_ratio", 1)))
+            # render resolution. We record the viewport (physical/render-buffer
+            # size + ratio) for future per-client use. Renderview carries physical
+            # dims as pwidth/pheight; fall back to width/height for older clients.
+            pw = event.get("pwidth", event.get("width"))
+            ph = event.get("pheight", event.get("height"))
+            ratio = event.get("ratio", event.get("pixel_ratio", 1))
+            self.viewport = (int(pw), int(ph), float(ratio))
         self._display._enqueue_event(self.client_id, self.principal, event)

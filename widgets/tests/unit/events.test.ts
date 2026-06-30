@@ -1,34 +1,45 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  type BackingGeometry,
   computeBackingSize,
   extractModifiers,
+  mapButton,
+  mapButtons,
   normalizeKeyEvent,
   normalizePointerEvent,
   normalizeWheelEvent,
-  pointerToFramebuffer,
+  pointerToCanvas,
   wheelDeltaToPixels,
 } from "../../src/events";
 
-const geom = (dpr: number): BackingGeometry => ({
-  cssWidth: 800,
-  cssHeight: 450,
-  backingWidth: 800 * dpr,
-  backingHeight: 450 * dpr,
+const rect = { left: 10, top: 20, width: 800, height: 450 } as DOMRect;
+
+describe("pointerToCanvas", () => {
+  it("returns canvas-relative logical coords (no backing scale)", () => {
+    expect(pointerToCanvas(110, 70, rect)).toEqual({ x: 100, y: 50 });
+  });
 });
 
-describe("pointerToFramebuffer", () => {
-  it.each([1, 1.5, 2])("scales CSS coords by the backing ratio (dpr=%s)", (dpr) => {
-    const { x, y } = pointerToFramebuffer(100, 50, geom(dpr));
-    expect(x).toBe(Math.round(100 * dpr));
-    expect(y).toBe(Math.round(50 * dpr));
+describe("mapButton", () => {
+  it.each([
+    [-1, 0], // pointermove: no button -> none
+    [0, 1], // left
+    [1, 3], // middle
+    [2, 2], // right
+    [3, 4], // back
+    [4, 5], // forward
+  ])("maps DOM button %s -> renderview %s", (dom, rv) => {
+    expect(mapButton(dom)).toBe(rv);
   });
+});
 
-  it("clamps to the backing bounds", () => {
-    const { x, y } = pointerToFramebuffer(10_000, -5, geom(2));
-    expect(x).toBe(1599); // backingWidth(1600) - 1
-    expect(y).toBe(0);
+describe("mapButtons", () => {
+  it("expands a DOM bitmask into a renderview tuple", () => {
+    expect(mapButtons(0)).toEqual([]);
+    expect(mapButtons(1)).toEqual([1]); // left
+    expect(mapButtons(2)).toEqual([2]); // right
+    expect(mapButtons(4)).toEqual([3]); // middle
+    expect(mapButtons(1 | 2 | 4)).toEqual([1, 2, 3]);
   });
 });
 
@@ -45,54 +56,65 @@ describe("wheelDeltaToPixels", () => {
 });
 
 describe("extractModifiers", () => {
-  it("collects active modifiers", () => {
-    expect(extractModifiers({ shiftKey: true, ctrlKey: false, altKey: true, metaKey: false })).toEqual([
-      "shift",
-      "alt",
-    ]);
+  it("collects active modifiers, capitalized (renderview names)", () => {
+    expect(
+      extractModifiers({ shiftKey: true, ctrlKey: true, altKey: true, metaKey: false }),
+    ).toEqual(["Shift", "Control", "Alt"]);
   });
 });
 
 describe("normalizers", () => {
-  const rect = { left: 10, top: 20, width: 800, height: 450 } as DOMRect;
-
-  it("normalizes a pointer event to framebuffer coords", () => {
+  it("normalizes a pointer_down to logical coords + renderview button/buttons", () => {
     const ev = {
-      type: "pointermove",
+      type: "pointerdown",
       clientX: 110,
       clientY: 70,
-      button: 0,
-      buttons: 1,
+      button: 0, // DOM left
+      buttons: 1, // DOM left bitmask
       shiftKey: false,
       ctrlKey: false,
       altKey: false,
       metaKey: false,
+      timeStamp: 1000,
     } as PointerEvent;
-    const out = normalizePointerEvent(ev, rect, geom(2));
-    expect(out.type).toBe("pointer_move");
-    expect(out.x).toBe(200); // (110-10)*2
-    expect(out.y).toBe(100); // (70-20)*2
-    expect(out.buttons).toBe(1);
+    expect(normalizePointerEvent(ev, rect)).toEqual({
+      type: "pointer_down",
+      x: 100,
+      y: 50,
+      button: 1,
+      buttons: [1],
+      modifiers: [],
+      timestamp: 1,
+    });
   });
 
-  it("normalizes a wheel event", () => {
+  it("normalizes a wheel event (pixels, no mode field)", () => {
     const ev = {
       clientX: 10,
       clientY: 20,
       deltaX: 0,
       deltaY: -120,
       deltaMode: 0,
+      buttons: 0,
       shiftKey: false,
       ctrlKey: false,
       altKey: false,
       metaKey: false,
+      timeStamp: 3000,
     } as WheelEvent;
-    const out = normalizeWheelEvent(ev, rect, geom(1));
-    expect(out.mode).toBe("pixel");
-    expect(out.dy).toBe(-120);
+    expect(normalizeWheelEvent(ev, rect)).toEqual({
+      type: "wheel",
+      x: 0,
+      y: 0,
+      dx: 0,
+      dy: -120,
+      buttons: [],
+      modifiers: [],
+      timestamp: 3,
+    });
   });
 
-  it("normalizes a key event", () => {
+  it("normalizes a key event (key + code, capitalized modifiers)", () => {
     const ev = {
       type: "keydown",
       key: "a",
@@ -101,9 +123,15 @@ describe("normalizers", () => {
       ctrlKey: false,
       altKey: false,
       metaKey: false,
+      timeStamp: 2000,
     } as KeyboardEvent;
-    const out = normalizeKeyEvent(ev);
-    expect(out).toEqual({ type: "key_down", key: "a", code: "KeyA", modifiers: ["shift"] });
+    expect(normalizeKeyEvent(ev)).toEqual({
+      type: "key_down",
+      key: "a",
+      code: "KeyA",
+      modifiers: ["Shift"],
+      timestamp: 2,
+    });
   });
 });
 

@@ -1,13 +1,14 @@
-# Build the encode-only NVENC SDK spike wheel (vendor/nvenc-encode-spike).
+# Build the NVENC SDK wheel (packages/nvenc -> habemus-papadum-nvenc) as a CI
+# artifact, to validate that it builds across CPython versions.
 #
-# Deliberately NOT triggered on pushes to main — it's an expensive, rarely-needed
-# build. It runs only when:
-#   * you click "Run workflow" (workflow_dispatch), or
-#   * you push a tag matching `nvenc-sdk-*` (which also publishes a release).
+# Build only — it does NOT publish. Publishing to PyPI is done from a maintainer box
+# by scripts/publish.sh (see that script). Deliberately NOT triggered on pushes to
+# main; it's an expensive, rarely-needed build.
 #
 # No GPU is needed to BUILD (we link the CUDA driver stub; libnvidia-encode is
-# dlopen'd at runtime). The wheel cannot be self-tested here — there's no GPU on
-# GitHub runners — so validate it on a GPU box (`pdum-rfb doctor`).
+# dlopen'd at runtime). The wheel can't be self-tested here (no GPU on GitHub
+# runners) — validate on a GPU box with `pdum-rfb doctor`, or via the weekly
+# gpu-tests workflow.
 name: build-nvenc-sdk-wheel
 
 on:
@@ -20,17 +21,13 @@ on:
         description: "Build a profiling wheel (NVTX ranges on)"
         type: boolean
         default: false
-  push:
-    tags: ["nvenc-sdk-*"]
-
-permissions:
-  contents: write   # create releases on tag
 
 jobs:
   build:
     runs-on: ubuntu-latest
     # manylinux_2_28 + CUDA toolkit (NVIDIA's own base) -> broadly-compatible wheels
     # (manylinux_2_28 installs on RHEL8 / Ubuntu 18.10+), unlike a stock-Ubuntu build.
+    # The 13.0 NVENC ABI builds fine here: its headers are vendored, not from the toolkit.
     container: sameli/manylinux_2_28_x86_64_cuda_12.3
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +38,7 @@ jobs:
           enable-cache: true
 
       - name: Build wheel(s)
-        working-directory: vendor/nvenc-encode-spike
+        working-directory: packages/nvenc
         run: |
           PV="${{ github.event.inputs.python_versions || '3.12 3.13 3.14' }}"
           ARGS=""
@@ -52,14 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nvenc-sdk-wheels
-          path: vendor/nvenc-encode-spike/dist/*.whl
-
-      - name: Publish to release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: vendor/nvenc-encode-spike/dist/*.whl
-          body: |
-            Encode-only NVENC SDK spike wheels (`nvenc_spike`). Self-contained except
-            for the host NVIDIA driver (`libcuda` / `libnvidia-encode` are not bundled).
-            MIT (incl. bundled NVIDIA SDK, MIT). See docs/nvenc_sdk_evaluation.md.
+          path: packages/nvenc/dist/*.whl

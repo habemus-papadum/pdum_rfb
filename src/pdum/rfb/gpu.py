@@ -3,7 +3,7 @@
 This module lets a CUDA-resident frame (a CuPy / PyTorch / any ``__dlpack__`` or
 ``__cuda_array_interface__`` tensor) be encoded by NVENC **without a round-trip
 through host memory** — the encoder reads the device buffer directly. It is the
-zero-copy counterpart to :mod:`pdum.rfb.encoders.nvenc` (which uploads host
+zero-copy counterpart to :mod:`pdum.rfb.encoders.nvenc_cpu` (which uploads host
 ``rgb24`` and reformats to ``yuv420p`` on the CPU first).
 
 Everything here lazy-imports CuPy, so ``import pdum.rfb.gpu`` is always safe; the
@@ -357,7 +357,7 @@ def cuda_zerocopy_available() -> bool:
     """True if the zero-copy CUDA→NVENC path is usable in this process (cached).
 
     Checks, in order: CuPy importable; an NVENC-capable GPU/driver
-    (:func:`pdum.rfb.encoders.nvenc.nvenc_available`); and that PyAV can actually
+    (:func:`pdum.rfb.encoders.nvenc_cpu.nvenc_cpu_available`); and that PyAV can actually
     encode a CUDA frame (PyAV ≥ 18 or a from-source build with the fix). The
     self-test opens an NVENC session, so it runs at most once per process.
 
@@ -369,9 +369,9 @@ def cuda_zerocopy_available() -> bool:
     if importlib.util.find_spec("cupy") is None:
         return False
     try:
-        from .encoders.nvenc import nvenc_available
+        from .encoders.nvenc_cpu import nvenc_cpu_available
 
-        if not nvenc_available():
+        if not nvenc_cpu_available():
             return False
     except Exception:
         return False

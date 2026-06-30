@@ -48,8 +48,8 @@ async def test_max_frames_stops_iteration():
 
 async def test_events_recorded_in_order_and_resize_updates_size():
     src = SyntheticFrameSource(width=64, height=48, pace=False)
-    await src.handle_event({"type": "pointer_move", "x": 1, "y": 2, "buttons": 0})
-    await src.handle_event({"type": "resize", "width": 128, "height": 96, "pixel_ratio": 2})
+    await src.handle_event({"type": "pointer_move", "x": 1, "y": 2, "buttons": []})
+    await src.handle_event({"type": "resize", "width": 64, "height": 48, "pwidth": 128, "pheight": 96, "ratio": 2})
     kinds = [e["type"] for e in src.snapshot_events()]
     assert kinds == ["pointer_move", "resize"]
     assert all("_received_us" in e for e in src.events)

@@ -92,11 +92,11 @@ src/pdum/rfb/
   gpu.py          zero-copy GPU helpers: rgb_to_nv12 kernel, cuda_frame, enable_cuda_context_sharing,
                   cuda_zerocopy_available, HostFrameAdapter (lazy-imports CuPy; see docs/gpu_zerocopy.md)
   encoders/
-    base.py       registry + build_encoder  (registers pyav + nvenc + nvenc_cuda factories)
+    base.py       registry + build_encoder  (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum factories)
     image.py      ImageEncoder (Pillow)
-    pyav_h264.py  PyAvH264Encoder + libx264_available / self_test
-    nvenc.py      NvencH264Encoder (GPU H.264 via PyAV h264_nvenc, host input) + nvenc_available
-    nvenc_cuda.py CudaNvencEncoder (zero-copy CUDA NV12 -> h264_nvenc via from_dlpack) + cuda_nvenc_available
+    h264_cpu.py  H264CpuEncoder + h264_cpu_available / self_test
+    nvenc_cpu.py      NvencCpuEncoder (GPU H.264 via PyAV h264_nvenc, host input) + nvenc_cpu_available
+    nvenc_gpu_pyav.py NvencGpuPyavEncoder (zero-copy CUDA NV12 -> h264_nvenc via from_dlpack) + nvenc_gpu_pyav_available
   metrics.py      SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
   adaptive.py     AdaptiveQualityController (opt-in via serve(adaptive=True))
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
@@ -109,7 +109,23 @@ widgets/src/
   protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
   workerFactory.ts          inline worker (?worker&inline)
   worker/{entry,renderer,imageDecode,videoDecode}.ts
+
+packages/nvenc/             habemus-papadum-nvenc (import pdum.nvenc) — uv workspace member
+  src/cpp/nvenc_ext.cpp     OURS: thin pybind11 binding over NVIDIA NvEncoderCuda (+ NVTX)
+  src/pdum/nvenc/__init__.py  OURS: ABI loader (picks 12.1/13.0 by driver) -> NvencEncoder
+  CMakeLists.txt build-wheel.sh  scikit-build-core; builds BOTH NVENC ABIs (_nvenc_121/_130)
+  third_party/              VERBATIM NVIDIA SDK (MIT, unmodified — PROVENANCE.md)
 ```
+
+This repo is a **uv workspace**: root = `habemus-papadum-rfb` (the published rfb
+package), members = `packages/*`. `pdum` is a **PEP 420 namespace** (no
+`src/pdum/__init__.py` in either package), so `habemus-papadum-rfb` contributes
+`pdum.rfb` and `habemus-papadum-nvenc` contributes `pdum.nvenc` without conflict. The
+nvenc package is **native** (scikit-build-core + auditwheel, needs a CUDA toolkit to
+build) and is only built when its `gpu-nvenc-sdk` extra is requested — default
+`uv sync` (incl. CI) never builds it. Both packages are published by
+`scripts/publish.sh` (rfb via hatch; nvenc via auditwheel'd wheels through the same
+`hatch publish`); **publishing is never done from CI**.
 
 ### Wire protocol
 
@@ -131,7 +147,9 @@ One WebSocket carries two message kinds:
 
 Python (from repo root):
 ```bash
-./scripts/setup.sh                 # idempotent bootstrap: uv sync, pnpm, widget build, hooks
+./scripts/setup.sh                 # idempotent bootstrap: uv sync (GPU auto-detect via RFB_GPU),
+                                   #   pnpm install + Playwright Chromium, pre-commit hooks
+                                   #   RFB_GPU=auto|force|0 controls the gpu-nvenc-sdk build (Linux+GPU)
 uv run pytest                      # all Python tests (runs with -s)
 uv run ruff check . && uv run ruff format .
 uv run python -m pdum.rfb.server --pattern bouncing_box --port 8765   # demo server/CLI
@@ -169,15 +187,20 @@ cross-language contract — keep the Python and TS sides in sync.
 ## Extension seams
 
 - **Encoders:** `register_video_encoder(name, factory)` + the `has_nvenc` flag in
-  `select_transport`. The GPU **NVENC** backend (`encoders/nvenc.py`) already uses
+  `select_transport`. The GPU **NVENC** backend (`encoders/nvenc_cpu.py`) already uses
   this seam: it rides on PyAV's bundled `h264_nvenc` (no extra Python dep beyond
-  `av`; NVIDIA's `PyNvVideoCodec` is unusable on 3.14 — no wheel/sdist), is gated
-  by `nvenc_available()` (OS + GPU probe), and `serve()` auto-prefers it. The
-  **zero-copy CUDA** backend (`encoders/nvenc_cuda.py`, registered `"nvenc_cuda"`)
-  slots in the same way: opt in with `serve(gpu=True)` + `publish()` a CuPy/DLPack
-  frame; gated by `gpu.cuda_zerocopy_available()` (needs **PyAV ≥ 18** — the
-  encode-side `hw_frames_ctx` wiring; a pure-Python monkey-patch is impossible on
-  17.x). See `docs/gpu_zerocopy.md`.
+  `av`), is gated by `nvenc_cpu_available()` (OS + GPU probe), and `serve()` auto-prefers
+  it. The **zero-copy CUDA** backend (`encoders/nvenc_gpu_pyav.py`, registered
+  `"nvenc_gpu_pyav"`) slots in the same way: opt in with `serve(gpu=True)` + `publish()` a
+  CuPy/DLPack frame; gated by `gpu.cuda_zerocopy_available()` (needs **PyAV ≥ 18** —
+  the encode-side `hw_frames_ctx` wiring; a pure-Python monkey-patch is impossible on
+  17.x). See `docs/gpu_zerocopy.md`. The **PyAV-free** GPU backend
+  (`encoders/nvenc_gpu_pdum.py`, registered `"nvenc_gpu_pdum"`) rides the sibling package
+  `pdum.nvenc` (`packages/nvenc/`): `serve(gpu=True)` **prefers it** when
+  `nvenc_gpu_pdum_available()`, else falls back to `nvenc_gpu_pyav` (PyAV≥18). It needs no
+  PyAV at all and is the fastest path measured. The SDK encoder is configured
+  `extra_output_delay=0` (zero-latency, synchronous 1-in-1-out) so each frame's access
+  unit comes back from its own `encode()` call — required for correct seq attribution.
 - **Frames:** push `ndarray`s, **CuPy/DLPack CUDA tensors**, or `RawFrame`s to
   `Display.publish()` (a CUDA tensor becomes a `memory="cuda"` frame; the type
   already modelled this). The internal `_ClientFeed` (in `display.py`) is the

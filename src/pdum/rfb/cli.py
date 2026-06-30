@@ -99,19 +99,23 @@ else:
         x264 = False
         if av_ver:
             try:
-                from .encoders.pyav_h264 import libx264_available
+                from .encoders.h264_cpu import h264_cpu_available
 
-                x264 = libx264_available()
+                x264 = h264_cpu_available()
             except Exception:
                 x264 = False
             ge18 = tuple(int(p) for p in av_ver.split(".")[:1]) >= (18,)
             probes.append(Probe("PyAV", OK, f"{av_ver}" + ("  (≥18: zero-copy capable)" if ge18 else "")))
             probes.append(
-                Probe("CPU H.264 (libx264)", OK if x264 else MISSING, "libx264 present" if x264 else "no libx264")
+                Probe(
+                    "h264-cpu — CPU H.264 (libx264)",
+                    OK if x264 else MISSING,
+                    "libx264 present" if x264 else "no libx264",
+                )
             )
         else:
             probes.append(Probe("PyAV", MISSING, "pip install 'habemus-papadum-rfb[h264]'"))
-            probes.append(Probe("CPU H.264 (libx264)", MISSING, "needs PyAV"))
+            probes.append(Probe("h264-cpu — CPU H.264 (libx264)", MISSING, "needs PyAV"))
 
         # --- GPU stack ---
         cupy_ver = _version("cupy")
@@ -126,14 +130,14 @@ else:
 
         host_nvenc = False
         try:
-            from .encoders.nvenc import nvenc_available
+            from .encoders.nvenc_cpu import nvenc_cpu_available
 
-            host_nvenc = nvenc_available()
+            host_nvenc = nvenc_cpu_available()
         except Exception:
             pass
         probes.append(
             Probe(
-                "Host NVENC (PyAV h264_nvenc)",
+                "nvenc-cpu — host NVENC (PyAV h264_nvenc)",
                 OK if host_nvenc else MISSING,
                 "available" if host_nvenc else "needs NVIDIA driver + NVENC GPU + PyAV",
             )
@@ -148,42 +152,42 @@ else:
             pass
         probes.append(
             Probe(
-                "Zero-copy CUDA→NVENC (PyAV≥18)",
+                "nvenc-gpu-pyav — zero-copy CUDA→NVENC (PyAV≥18)",
                 OK if zerocopy else MISSING,
                 "available" if zerocopy else "needs CuPy + PyAV≥18 (see install docs)",
             )
         )
 
         sdk = False
-        sdk_detail = "pip install the nvenc_spike wheel (see install docs)"
+        sdk_detail = "pip install habemus-papadum-nvenc (see install docs)"
         try:
-            import nvenc_spike  # noqa: F401
+            import pdum.nvenc  # noqa: F401
 
-            sdk = _nvenc_sdk_selftest()
+            sdk = _nvenc_gpu_pdum_selftest()
             sdk_detail = "available (no PyAV needed)" if sdk else "imported but self-test failed"
         except Exception:
             pass
-        probes.append(Probe("NVENC SDK (nvenc_spike)", OK if sdk else MISSING, sdk_detail))
+        probes.append(Probe("nvenc-gpu-pdum — NVENC SDK (pdum.nvenc)", OK if sdk else MISSING, sdk_detail))
 
         # --- recommendation (fastest available, best first) ---
         if sdk:
-            rec = "NVENC SDK (nvenc_spike) — fastest GPU path, no PyAV dependency"
+            rec = "nvenc-gpu-pdum — NVENC SDK (pdum.nvenc): fastest GPU path, no PyAV dependency"
         elif zerocopy:
-            rec = "Zero-copy CUDA→NVENC (PyAV≥18) — GPU encode, no host copy"
+            rec = "nvenc-gpu-pyav — zero-copy CUDA→NVENC (PyAV≥18): GPU encode, no host copy"
         elif host_nvenc:
-            rec = "Host NVENC (PyAV h264_nvenc) — GPU encode with a host upload"
+            rec = "nvenc-cpu — host NVENC (PyAV h264_nvenc): GPU encode with a host upload"
         elif x264:
-            rec = "CPU H.264 (libx264 via PyAV) — software, no GPU"
+            rec = "h264-cpu — CPU H.264 (libx264 via PyAV): software, no GPU"
         else:
-            rec = "Image path (JPEG/PNG/WebP) — dependency-light, no H.264"
+            rec = "image — JPEG/PNG/WebP: dependency-light, no H.264"
         return probes, rec
 
-    def _nvenc_sdk_selftest(width: int = 256, height: int = 128) -> bool:
+    def _nvenc_gpu_pdum_selftest(width: int = 256, height: int = 128) -> bool:
         try:
             import cupy as cp
-            import nvenc_spike
+            from pdum.nvenc import NvencEncoder
 
-            enc = nvenc_spike.NvencSpike(width, height, codec="h264", preset="p3", tuning="ll")
+            enc = NvencEncoder(width, height, codec="h264", preset="p3", tuning="ll")
             nv12 = cp.zeros((height * 3 // 2, width), dtype=cp.uint8)
             cp.cuda.runtime.deviceSynchronize()
             enc.encode(nv12, force_idr=True)
@@ -224,13 +228,13 @@ else:
         br = bench._parse_bitrate(bitrate)
 
         # detect what's available
-        from .encoders.nvenc import NVENC_MIN_WIDTH, nvenc_available
-        from .encoders.pyav_h264 import libx264_available
+        from .encoders.h264_cpu import h264_cpu_available
+        from .encoders.nvenc_cpu import NVENC_MIN_WIDTH, nvenc_cpu_available
 
-        have_h264 = libx264_available()
-        have_nvenc = nvenc_available()
+        have_h264 = h264_cpu_available()
+        have_nvenc = nvenc_cpu_available()
         have_gpu = bench._cuda_zerocopy_available()
-        have_sdk = bench._nvenc_sdk_available()
+        have_sdk = bench._nvenc_gpu_pdum_available()
 
         results = []
         with console.status("[bold]benchmarking…"):
@@ -258,13 +262,13 @@ else:
                     )
                 if have_gpu and w >= NVENC_MIN_WIDTH:
                     results.append(
-                        bench.benchmark_nvenc_cuda(
+                        bench.benchmark_nvenc_gpu_pyav(
                             bitrate=br, frames=frames, width=w, height=h, fps=fps, pattern=pattern
                         )
                     )
                 if have_sdk and w >= NVENC_MIN_WIDTH:
                     results.append(
-                        bench.benchmark_nvenc_sdk(
+                        bench.benchmark_nvenc_gpu_pdum(
                             bitrate=br, frames=frames, width=w, height=h, fps=fps, pattern=pattern
                         )
                     )
@@ -289,10 +293,10 @@ else:
         skipped = [
             n
             for n, ok in (
-                ("CPU h264", have_h264),
-                ("host nvenc", have_nvenc),
-                ("zero-copy", have_gpu),
-                ("nvenc-sdk", have_sdk),
+                ("h264-cpu", have_h264),
+                ("nvenc-cpu", have_nvenc),
+                ("nvenc-gpu-pyav", have_gpu),
+                ("nvenc-gpu-pdum", have_sdk),
             )
             if not ok
         ]

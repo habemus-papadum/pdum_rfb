@@ -521,7 +521,7 @@ Encoder backends:
 ImageEncoder:
   NumPy/RGBA -> JPEG/PNG/WebP -> WebSocket binary payload
 
-PyAvH264Encoder:
+H264CpuEncoder:
   NumPy/RGB -> libx264 -> H.264 Annex B -> WebCodecs
 
 NvencEncoder:

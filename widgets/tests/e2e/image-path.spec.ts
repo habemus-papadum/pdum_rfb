@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { type CapturedImage, channelsClose, expectedQuadrantColor, sampleQuadrant } from "../testPattern";
+import { type CapturedImage, matchedRotation, sampleQuadrant } from "../testPattern";
 
 const WS = "ws://127.0.0.1:8770";
 
@@ -25,12 +25,12 @@ test("image path decodes the test pattern to the canvas", async ({ page }) => {
   expect(cap.width).toBeGreaterThan(0);
   expect(cap.lastDisplayedSeq).toBeGreaterThanOrEqual(0);
 
-  for (let q = 0; q < 4; q++) {
-    const actual = sampleQuadrant(cap, q);
-    const expectedColor = expectedQuadrantColor(cap.lastDisplayedSeq, q);
-    expect(
-      channelsClose(actual, expectedColor, 24),
-      `quadrant ${q} @ seq ${cap.lastDisplayedSeq}: got ${actual}, want ${expectedColor}`,
-    ).toBe(true);
-  }
+  // The decoded frame must be render_test_pattern(k) for some rotation k — the four
+  // palette colors in the correct spatial cycle. (We don't tie k to lastDisplayedSeq:
+  // the wire seq is a per-client counter, not the server's render counter.)
+  const quads = [0, 1, 2, 3].map((q) => sampleQuadrant(cap, q));
+  expect(
+    matchedRotation(cap, 24),
+    `quadrants ${JSON.stringify(quads)} (seq ${cap.lastDisplayedSeq}) match no palette rotation`,
+  ).toBeGreaterThanOrEqual(0);
 });

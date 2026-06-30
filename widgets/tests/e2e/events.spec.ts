@@ -7,14 +7,16 @@ interface RecordedEvent {
   type: string;
   x?: number;
   y?: number;
-  mode?: string;
+  dx?: number;
+  dy?: number;
   code?: string;
   modifiers?: string[];
 }
 
 // Inject real input and assert the normalized events reach the Python server via
-// its recorded-events HTTP side channel. deviceScaleFactor is 1 (playwright
-// config), so framebuffer coords equal CSS coords.
+// its recorded-events HTTP side channel. Events follow the renderview spec
+// (logical coords, capitalized modifiers); deviceScaleFactor is 1 (playwright
+// config), so logical coords equal CSS coords.
 test("pointer / key / wheel events round-trip to the server", async ({ page, request }) => {
   await request.get(`${HTTP}/recorded-events/reset`);
   await page.goto(`/?ws=${encodeURIComponent(WS)}&transport=image`);
@@ -57,8 +59,8 @@ test("pointer / key / wheel events round-trip to the server", async ({ page, req
   expect(move?.y).toBe(50);
 
   const wheel = events.find((e) => e.type === "wheel");
-  expect(wheel?.mode).toBe("pixel");
+  expect(wheel?.dy).toBe(-120);
 
   const key = events.find((e) => e.type === "key_down" && e.code === "KeyA");
-  expect(key?.modifiers).toContain("shift");
+  expect(key?.modifiers).toContain("Shift");
 });

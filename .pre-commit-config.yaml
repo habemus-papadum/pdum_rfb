@@ -1,6 +1,12 @@
 # Pre-commit hooks configuration
 # See https://pre-commit.com for more information
 
+# Never run hooks on verbatim, unmodified third-party source: it is committed
+# byte-for-byte (see packages/nvenc/third_party/PROVENANCE.md) and kept read-only,
+# so the whitespace / end-of-file fixers would fail with PermissionError and block
+# every commit. (vendor/ is git-ignored, but listed here to document the intent.)
+exclude: '^(packages/nvenc/third_party/|vendor/)'
+
 repos:
   # Strip outputs from Jupyter notebooks
   - repo: https://github.com/kynan/nbstripout
@@ -31,4 +37,3 @@ repos:
         args: [--fix]
       - id: ruff-format
         name: Format Python with ruff
-

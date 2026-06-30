@@ -35,7 +35,9 @@ export {
   normalizePointerEvent,
   normalizeWheelEvent,
   normalizeKeyEvent,
-  pointerToFramebuffer,
+  pointerToCanvas,
+  mapButton,
+  mapButtons,
   computeBackingSize,
 } from "./events";
 export type {
@@ -45,7 +47,6 @@ export type {
   NormalizedKeyEvent,
   NormalizedResize,
   Modifier,
-  BackingGeometry,
 } from "./eventTypes";
 
 export type { ConnectionState, Stats } from "./types";

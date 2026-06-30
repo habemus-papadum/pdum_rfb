@@ -3,13 +3,13 @@
 Everything under `third_party/` is copied **verbatim and unmodified** from
 **NVIDIA PyNvVideoCodec 2.1.0** (the source drop in `vendor/PyNvVideoCodec_2.1.0/`,
 distributed by NVIDIA under the **MIT License**; each file retains its original
-SPDX/copyright header). We made **zero** source edits — the spike's only changes
-relative to upstream are:
+SPDX/copyright header). We made **zero** source edits — our only changes relative to
+upstream are:
 
 - a current **pybind11 (v3.0.4)** instead of upstream's pinned 2.10.0 (the fix that
   lets it build on Python 3.14), and
-- our own binding/build files outside `third_party/` (`src/`, `CMakeLists.txt`,
-  `nvenc_spike/`, `build-wheel.sh`).
+- our own binding/build files outside `third_party/` (`src/cpp/nvenc_ext.cpp`,
+  `src/pdum/nvenc/`, `CMakeLists.txt`, `build-wheel.sh`).
 
 ## File map (origin → here)
 
@@ -29,8 +29,9 @@ All paths below are under `vendor/PyNvVideoCodec_2.1.0/src/VideoCodecSDKUtils/`.
 Only the encode-only subset is vendored — no decoder, demuxer, transcoder, ffmpeg,
 samples, or CUDA `.cu` kernels (the encoder needs none of them).
 
-`NvEncoder_130.{h,cpp}` and `nvEncodeAPI_130.h` are included for completeness (and a
-possible `-DNVENC_VER_13_0` build); the default build compiles the **12.1** ABI.
+Both ABIs are built: `NvEncoder_121.{h,cpp}` + `nvEncodeAPI_121.h` (`-DNVENC_VER_12_1`)
+and `NvEncoder_130.{h,cpp}` + `nvEncodeAPI_130.h` (`-DNVENC_VER_13_0`); the loader picks
+whichever the host driver supports.
 
 ## Licensing
 

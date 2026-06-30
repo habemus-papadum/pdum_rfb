@@ -82,9 +82,13 @@ export interface RequestKeyframeMsg {
 }
 export interface SetViewportMsg {
   type: "set_viewport";
+  /** Logical (CSS) size. */
   width: number;
   height: number;
-  pixel_ratio: number;
+  /** Physical (backing-store) size. */
+  pwidth: number;
+  pheight: number;
+  ratio: number;
 }
 export interface EventMsg {
   type: "event";

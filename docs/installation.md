@@ -20,12 +20,12 @@ first**, and the platform limits that apply to the GPU paths.
 | ---- | ------- | -------- | ----- |
 | Just stream something | `pip install habemus-papadum-rfb` | anywhere | image only |
 | Software H.264 | `pip install 'habemus-papadum-rfb[h264]'` | anywhere PyAV has wheels | good |
-| **GPU H.264 (recommended)** | `[gpu-nvenc-sdk]` + the **`nvenc_spike`** wheel | Linux · amd64 · NVIDIA | **fastest** |
+| **GPU H.264 (recommended)** | `pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'` | Linux · amd64 · NVIDIA | **fastest** |
 | GPU H.264 (PyAV route) | `[gpu-cuda13]` + **PyAV 18** | Linux · NVIDIA | fastest |
 
-The two GPU rows reach the same hardware NVENC speed; the **SDK wheel is easier to
-install** (a prebuilt wheel, no PyAV-18 build) and is what `doctor` recommends when
-present. Details below.
+The two GPU rows reach the same hardware NVENC speed; the **SDK path is easier to
+install** — one `pip install` of a prebuilt wheel (`habemus-papadum-nvenc`) straight
+from PyPI, no PyAV-18 build — and is what `doctor` recommends when present. Details below.
 
 ## 1. Core — the image path (no extras)
 
@@ -66,19 +66,19 @@ NVENC. Two routes reach the same speed; **start with the SDK wheel**.
 
 ### 4a. NVENC SDK wheel — `[gpu-nvenc-sdk]` (recommended GPU path)
 
-NVIDIA's Video Codec SDK encoder, packaged as a self-contained wheel (`nvenc_spike`).
-**No PyAV at all**, no compiler, no `LD_LIBRARY_PATH` — just the host driver.
+NVIDIA's Video Codec SDK encoder, packaged as the self-contained
+**`habemus-papadum-nvenc`** wheel (`import pdum.nvenc`) — a prebuilt manylinux wheel
+on **PyPI**. **No PyAV at all**, no compiler, no `LD_LIBRARY_PATH` — just the host
+driver. One ABI-agnostic wheel ships both NVENC 12.1 and 13.0 builds and loads the
+one your driver supports.
 
 ```bash
-# CuPy half (pick your CUDA toolkit): installs from PyPI
-pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'      # cupy-cuda13x
-# pip install habemus-papadum-rfb cupy-cuda12x        # for a CUDA 12 toolkit
-
-# the SDK wheel itself (hosted on GitHub Releases — see "Why not PyPI?" below)
-pip install https://github.com/habemus-papadum/pdum_rfb/releases/download/<tag>/pdum_rfb_nvenc_sdk-<...>.whl
+pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'   # pulls habemus-papadum-nvenc + cupy-cuda13x
+# for a CUDA 12 toolkit, swap the CuPy half:
+pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]' cupy-cuda12x
 ```
 
-Verify: `pdum-rfb doctor` should show **NVENC SDK (nvenc_spike): ✓** and recommend it.
+Verify: `pdum-rfb doctor` should show **nvenc-gpu-pdum — NVENC SDK (pdum.nvenc): ✓** and recommend it.
 This is the easiest GPU install **and** the fastest path measured on this hardware.
 
 ### 4b. PyAV 18 zero-copy — `[gpu-cuda13]` + PyAV ≥ 18
@@ -130,14 +130,18 @@ cheap. In the issue, paste:
 - the wheel tag that failed to install (pip prints it as "not a supported wheel
   on this platform").
 
-## Why aren't the GPU wheels on PyPI?
+## What's on PyPI, what isn't
 
-- **`nvenc_spike` (SDK wheel)** bundles NVIDIA's SDK encoder; it's published on this
-  repo's **GitHub Releases**, not PyPI. The `[gpu-nvenc-sdk]` extra installs the
-  pip-half (CuPy); you add the wheel URL as shown above.
-- **PyAV 18** isn't released on PyPI yet. Until it is, use `scripts/install-gpu.sh`
-  or a prebuilt av wheel from Releases. When PyAV 18.0 ships, the `[gpu-cuda13]`
-  extra becomes a one-line `pip install` (just add `"av>=18"` to it).
+- **`habemus-papadum-nvenc` (SDK wheel) — on PyPI.** Its NVIDIA SDK source is MIT, so
+  the wheel is clean to publish; the `[gpu-nvenc-sdk]` extra pulls it as a normal
+  dependency. Maintainers publish it (and the rfb package) with `scripts/publish.sh`;
+  CI only builds it as a validation artifact, never publishes.
+- **PyAV 18 (`[gpu-cuda13]` route) — not on PyPI yet.** PyAV 18 itself is unreleased,
+  and the CUDA-enabled build bundles **LGPL** ffmpeg, so it stays on this repo's
+  **GitHub Releases**. Until PyAV 18.0 ships, use `scripts/install-gpu.sh` or a
+  prebuilt av wheel from Releases; when it ships, the `[gpu-cuda13]` extra becomes a
+  one-line `pip install` (just add `"av>=18"` to it).
 
 PyPI forbids direct-reference (URL) dependencies in published packages, which is why
-neither GPU wheel can be a plain transitive dependency today.
+the PyAV-18 wheel can't be a plain transitive dependency today — but the SDK wheel
+now can.

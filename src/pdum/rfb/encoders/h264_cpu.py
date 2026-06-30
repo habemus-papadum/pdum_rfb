@@ -31,7 +31,7 @@ def h264_available() -> bool:
     return importlib.util.find_spec("av") is not None
 
 
-def libx264_available() -> bool:
+def h264_cpu_available() -> bool:
     """True if PyAV is importable and exposes the libx264 encoder."""
     if not h264_available():
         return False
@@ -43,12 +43,12 @@ def libx264_available() -> bool:
         return False
 
 
-class PyAvH264Encoder:
+class H264CpuEncoder:
     """Encode CPU ``rgb24`` frames to H.264 Annex B access units."""
 
     #: Recorded in each payload's ``metadata["encoder"]`` so the wire/headers
     #: identify which backend produced the bitstream. Subclasses override it.
-    encoder_label = "pyav-libx264"
+    encoder_label = "h264-cpu"
 
     def __init__(
         self,
@@ -93,7 +93,7 @@ class PyAvH264Encoder:
         import av
 
         if frame.memory != "cpu" or frame.pixel_format != "rgb24":
-            raise TypeError("PyAvH264Encoder expects CPU rgb24 frames")
+            raise TypeError("H264CpuEncoder expects CPU rgb24 frames")
         arr = frame.data
         if not isinstance(arr, np.ndarray):
             raise TypeError("Expected numpy.ndarray")
@@ -148,12 +148,12 @@ def self_test(width: int = 64, height: int = 64, frames: int = 8) -> bool:
     number of frames at the expected resolution. Doubles as a runtime check
     that libx264 is actually usable.
     """
-    if not libx264_available():
+    if not h264_cpu_available():
         return False
 
     from ..testing import decode_annexb
 
-    enc = PyAvH264Encoder(width=width, height=height, fps=int(frames))
+    enc = H264CpuEncoder(width=width, height=height, fps=int(frames))
     chunks: list[bytes] = []
     for seq in range(frames):
         arr = np.full((height, width, 3), (seq * 7) % 256, dtype=np.uint8)

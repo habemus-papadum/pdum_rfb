@@ -5,8 +5,8 @@ delivers pointer/keyboard/resize events back. It is **transport-neutral**: a
 session wires together three independent concerns —
 
 ```text
-Frame source      -> produces raw frames (NumPy today; CUDA/OpenGL later)
-Encoder backend   -> image (JPEG/PNG/WebP) or CPU H.264 (PyAV/libx264)
+Frame source      -> produces raw frames (NumPy or CUDA/CuPy; OpenGL later)
+Encoder backend   -> image (JPEG/PNG/WebP), CPU H.264 (PyAV/libx264), or GPU NVENC
 Transport backend -> WebSocket + a JSON/binary wire protocol
 ```
 
@@ -29,23 +29,29 @@ uv add 'habemus-papadum-rfb[h264]'  # + CPU H.264 (PyAV/libx264)
 
 ## Python: serve frames
 
-Any `render(seq, timestamp_us) -> np.ndarray` (RGB `(H, W, 3)` uint8) becomes a
-source:
+The public API is **push**: `serve(width, height)` starts the server in the
+background and returns a `Display`; you `publish()` RGB `(H, W, 3)` uint8 arrays
+into it from your own loop and drain input with `poll_events()`:
 
 ```python
 import asyncio
 import numpy as np
-from pdum.rfb import RenderCallbackSource, serve
-
-def render(seq, t_us):
-    arr = np.zeros((480, 640, 3), dtype=np.uint8)
-    arr[:, (seq * 4) % 640 :] = (40, 160, 220)  # a moving band
-    return arr
+import pdum.rfb as rfb
 
 async def main():
-    server = await serve(lambda: RenderCallbackSource(render, width=640, height=480, fps=30))
-    async with server as s:
-        await s.serve_forever()
+    display = await rfb.serve(640, 480, port=8765)
+    x = 0
+    try:
+        while True:
+            for _ev in display.poll_events():           # input from all viewers
+                ...
+            arr = np.zeros((480, 640, 3), dtype=np.uint8)
+            arr[:, x : x + 40] = (40, 160, 220)         # a moving band
+            display.publish(arr)                        # sync, latest-wins, fans out
+            x = (x + 4) % 640
+            await asyncio.sleep(1 / 30)
+    finally:
+        await display.aclose()
 
 asyncio.run(main())
 ```

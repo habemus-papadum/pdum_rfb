@@ -1,6 +1,6 @@
 """Tests for the hardware NVENC H.264 encoder.
 
-Mirrors ``test_pyav_h264.py``: proves the produced Annex B bitstream is valid and
+Mirrors ``test_h264_cpu.py``: proves the produced Annex B bitstream is valid and
 decodable entirely in Python (decoded back with PyAV). The whole module is
 skipped unless an NVENC-capable GPU + driver is actually present, so CI on
 machines without an NVIDIA GPU stays green.
@@ -14,10 +14,10 @@ import numpy as np
 import pytest
 
 from pdum.rfb import RawFrame
-from pdum.rfb.encoders.nvenc import (
+from pdum.rfb.encoders.nvenc_cpu import (
     NVENC_MIN_WIDTH,
-    NvencH264Encoder,
-    nvenc_available,
+    NvencCpuEncoder,
+    nvenc_cpu_available,
     self_test,
 )
 from pdum.rfb.testing import (
@@ -28,7 +28,7 @@ from pdum.rfb.testing import (
     starts_with_start_code,
 )
 
-pytestmark = pytest.mark.skipif(not nvenc_available(), reason="NVENC-capable GPU not available")
+pytestmark = pytest.mark.skipif(not nvenc_cpu_available(), reason="NVENC-capable GPU not available")
 
 W, H = 256, 192  # both comfortably above the NVENC minimum width
 
@@ -38,7 +38,7 @@ def _frame(seq):
 
 
 def _encode_stream(n=20):
-    enc = NvencH264Encoder(width=W, height=H, fps=30)
+    enc = NvencCpuEncoder(width=W, height=H, fps=30)
     payloads = []
     for seq in range(n):
         payloads.extend(enc.encode(_frame(seq), force_keyframe=(seq == 0)))
@@ -53,7 +53,7 @@ def test_first_packet_is_annexb_keyframe_with_parameter_sets():
     first = payloads[0]
     assert first.keyframe is True
     assert first.codec == "avc1.42E01F"
-    assert first.metadata["encoder"] == "pyav-nvenc"
+    assert first.metadata["encoder"] == "nvenc-cpu"
     assert starts_with_start_code(first.payload)
     assert has_sps_pps_idr(first.payload)
 
@@ -68,7 +68,7 @@ def test_delta_packets_have_no_parameter_sets():
 
 
 def test_mid_stream_forced_keyframe_emits_idr():
-    enc = NvencH264Encoder(width=W, height=H, fps=30)
+    enc = NvencCpuEncoder(width=W, height=H, fps=30)
     enc.encode(_frame(0), force_keyframe=True)
     for seq in range(1, 5):
         enc.encode(_frame(seq))
@@ -90,7 +90,7 @@ def test_self_test_passes():
 
 
 def test_rejects_non_rgb24_frames():
-    enc = NvencH264Encoder(width=W, height=H, fps=30)
+    enc = NvencCpuEncoder(width=W, height=H, fps=30)
     bad = RawFrame(0, W, H, 0, "nv12", "cpu", np.zeros((H * 3 // 2, W), dtype=np.uint8))
     with pytest.raises(TypeError):
         enc.encode(bad)
@@ -99,4 +99,4 @@ def test_rejects_non_rgb24_frames():
 
 def test_rejects_width_below_nvenc_minimum():
     with pytest.raises(ValueError, match="width"):
-        NvencH264Encoder(width=NVENC_MIN_WIDTH - 16, height=H, fps=30)
+        NvencCpuEncoder(width=NVENC_MIN_WIDTH - 16, height=H, fps=30)

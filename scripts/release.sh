@@ -6,12 +6,13 @@ This script automates the release process:
 2. Validates version has -alpha suffix
 3. Calculates release version (strips -alpha)
 4. Runs validation (lint, Python tests, widget tests, docs build)
-5. Updates version files (pyproject.toml, __init__.py, widgets/package.json)
+5. Updates version files (pyproject.toml, __init__.py, widgets/package.json,
+   packages/nvenc/pyproject.toml) — all in lockstep
 6. Updates uv.lock with new version
 7. Creates release commit and tag
 8. Pushes tag to origin
-9. Publishes to PyPI
-10. Builds and publishes the widgets to npm
+9. Publishes both Python packages to PyPI (habemus-papadum-rfb + -nvenc, via publish.sh)
+10. Builds and publishes the widgets to npm (@habemus-papadum/rfb-widgets)
 11. Creates GitHub release (triggers docs deployment)
 12. Bumps to next development version with -alpha
 13. Updates uv.lock with new dev version
@@ -19,9 +20,11 @@ This script automates the release process:
 """
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -43,6 +46,9 @@ PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 INIT_PY = REPO_ROOT / "src" / "pdum" / "rfb" / "__init__.py"
 WIDGETS_DIR = REPO_ROOT / "widgets"
 PACKAGE_JSON = WIDGETS_DIR / "package.json"
+# Sibling workspace package habemus-papadum-nvenc (import pdum.nvenc); released in
+# lockstep with the rfb package, so its version is bumped alongside the others.
+NVENC_PYPROJECT = REPO_ROOT / "packages" / "nvenc" / "pyproject.toml"
 
 class StepCategory(Enum):
     """Categories of release steps."""
@@ -140,6 +146,31 @@ def check_git_clean() -> None:
     console.print("[green]✓[/green] Git repository is clean")
 
 
+def load_local_env() -> None:
+    """Load REPO_ROOT/.env (git-ignored) into the environment.
+
+    Mirrors scripts/publish.sh so the whole release flow is non-interactive:
+    ``HATCH_INDEX_USER``/``HATCH_INDEX_AUTH`` (+ ``UV_PUBLISH_TOKEN``) authenticate
+    PyPI publishing, and ``NPM_TOKEN`` (consumed by .npmrc) authenticates npm. Any
+    variable already set in the environment takes precedence; missing .env is fine.
+    """
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        return
+    loaded = []
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip()
+            loaded.append(key)
+    if loaded:
+        console.print(f"[dim]Loaded {len(loaded)} credential(s) from .env[/dim]")
+
+
 def read_version_from_file(file_path: Path, pattern: str) -> str:
     """Read version from a file using a regex pattern."""
     content = file_path.read_text()
@@ -187,11 +218,15 @@ def read_current_version() -> None:
     package_json_version = read_package_json_version(PACKAGE_JSON)
     console.print(f"  [cyan]widgets/package.json:[/cyan] {package_json_version}")
 
-    if not (pyproject_version == init_version == package_json_version):
+    nvenc_version = read_version_from_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")')
+    console.print(f"  [cyan]packages/nvenc/pyproject.toml:[/cyan] {nvenc_version}")
+
+    if not (pyproject_version == init_version == package_json_version == nvenc_version):
         console.print("[red]✗ ERROR:[/red] Version mismatch!")
         console.print(f"  [yellow]pyproject.toml:[/yellow] {pyproject_version}")
         console.print(f"  [yellow]__init__.py:[/yellow] {init_version}")
         console.print(f"  [yellow]widgets/package.json:[/yellow] {package_json_version}")
+        console.print(f"  [yellow]packages/nvenc/pyproject.toml:[/yellow] {nvenc_version}")
         sys.exit(1)
 
     ctx.current_version = pyproject_version
@@ -266,6 +301,7 @@ def update_version_files() -> None:
     write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.release_version)
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.release_version)
     write_package_json_version(PACKAGE_JSON, ctx.release_version)
+    write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.release_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] in all files"
     )
@@ -288,6 +324,7 @@ def create_release_commit() -> None:
             str(PYPROJECT_TOML),
             str(INIT_PY),
             str(PACKAGE_JSON),
+            str(NVENC_PYPROJECT),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -317,10 +354,15 @@ def push_tag() -> None:
 
 
 def publish_to_pypi() -> None:
-    """Publish the package to PyPI using the publish script."""
-    console.rule("[bold blue]Publishing to PyPI")
+    """Publish BOTH Python packages to PyPI via scripts/publish.sh.
 
-    run_command(["./scripts/publish.sh"], "Running publish.sh to build and publish to PyPI")
+    publish.sh builds + publishes habemus-papadum-rfb (hatch) and the native
+    habemus-papadum-nvenc wheels, and loads .env for credentials. Set SKIP_NVENC=1
+    to publish only rfb.
+    """
+    console.rule("[bold blue]Publishing to PyPI (rfb + nvenc)")
+
+    run_command(["./scripts/publish.sh"], "Running publish.sh (habemus-papadum-rfb + habemus-papadum-nvenc)")
 
 
 def publish_to_npm() -> None:
@@ -328,6 +370,12 @@ def publish_to_npm() -> None:
 
     Builds first so the published `dist/` always reflects the release version —
     `pnpm publish` does not run the `build` script automatically.
+
+    Auth: the npm token lives only in ``.env`` (as ``NPM_TOKEN``); there is no
+    committed or persistent ``.npmrc`` (pnpm 11 refuses to expand ``${NPM_TOKEN}``
+    from a project-level ``.npmrc``, and we keep dev environments auth-config-free).
+    So we materialize the resolved token into a transient, 0600 npmrc outside the
+    repo and point pnpm at it via ``NPM_CONFIG_USERCONFIG`` for the publish call only.
     """
     console.rule("[bold blue]Publishing Widgets to npm")
 
@@ -336,10 +384,30 @@ def publish_to_npm() -> None:
         "Installing widget dependencies",
     )
     run_command(["pnpm", "--dir", "widgets", "build"], "Building widget bundle")
-    run_command(
-        ["pnpm", "--dir", "widgets", "publish", "--no-git-checks"],
-        "Publishing @habemus-papadum/rfb-widgets to npm",
-    )
+
+    token = os.environ.get("NPM_TOKEN")
+    if not token:
+        console.print("[red]NPM_TOKEN is not set (add it to .env). Cannot authenticate the npm publish.[/red]")
+        sys.exit(1)
+
+    fd, npmrc_path = tempfile.mkstemp(prefix="pdum-npm-", suffix=".npmrc")  # mkstemp -> mode 0600
+    try:
+        os.write(fd, f"//registry.npmjs.org/:_authToken={token}\n".encode())
+        os.close(fd)
+        prev = os.environ.get("NPM_CONFIG_USERCONFIG")
+        os.environ["NPM_CONFIG_USERCONFIG"] = npmrc_path
+        try:
+            run_command(
+                ["pnpm", "--dir", "widgets", "publish", "--no-git-checks"],
+                "Publishing @habemus-papadum/rfb-widgets to npm",
+            )
+        finally:
+            if prev is None:
+                os.environ.pop("NPM_CONFIG_USERCONFIG", None)
+            else:
+                os.environ["NPM_CONFIG_USERCONFIG"] = prev
+    finally:
+        Path(npmrc_path).unlink(missing_ok=True)
 
 
 def create_github_release() -> None:
@@ -406,6 +474,7 @@ def update_to_dev_version() -> None:
     write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.next_dev_version)
     write_package_json_version(PACKAGE_JSON, ctx.next_dev_version)
+    write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] in all files"
     )
@@ -428,6 +497,7 @@ def create_dev_commit() -> None:
             str(PYPROJECT_TOML),
             str(INIT_PY),
             str(PACKAGE_JSON),
+            str(NVENC_PYPROJECT),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -558,9 +628,10 @@ STEPS: list[Step] = [
     Step(
         id="publish_pypi",
         name="Publish to PyPI",
-        description="Build and publish package to PyPI",
+        description="Build + publish both Python packages (habemus-papadum-rfb + -nvenc)",
         category=StepCategory.RELEASE,
         action=publish_to_pypi,
+        notes="nvenc build needs a CUDA toolkit; SKIP_NVENC=1 for rfb only",
     ),
     Step(
         id="publish_npm",
@@ -568,7 +639,7 @@ STEPS: list[Step] = [
         description="Build the widget bundle and publish @habemus-papadum/rfb-widgets to npm",
         category=StepCategory.RELEASE,
         action=publish_to_npm,
-        notes="Requires pnpm + npm auth",
+        notes="Requires pnpm + NPM_TOKEN (in .env, consumed by .npmrc)",
     ),
     Step(
         id="github_release",
@@ -686,6 +757,9 @@ def main() -> None:
     # Set global context
     ctx.bump_level = args.bump_level
     ctx.testing = args.testing
+
+    # Load local PyPI + npm credentials (.env) so publishing is non-interactive.
+    load_local_env()
 
     # Show title
     title = Panel.fit(

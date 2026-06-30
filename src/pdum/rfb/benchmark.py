@@ -172,12 +172,12 @@ def benchmark_h264(
     fps: int = 30,
     pattern: str = "gradient",
 ) -> BenchmarkResult:
-    from .encoders.pyav_h264 import PyAvH264Encoder
+    from .encoders.h264_cpu import H264CpuEncoder
 
     return _benchmark_video(
-        make_encoder=lambda: PyAvH264Encoder(width=width, height=height, fps=fps, bitrate=bitrate),
-        label=f"h264 {bitrate // 1_000_000}M",
-        encoder_name="h264",
+        make_encoder=lambda: H264CpuEncoder(width=width, height=height, fps=fps, bitrate=bitrate),
+        label=f"h264-cpu {bitrate // 1_000_000}M",
+        encoder_name="h264-cpu",
         frames=frames,
         width=width,
         height=height,
@@ -197,7 +197,7 @@ def benchmark_nvenc(
 ) -> BenchmarkResult:
     from time import sleep
 
-    from .encoders.nvenc import NvencH264Encoder
+    from .encoders.nvenc_cpu import NvencCpuEncoder
 
     def make_encoder():
         # Consumer GPUs cap concurrent NVENC sessions; a fresh open can transiently
@@ -205,7 +205,7 @@ def benchmark_nvenc(
         last: Exception | None = None
         for _ in range(4):
             try:
-                return NvencH264Encoder(width=width, height=height, fps=fps, bitrate=bitrate)
+                return NvencCpuEncoder(width=width, height=height, fps=fps, bitrate=bitrate)
             except ValueError:
                 raise  # width below the NVENC minimum is not transient
             except Exception as exc:  # pragma: no cover - hardware/driver dependent
@@ -215,8 +215,8 @@ def benchmark_nvenc(
 
     return _benchmark_video(
         make_encoder=make_encoder,
-        label=f"nvenc {bitrate // 1_000_000}M",
-        encoder_name="nvenc",
+        label=f"nvenc-cpu {bitrate // 1_000_000}M",
+        encoder_name="nvenc-cpu",
         frames=frames,
         width=width,
         height=height,
@@ -225,7 +225,7 @@ def benchmark_nvenc(
     )
 
 
-def benchmark_nvenc_cuda(
+def benchmark_nvenc_gpu_pyav(
     *,
     bitrate: int = 8_000_000,
     frames: int = 60,
@@ -245,7 +245,7 @@ def benchmark_nvenc_cuda(
 
     import cupy as cp
 
-    from .encoders.nvenc_cuda import CudaNvencEncoder
+    from .encoders.nvenc_gpu_pyav import NvencGpuPyavEncoder
     from .gpu import cuda_frame, enable_cuda_context_sharing
     from .testing import decode_annexb
 
@@ -258,7 +258,7 @@ def benchmark_nvenc_cuda(
         last: Exception | None = None
         for _ in range(4):  # consumer GPUs transiently EINVAL on session churn
             try:
-                return CudaNvencEncoder(width=width, height=height, fps=fps, bitrate=bitrate)
+                return NvencGpuPyavEncoder(width=width, height=height, fps=fps, bitrate=bitrate)
             except ValueError:
                 raise
             except Exception as exc:  # pragma: no cover - hardware/driver dependent
@@ -288,8 +288,8 @@ def benchmark_nvenc_cuda(
     psnrs = [_psnr(src[i], f.to_ndarray(format="rgb24")) for i, f in enumerate(decoded[:frames])]
     bytes_per_frame = total_bytes / frames
     return BenchmarkResult(
-        label=f"nvenc-cuda {bitrate // 1_000_000}M",
-        encoder="nvenc-cuda",
+        label=f"nvenc-gpu-pyav {bitrate // 1_000_000}M",
+        encoder="nvenc-gpu-pyav",
         width=width,
         height=height,
         frames=frames,
@@ -302,7 +302,7 @@ def benchmark_nvenc_cuda(
     )
 
 
-def benchmark_nvenc_sdk(
+def benchmark_nvenc_gpu_pdum(
     *,
     bitrate: int = 8_000_000,
     frames: int = 60,
@@ -311,25 +311,25 @@ def benchmark_nvenc_sdk(
     fps: int = 30,
     pattern: str = "gradient",
 ) -> BenchmarkResult:
-    """NVIDIA Video Codec SDK encoder (the ``nvenc_spike`` wheel), no PyAV.
+    """NVIDIA Video Codec SDK encoder (habemus-papadum-nvenc / ``pdum.nvenc``), no PyAV.
 
     Frames are converted RGB→NV12 on the GPU and encoded straight from device
     memory (one intra-GPU copy into NVENC's input surface). Comparable to
-    :func:`benchmark_nvenc_cuda`, but via NVIDIA's ``NvEncoderCuda`` instead of
+    :func:`benchmark_nvenc_gpu_pyav`, but via NVIDIA's ``NvEncoderCuda`` instead of
     PyAV's ``h264_nvenc`` — and so works without PyAV>=18. See
     docs/nvenc_sdk_evaluation.md.
     """
     from time import sleep
 
     import cupy as cp
-    import nvenc_spike
+    from pdum.nvenc import NvencEncoder
 
     from .gpu import rgb_to_nv12
     from .testing import decode_annexb
 
     src = _source_frames(pattern, frames, width, height)
     # Pre-upload RGB to the GPU (not timed); the timed region covers the on-GPU
-    # RGB->NV12 conversion + the encode, matching benchmark_nvenc_cuda.
+    # RGB->NV12 conversion + the encode, matching benchmark_nvenc_gpu_pyav.
     rgb_frames = [cp.asarray(arr) for arr in src]
     cp.cuda.runtime.deviceSynchronize()
 
@@ -337,7 +337,7 @@ def benchmark_nvenc_sdk(
         last: Exception | None = None
         for _ in range(4):  # consumer GPUs transiently EINVAL on session churn
             try:
-                return nvenc_spike.NvencSpike(
+                return NvencEncoder(
                     width, height, codec="h264", preset="p3", tuning="ll", fps=fps, gop=fps, bitrate=bitrate
                 )
             except Exception as exc:  # pragma: no cover - hardware/driver dependent
@@ -369,8 +369,8 @@ def benchmark_nvenc_sdk(
     psnrs = [_psnr(src[i], f.to_ndarray(format="rgb24")) for i, f in enumerate(decoded[:frames])]
     bytes_per_frame = total_bytes / frames
     return BenchmarkResult(
-        label=f"nvenc-sdk {bitrate // 1_000_000}M",
-        encoder="nvenc-sdk",
+        label=f"nvenc-gpu-pdum {bitrate // 1_000_000}M",
+        encoder="nvenc-gpu-pdum",
         width=width,
         height=height,
         frames=frames,
@@ -383,10 +383,10 @@ def benchmark_nvenc_sdk(
     )
 
 
-def _nvenc_sdk_available() -> bool:
+def _nvenc_gpu_pdum_available() -> bool:
     try:
         import cupy  # noqa: F401
-        import nvenc_spike  # noqa: F401
+        import pdum.nvenc  # noqa: F401
 
         return True
     except Exception:  # pragma: no cover - optional wheel
@@ -449,18 +449,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sdk",
         action="store_true",
-        help="also benchmark the NVENC SDK path (needs CuPy + the nvenc_spike wheel); see docs/nvenc_sdk_evaluation.md",
+        help="also benchmark the NVENC SDK path (needs CuPy + habemus-papadum-nvenc); see docs/nvenc_sdk_evaluation.md",
     )
     args = parser.parse_args(argv)
 
-    from .encoders.nvenc import NVENC_MIN_WIDTH, nvenc_available
-    from .encoders.pyav_h264 import libx264_available
+    from .encoders.h264_cpu import h264_cpu_available
+    from .encoders.nvenc_cpu import NVENC_MIN_WIDTH, nvenc_cpu_available
 
     fps_values = [int(f) for f in args.fps.split(",")]
-    use_h264 = not args.no_h264 and libx264_available()
-    use_nvenc = not args.no_nvenc and nvenc_available()
+    use_h264 = not args.no_h264 and h264_cpu_available()
+    use_nvenc = not args.no_nvenc and nvenc_cpu_available()
     use_gpu = args.gpu and _cuda_zerocopy_available()
-    use_sdk = args.sdk and _nvenc_sdk_available()
+    use_sdk = args.sdk and _nvenc_gpu_pdum_available()
     nvenc_bitrates = (args.nvenc_bitrate or args.h264_bitrate).split(",")
 
     results: list[BenchmarkResult] = []
@@ -509,7 +509,7 @@ def main(argv: list[str] | None = None) -> None:
             if use_gpu and w >= NVENC_MIN_WIDTH:
                 for br in nvenc_bitrates:
                     results.append(
-                        benchmark_nvenc_cuda(
+                        benchmark_nvenc_gpu_pyav(
                             bitrate=_parse_bitrate(br),
                             frames=args.frames,
                             width=w,
@@ -521,7 +521,7 @@ def main(argv: list[str] | None = None) -> None:
             if use_sdk and w >= NVENC_MIN_WIDTH:
                 for br in nvenc_bitrates:
                     results.append(
-                        benchmark_nvenc_sdk(
+                        benchmark_nvenc_gpu_pdum(
                             bitrate=_parse_bitrate(br),
                             frames=args.frames,
                             width=w,
@@ -532,7 +532,7 @@ def main(argv: list[str] | None = None) -> None:
                     )
 
     note = ""
-    if not args.no_nvenc and not nvenc_available():
+    if not args.no_nvenc and not nvenc_cpu_available():
         note = "  (NVENC unavailable on this host — GPU rows skipped)"
     elif args.gpu and not use_gpu:
         note = "  (zero-copy CUDA path unavailable — needs CuPy + PyAV>=18; nvenc-cuda rows skipped)"

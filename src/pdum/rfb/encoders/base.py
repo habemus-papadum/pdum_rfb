@@ -2,8 +2,8 @@
 
 The registry is the extension seam for additional video encoders. The CPU
 H.264 (PyAV/libx264) backend registers itself lazily so importing this module
-never imports PyAV. A future NVENC backend registers itself the same way and
-:func:`pdum.rfb.protocol.select_transport` flips ``has_nvenc`` to prefer it.
+never imports PyAV. The NVENC backends register themselves the same way and
+:func:`pdum.rfb.protocol.select_transport` flips ``has_nvenc`` to prefer them.
 """
 
 from __future__ import annotations
@@ -31,38 +31,50 @@ def available_video_encoders() -> list[str]:
     return sorted(_VIDEO_ENCODERS)
 
 
-def _pyav_factory(**kwargs) -> EncoderBackend:
+def _h264_cpu_factory(**kwargs) -> EncoderBackend:
     # Imported lazily so PyAV is only required when an H.264 encoder is built.
-    from .pyav_h264 import PyAvH264Encoder
+    from .h264_cpu import H264CpuEncoder
 
-    return PyAvH264Encoder(**kwargs)
+    return H264CpuEncoder(**kwargs)
 
 
-def _nvenc_factory(**kwargs) -> EncoderBackend:
+def _nvenc_cpu_factory(**kwargs) -> EncoderBackend:
     # Imported lazily so PyAV is only required when an H.264 encoder is built.
-    from .nvenc import NvencH264Encoder
+    from .nvenc_cpu import NvencCpuEncoder
 
-    return NvencH264Encoder(**kwargs)
+    return NvencCpuEncoder(**kwargs)
 
 
-def _nvenc_cuda_factory(**kwargs) -> EncoderBackend:
+def _nvenc_gpu_pyav_factory(**kwargs) -> EncoderBackend:
     # Lazy: needs PyAV >= 18 + CuPy + an NVENC GPU (gated by cuda_zerocopy_available).
-    from .nvenc_cuda import CudaNvencEncoder
+    from .nvenc_gpu_pyav import NvencGpuPyavEncoder
 
-    return CudaNvencEncoder(**kwargs)
+    return NvencGpuPyavEncoder(**kwargs)
+
+
+def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
+    # Lazy: PyAV-free GPU path via habemus-papadum-nvenc (CuPy + an NVENC GPU);
+    # gated by pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
+    from .nvenc_gpu_pdum import NvencGpuPdumEncoder
+
+    return NvencGpuPdumEncoder(**kwargs)
 
 
 # The CPU H.264 backend is always *registered*; whether it can be *built* still
 # depends on PyAV being importable (handled by select_transport via has_h264).
-register_video_encoder("pyav", _pyav_factory)
-# The NVENC backend is always *registered* too; whether it can be *built* depends
+register_video_encoder("h264_cpu", _h264_cpu_factory)
+# Host-input NVENC is always *registered* too; whether it can be *built* depends
 # on an NVENC-capable GPU + driver (handled by select_transport via has_nvenc,
-# which the server derives from pdum.rfb.encoders.nvenc.nvenc_available()).
-register_video_encoder("nvenc", _nvenc_factory)
+# which the server derives from pdum.rfb.encoders.nvenc_cpu.nvenc_cpu_available()).
+register_video_encoder("nvenc_cpu", _nvenc_cpu_factory)
 # Zero-copy CUDA→NVENC backend. Built only when the publisher pushes CUDA frames
 # and the path is usable (PyAV >= 18 + CuPy + GPU); see
 # pdum.rfb.gpu.cuda_zerocopy_available and serve(gpu=...).
-register_video_encoder("nvenc_cuda", _nvenc_cuda_factory)
+register_video_encoder("nvenc_gpu_pyav", _nvenc_gpu_pyav_factory)
+# PyAV-free GPU NVENC backend (habemus-papadum-nvenc / pdum.nvenc). serve(gpu=True)
+# prefers it when available; gated by
+# pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
+register_video_encoder("nvenc_gpu_pdum", _nvenc_gpu_pdum_factory)
 
 
 def build_encoder(
@@ -72,7 +84,7 @@ def build_encoder(
     height: int,
     fps: int = 30,
     bitrate: int = 12_000_000,
-    video_encoder: str = "pyav",
+    video_encoder: str = "h264_cpu",
 ) -> EncoderBackend:
     """Build the encoder backend described by ``selection``.
 

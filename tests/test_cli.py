@@ -17,7 +17,7 @@ def test_app_constructed():
 def test_probe_all_structure():
     probes, rec = cli._probe_all()
     names = {p.component for p in probes}
-    assert {"Python", "Platform", "PyAV", "CuPy", "NVENC SDK (nvenc_spike)"} <= names
+    assert {"Python", "Platform", "PyAV", "CuPy", "nvenc-gpu-pdum — NVENC SDK (pdum.nvenc)"} <= names
     assert isinstance(rec, str) and rec
     for p in probes:
         assert p.status in (cli.OK, cli.WARN, cli.MISSING)

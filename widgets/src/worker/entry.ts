@@ -153,9 +153,11 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       video?.reset();
       send({
         type: "set_viewport",
-        width: msg.backingWidth,
-        height: msg.backingHeight,
-        pixel_ratio: msg.pixelRatio,
+        width: msg.cssWidth,
+        height: msg.cssHeight,
+        pwidth: msg.backingWidth,
+        pheight: msg.backingHeight,
+        ratio: msg.pixelRatio,
       });
       requestKeyframe("viewport resized");
       break;

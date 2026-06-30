@@ -47,6 +47,6 @@ def test_unknown_capabilities_raise():
 
 def test_nvenc_encoder_is_registered():
     # The NVENC backend is always registered (buildable only with a GPU), so the
-    # server's video_encoder="nvenc" selection always resolves to a factory.
-    assert "nvenc" in available_video_encoders()
-    assert "pyav" in available_video_encoders()
+    # server's video_encoder="nvenc_cpu" selection always resolves to a factory.
+    assert "nvenc_cpu" in available_video_encoders()
+    assert "h264_cpu" in available_video_encoders()

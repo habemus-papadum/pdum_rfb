@@ -98,12 +98,16 @@ class RfbSession:
         elif kind == "event":
             await self.source.handle_event(data["event"])
         elif kind == "set_viewport":
+            # Renderview-shaped resize: logical width/height, physical pwidth/pheight,
+            # ratio. Older clients sent only width/height (physical) + pixel_ratio.
             await self.source.handle_event(
                 {
                     "type": "resize",
                     "width": data["width"],
                     "height": data["height"],
-                    "pixel_ratio": data.get("pixel_ratio", 1),
+                    "pwidth": data.get("pwidth", data["width"]),
+                    "pheight": data.get("pheight", data["height"]),
+                    "ratio": data.get("ratio", data.get("pixel_ratio", 1)),
                 }
             )
 

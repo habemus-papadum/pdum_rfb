@@ -1,4 +1,4 @@
-"""Tests for the zero-copy CUDA→NVENC path (:mod:`pdum.rfb.gpu` + ``nvenc_cuda``).
+"""Tests for the zero-copy CUDA→NVENC path (:mod:`pdum.rfb.gpu` + ``nvenc_gpu_pyav``).
 
 Three tiers, by what the host provides:
 
@@ -38,20 +38,44 @@ def _cupy_usable() -> bool:
         return False
 
 
+def _sdk_usable() -> bool:
+    """PyAV-free SDK NVENC path usable (CuPy + an NVENC GPU + the pdum.nvenc wheel)."""
+    try:
+        from pdum.rfb.encoders.nvenc_gpu_pdum import nvenc_gpu_pdum_available
+
+        return nvenc_gpu_pdum_available()
+    except Exception:
+        return False
+
+
 HAS_CUPY = _cupy_usable()
 ZEROCOPY = HAS_CUPY and gpu.cuda_zerocopy_available()
+SDK = HAS_CUPY and _sdk_usable()
 
 requires_cupy = pytest.mark.skipif(not HAS_CUPY, reason="cupy unavailable (not installed or no CUDA device)")
 requires_zerocopy = pytest.mark.skipif(
     not ZEROCOPY, reason="zero-copy CUDA NVENC unavailable (needs CuPy + NVENC GPU + PyAV>=18)"
+)
+requires_sdk = pytest.mark.skipif(
+    not SDK, reason="NVENC SDK path unavailable (needs CuPy + NVENC GPU + habemus-papadum-nvenc)"
 )
 
 
 # --- always-on (no CuPy) ----------------------------------------------------
 
 
-def test_nvenc_cuda_registered():
-    assert "nvenc_cuda" in available_video_encoders()
+def test_nvenc_gpu_pyav_registered():
+    assert "nvenc_gpu_pyav" in available_video_encoders()
+
+
+def test_nvenc_gpu_pdum_registered():
+    assert "nvenc_gpu_pdum" in available_video_encoders()
+
+
+def test_nvenc_gpu_pdum_available_returns_bool():
+    from pdum.rfb.encoders.nvenc_gpu_pdum import nvenc_gpu_pdum_available
+
+    assert isinstance(nvenc_gpu_pdum_available(), bool)
 
 
 def test_gates_return_bool():
@@ -72,8 +96,8 @@ def test_serve_gpu_raises_when_unavailable():
 
     from pdum.rfb.server import serve
 
-    if ZEROCOPY:
-        pytest.skip("zero-copy stack available; this asserts the *unavailable* path")
+    if ZEROCOPY or SDK:
+        pytest.skip("a GPU encoder is available; this asserts the *unavailable* path")
     with pytest.raises(RuntimeError):
         asyncio.run(serve(256, 256, port=0, gpu=True))
 
@@ -158,17 +182,17 @@ def _release_nvenc_sessions():
 
 
 def _encode_frames(w, h, make_frame, n=12, attempts=3):
-    """Encode ``n`` frames through a fresh ``CudaNvencEncoder``, retrying transient
+    """Encode ``n`` frames through a fresh ``NvencGpuPyavEncoder``, retrying transient
     NVENC churn errors (a consumer-GPU quirk; production uses one long-lived
     encoder per connection and is unaffected)."""
     import gc
 
-    from pdum.rfb.encoders.nvenc_cuda import CudaNvencEncoder
+    from pdum.rfb.encoders.nvenc_gpu_pyav import NvencGpuPyavEncoder
 
     last: Exception | None = None
     for _ in range(attempts):
         try:
-            enc = CudaNvencEncoder(width=w, height=h, fps=30)
+            enc = NvencGpuPyavEncoder(width=w, height=h, fps=30)
             chunks: list[bytes] = []
             for s in range(n):
                 chunks += [p.payload for p in enc.encode(make_frame(s), force_keyframe=(s == 0))]
@@ -183,9 +207,9 @@ def _encode_frames(w, h, make_frame, n=12, attempts=3):
 
 @requires_zerocopy
 def test_self_test_nv12_round_trip():
-    from pdum.rfb.encoders import nvenc_cuda
+    from pdum.rfb.encoders import nvenc_gpu_pyav
 
-    assert any(nvenc_cuda.self_test(256, 256, 8) for _ in range(3))
+    assert any(nvenc_gpu_pyav.self_test(256, 256, 8) for _ in range(3))
 
 
 @requires_zerocopy
@@ -227,3 +251,47 @@ def test_host_frame_adapter_downloads_cuda_nv12():
     nv12 = gpu.rgb_to_nv12(cp.asarray((np.random.rand(h, w, 3) * 255).astype(np.uint8)))
     out = adapted.encode(gpu.cuda_frame(nv12, pixel_format="nv12", height=h))
     assert out and out[0].mime and len(out[0].payload) > 0
+
+
+# --- PyAV-free SDK NVENC backend (CuPy + NVENC GPU + habemus-papadum-nvenc) ---
+
+
+@requires_sdk
+def test_nvenc_gpu_pdum_self_test():
+    from pdum.rfb.encoders import nvenc_gpu_pdum
+
+    assert any(nvenc_gpu_pdum.self_test(256, 192, 8) for _ in range(3))
+
+
+@requires_sdk
+def test_nvenc_gpu_pdum_encode_cuda_rgb_decodes_back():
+    import cupy as cp
+
+    from pdum.rfb.encoders.nvenc_gpu_pdum import NvencGpuPdumEncoder
+    from pdum.rfb.testing import decode_annexb
+
+    w, h = 256, 192
+    rgb = cp.asarray((np.random.rand(h, w, 3) * 255).astype(np.uint8))
+    enc = NvencGpuPdumEncoder(width=w, height=h, fps=12)
+    chunks: list[bytes] = []
+    for s in range(12):
+        chunks += [p.payload for p in enc.encode(gpu.cuda_frame(rgb, seq=s), force_keyframe=(s == 0))]
+    chunks += [p.payload for p in enc.flush()]
+    enc.close()
+    decoded = decode_annexb(b"".join(chunks))
+    assert len(decoded) >= 10
+    assert all(f.width == w and f.height == h for f in decoded)
+
+
+@requires_sdk
+def test_nvenc_gpu_pdum_first_frame_is_keyframe():
+    import cupy as cp
+
+    from pdum.rfb.encoders.nvenc_gpu_pdum import NvencGpuPdumEncoder
+
+    w, h = 256, 192
+    nv12 = cp.zeros((h + h // 2, w), cp.uint8)
+    enc = NvencGpuPdumEncoder(width=w, height=h, fps=12)
+    payloads = enc.encode(gpu.cuda_frame(nv12, pixel_format="nv12", height=h, seq=0), force_keyframe=True)
+    enc.close()
+    assert payloads and payloads[0].keyframe and payloads[0].metadata["encoder"] == "nvenc-gpu-pdum"

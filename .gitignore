@@ -222,9 +222,12 @@ __marimo__/
 vendor/PyNvVideoCodec_2.1.0
 vendor/PyNvVideoCodec_2.1.0.zip
 
-# nvenc-encode-spike: commit the curated source (src/, third_party/, CMakeLists,
-# pyproject, *.md); ignore build outputs.
-vendor/nvenc-encode-spike/build/
-vendor/nvenc-encode-spike/build-nvtx/
-vendor/nvenc-encode-spike/dist/
-vendor/nvenc-encode-spike/_skbuild/
+# packages/nvenc (habemus-papadum-nvenc): commit the curated source (src/,
+# third_party/, CMakeLists, pyproject, *.md); ignore build outputs.
+packages/nvenc/build/
+packages/nvenc/build-nvtx/
+packages/nvenc/dist/
+packages/nvenc/_skbuild/
+
+# Local npm auth (references $NPM_TOKEN; created by setup for `pnpm publish`)
+.npmrc

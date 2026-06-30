@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from pdum.rfb import RawFrame
-from pdum.rfb.encoders.pyav_h264 import PyAvH264Encoder, libx264_available, self_test
+from pdum.rfb.encoders.h264_cpu import H264CpuEncoder, h264_cpu_available, self_test
 from pdum.rfb.testing import (
     decode_annexb,
     has_sps_pps_idr,
@@ -17,7 +17,7 @@ from pdum.rfb.testing import (
     starts_with_start_code,
 )
 
-pytestmark = pytest.mark.skipif(not libx264_available(), reason="libx264 (PyAV) not available")
+pytestmark = pytest.mark.skipif(not h264_cpu_available(), reason="libx264 (PyAV) not available")
 
 W, H = 128, 96
 
@@ -27,7 +27,7 @@ def _frame(seq):
 
 
 def _encode_stream(n=20):
-    enc = PyAvH264Encoder(width=W, height=H, fps=30)
+    enc = H264CpuEncoder(width=W, height=H, fps=30)
     payloads = []
     for seq in range(n):
         payloads.extend(enc.encode(_frame(seq), force_keyframe=(seq == 0)))
@@ -56,7 +56,7 @@ def test_delta_packets_have_no_parameter_sets():
 
 
 def test_mid_stream_forced_keyframe_emits_idr():
-    enc = PyAvH264Encoder(width=W, height=H, fps=30)
+    enc = H264CpuEncoder(width=W, height=H, fps=30)
     enc.encode(_frame(0), force_keyframe=True)
     for seq in range(1, 5):
         enc.encode(_frame(seq))
@@ -78,7 +78,7 @@ def test_self_test_passes():
 
 
 def test_rejects_non_rgb24_frames():
-    enc = PyAvH264Encoder(width=W, height=H, fps=30)
+    enc = H264CpuEncoder(width=W, height=H, fps=30)
     bad = RawFrame(0, W, H, 0, "nv12", "cpu", np.zeros((H * 3 // 2, W), dtype=np.uint8))
     with pytest.raises(TypeError):
         enc.encode(bad)

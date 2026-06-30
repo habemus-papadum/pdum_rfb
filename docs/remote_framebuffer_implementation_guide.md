@@ -26,16 +26,21 @@ Transport backend -> sends encoded payloads + receives events
 
 ### Prefer a common event vocabulary
 
-All transports should send the same user-input events to Python:
+All transports send the same user-input events to Python, following the
+[renderview spec](https://github.com/pygfx/renderview) (the vocabulary shared by
+jupyter_rfb / pygfx / fastplotlib): logical canvas coordinates, `button` as
+`0=none,1=left,2=right,3=middle`, `buttons` as a tuple of pressed buttons,
+capitalized `modifiers`, and a `timestamp` (seconds). `code` on key events is an
+additive extra:
 
 ```json
-{"type":"resize","width":1280,"height":720,"pixel_ratio":2}
-{"type":"pointer_move","x":300,"y":180,"buttons":1,"modifiers":[]}
-{"type":"pointer_down","x":300,"y":180,"button":0,"buttons":1}
-{"type":"pointer_up","x":300,"y":180,"button":0,"buttons":0}
-{"type":"wheel","x":300,"y":180,"dx":0,"dy":-120,"mode":"pixel"}
-{"type":"key_down","key":"a","code":"KeyA","modifiers":["shift"]}
-{"type":"key_up","key":"a","code":"KeyA","modifiers":[]}
+{"type":"resize","width":1280,"height":720,"pwidth":2560,"pheight":1440,"ratio":2}
+{"type":"pointer_move","x":300,"y":180,"button":0,"buttons":[],"modifiers":[],"timestamp":12.5}
+{"type":"pointer_down","x":300,"y":180,"button":1,"buttons":[1],"modifiers":[],"timestamp":12.6}
+{"type":"pointer_up","x":300,"y":180,"button":1,"buttons":[],"modifiers":[],"timestamp":12.7}
+{"type":"wheel","x":300,"y":180,"dx":0,"dy":-120,"buttons":[],"modifiers":[],"timestamp":12.8}
+{"type":"key_down","key":"a","code":"KeyA","modifiers":["Shift"],"timestamp":13.0}
+{"type":"key_up","key":"a","code":"KeyA","modifiers":[],"timestamp":13.1}
 ```
 
 ### Use latest-frame-wins backpressure
@@ -68,7 +73,7 @@ remote_rfb/
       protocol.py
       encoders/
         image.py
-        pyav_h264.py
+        h264_cpu.py
         nvenc_pynv.py
       transports/
         websocket.py
@@ -162,8 +167,8 @@ Client to server:
 {"type":"hello","supported":["image/jpeg","image/png","webcodecs/h264-annexb"],"device_pixel_ratio":2}
 {"type":"ack","seq":42,"decode_queue_size":0,"displayed":true}
 {"type":"request_keyframe","reason":"dropped_frames"}
-{"type":"set_viewport","width":1280,"height":720,"pixel_ratio":2}
-{"type":"event","event":{"type":"pointer_move","x":100,"y":50,"buttons":1}}
+{"type":"set_viewport","width":1280,"height":720,"pwidth":2560,"pheight":1440,"ratio":2}
+{"type":"event","event":{"type":"pointer_move","x":100,"y":50,"button":0,"buttons":[],"modifiers":[],"timestamp":12.5}}
 ```
 
 Server to client:
@@ -455,7 +460,7 @@ import numpy as np
 from .types import RawFrame, EncodedPayload
 
 
-class PyAvH264Encoder:
+class H264CpuEncoder:
     def __init__(
         self,
         width: int,
@@ -493,7 +498,7 @@ class PyAvH264Encoder:
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         if frame.memory != "cpu" or frame.pixel_format != "rgb24":
-            raise TypeError("PyAvH264Encoder example expects CPU rgb24 frames")
+            raise TypeError("H264CpuEncoder example expects CPU rgb24 frames")
 
         arr = frame.data
         if not isinstance(arr, np.ndarray):
@@ -1131,7 +1136,7 @@ else:
 
 ### Milestone 2: PyAV/WebCodecs video transport
 
-- Add `PyAvH264Encoder`.
+- Add `H264CpuEncoder`.
 - Add WebCodecs worker.
 - Verify Annex B payload and keyframe startup.
 - Add queue-size ACKs.

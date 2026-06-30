@@ -117,18 +117,28 @@ onBeforeUnmount(() => view?.dispose());
 ## Input events
 
 The view captures DOM events on the canvas and forwards normalized versions to the
-server: `pointermove/down/up`, `wheel`, and `keydown/keyup`. It:
+server, following the [renderview spec](https://github.com/pygfx/renderview) — the
+event vocabulary shared by jupyter_rfb / pygfx / fastplotlib — so events feed those
+consumers without translation. It forwards `pointermove/down/up`, `wheel`, and
+`keydown/keyup`, and:
 
-- maps coordinates to **framebuffer pixels** (CSS coords × the effective
-  backing/CSS ratio), so the server receives 1:1 coordinates;
+- sends **logical** (canvas-relative CSS) coordinates, top-left origin; the
+  publisher maps logical → its own framebuffer using the `ratio` carried on resize;
+- reports `button` as renderview's `0=none, 1=left, 2=right, 3=middle` and `buttons`
+  as the **tuple** of currently-pressed buttons (not a DOM bitmask);
+- capitalizes modifiers: `"Shift"`, `"Control"`, `"Alt"`, `"Meta"`;
+- keeps a `code` (physical-key) field on key events — an additive extra over
+  renderview — and a `timestamp` (seconds) on every input event;
 - normalizes `wheel` `deltaMode` (line/page) to pixels;
 - sets `tabindex` on the canvas so it can receive keyboard focus, and uses
   `setPointerCapture` so drags that leave the canvas keep reporting;
-- observes resize (and DPR changes) and sends `set_viewport`, after which the
-  worker resizes the `OffscreenCanvas` and requests a fresh keyframe.
+- observes resize (and DPR changes) and sends `set_viewport` (logical `width`/
+  `height`, physical `pwidth`/`pheight`, `ratio`), after which the worker resizes
+  the `OffscreenCanvas` and requests a fresh keyframe.
 
-The server receives the common event vocabulary (`{type, x, y, buttons,
-modifiers}`, etc.) and routes it to your `FrameSource.handle_event`.
+The server receives the common event vocabulary (`{type, x, y, button, buttons,
+modifiers, timestamp}`, etc.); you drain it (tagged with `client_id`/`principal`)
+from `display.poll_events()` in your own loop (see the [Python guide](guide_python.md)).
 
 ## Transport selection
 
@@ -170,8 +180,9 @@ webpack 5, Rollup, esbuild, and Parcel.)
 The package also exports the lower-level pieces for custom integrations:
 `unpackBinaryMessage` / `packBinaryMessage`, `probeCapabilities` /
 `isCodecSupported`, `BackpressureController` / `KeyframeGate`, the event
-normalizers (`normalizePointerEvent`, `pointerToFramebuffer`, `computeBackingSize`,
-…), and all the wire/event TypeScript types. See [Internals](internals.md) for the
+normalizers (`normalizePointerEvent`, `pointerToCanvas`, `mapButton`/`mapButtons`,
+`computeBackingSize`, …), and all the wire/event TypeScript types. See
+[Internals](internals.md) for the
 wire format and worker design.
 
 ## Building & developing

@@ -59,22 +59,22 @@ gpu-cuda13 = [
 gpu-cuda12 = [
     "cupy-cuda12x>=13",  # CUDA 12.x  (add "av>=18" when released)
 ]
-# Alternative GPU H.264/HEVC backend via NVIDIA's Video Codec SDK encoder instead
-# of PyAV/ffmpeg (encode-only spike in vendor/nvenc-encode-spike; see
-# docs/nvenc_sdk_evaluation.md). It needs NO PyAV at all and builds on Python 3.14
-# (upstream PyNvVideoCodec does neither). The SDK wheel `pdum-rfb-nvenc-sdk` is not
-# on PyPI (PyPI forbids the direct-reference URL it would need); install it from
-# this repo's GitHub Releases:
-#   uv pip install habemus-papadum-rfb[gpu-nvenc-sdk]
-#   uv pip install <release-url>/pdum_rfb_nvenc_sdk-<...>.whl   # the SDK wheel itself
-# This extra pulls only the pip-installable half (CuPy); use cupy-cuda12x for CUDA 12.
+# Alternative GPU H.264/HEVC backend via NVIDIA's Video Codec SDK encoder instead of
+# PyAV/ffmpeg — the sibling package habemus-papadum-nvenc (import pdum.nvenc), built
+# from packages/nvenc/ (a uv workspace member). It needs NO PyAV and works on Python
+# 3.14. Pulls the SDK encoder + CuPy (use cupy-cuda12x for a CUDA 12 toolkit).
+# See docs/nvenc_sdk_evaluation.md.
 gpu-nvenc-sdk = [
-    "cupy-cuda13x>=14",  # + pdum-rfb-nvenc-sdk wheel from GitHub Releases (see comment)
+    "habemus-papadum-nvenc",
+    "cupy-cuda13x>=14",
 ]
 # `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
 cli = [
     "typer>=0.12",
     "rich>=13.7",
+]
+rendercanvas = [
+    "rendercanvas>=2.0",
 ]
 
 
@@ -83,7 +83,23 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
+# pdum is a PEP 420 namespace (no src/pdum/__init__.py) shared with the sibling
+# habemus-papadum-nvenc package, which contributes pdum.nvenc.
 packages = ["src/pdum"]
+
+[tool.uv]
+# Groups installed automatically by a bare `uv sync` (including `--frozen`). `viz` pulls
+# the dev render stack (rendercanvas + wgpu + pygfx) onto a dev box so the rendercanvas
+# backend can be exercised locally. CI's plain `uv sync --frozen` will include it too;
+# pass `--no-group viz` in CI to keep it lean.
+default-groups = ["dev", "viz"]
+
+# --- uv workspace: this repo hosts habemus-papadum-rfb (root) + packages/* ---
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+habemus-papadum-nvenc = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -107,6 +123,13 @@ dev = [
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",
+]
+# Dev-box-only render stack (NOT shipped) to exercise the rendercanvas backend end-to-end.
+# The library's runtime dep is just the `[rendercanvas]` extra; wgpu/pygfx are dev tooling.
+viz = [
+    "rendercanvas>=2.0",
+    "wgpu>=0.19",
+    "pygfx>=0.2",
 ]
 
 [tool.ruff]

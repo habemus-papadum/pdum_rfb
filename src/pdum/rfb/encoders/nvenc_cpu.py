@@ -7,13 +7,13 @@ this backend needs no Python dependency beyond ``av`` (already the ``h264`` /
 ``nvenc`` extra) — only a host NVIDIA driver + an NVENC-capable GPU, which pip
 cannot install.
 
-Like :class:`~pdum.rfb.encoders.pyav_h264.PyAvH264Encoder` it emits **Annex B**
+Like :class:`~pdum.rfb.encoders.h264_cpu.H264CpuEncoder` it emits **Annex B**
 access units (in-band SPS/PPS on key frames) configured for low latency
 (``preset=p4``/``tune=ll``, no B-frames, ~1 s forced-IDR cadence). It subclasses
 the libx264 encoder and only swaps the underlying ``av.CodecContext``, so the
 frame conversion, forced-keyframe handling, and payload packing are shared.
 
-Availability is gated by :func:`nvenc_available`, which checks the OS, that PyAV
+Availability is gated by :func:`nvenc_cpu_available`, which checks the OS, that PyAV
 exposes ``h264_nvenc``, and that the encoder actually opens on the GPU.
 """
 
@@ -24,7 +24,7 @@ import time
 from fractions import Fraction
 
 from ..protocol import DEFAULT_H264_CODEC
-from .pyav_h264 import PyAvH264Encoder, h264_available
+from .h264_cpu import H264CpuEncoder, h264_available
 
 #: NVENC H.264 has a hardware minimum frame width (160 on the tested Ada GPU;
 #: widths <160 fail ``avcodec_open2`` with EINVAL). Height may be smaller.
@@ -46,7 +46,7 @@ def nvenc_codec_available() -> bool:
 
     This is a cheap, side-effect-free check (it does not touch the GPU). It is
     necessary but not sufficient — the encoder still has to *open* on a real
-    device, which :func:`nvenc_available` verifies.
+    device, which :func:`nvenc_cpu_available` verifies.
     """
     if sys.platform not in _NVENC_PLATFORMS:
         return False
@@ -91,7 +91,7 @@ def _probe_open(retries: int = 3) -> bool:
     return False
 
 
-def nvenc_available() -> bool:
+def nvenc_cpu_available() -> bool:
     """True if a usable NVENC H.264 encoder is present (cached).
 
     Guards, in order: the OS must be one where NVENC exists (not macOS); PyAV
@@ -109,15 +109,15 @@ def nvenc_available() -> bool:
     return _nvenc_ok
 
 
-class NvencH264Encoder(PyAvH264Encoder):
+class NvencCpuEncoder(H264CpuEncoder):
     """Encode CPU ``rgb24`` frames to H.264 Annex B on the GPU via NVENC.
 
-    Drop-in for :class:`PyAvH264Encoder` (same constructor and ``EncoderBackend``
+    Drop-in for :class:`H264CpuEncoder` (same constructor and ``EncoderBackend``
     interface); only the underlying codec context differs. Frames narrower than
     :data:`NVENC_MIN_WIDTH` are rejected because NVENC cannot open below it.
     """
 
-    encoder_label = "pyav-nvenc"
+    encoder_label = "nvenc-cpu"
 
     def __init__(
         self,
@@ -180,7 +180,7 @@ def self_test(width: int = 256, height: int = 256, frames: int = 8) -> bool:
     number of frames at the expected resolution. Doubles as a runtime check that
     NVENC is actually usable end-to-end.
     """
-    if not nvenc_available():
+    if not nvenc_cpu_available():
         return False
 
     import numpy as np
@@ -189,7 +189,7 @@ def self_test(width: int = 256, height: int = 256, frames: int = 8) -> bool:
     from ..types import RawFrame
 
     width = max(width, NVENC_MIN_WIDTH)
-    enc = NvencH264Encoder(width=width, height=height, fps=int(frames))
+    enc = NvencCpuEncoder(width=width, height=height, fps=int(frames))
     chunks: list[bytes] = []
     for seq in range(frames):
         arr = np.full((height, width, 3), (seq * 7) % 256, dtype=np.uint8)

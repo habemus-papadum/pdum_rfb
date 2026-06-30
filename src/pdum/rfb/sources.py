@@ -111,8 +111,10 @@ class BaseFrameSource(ABC):
         recorded["_received_us"] = int((self._clock() - self._start) * 1_000_000)
         self.events.append(recorded)
         if event.get("type") == "resize":
-            self.width = _make_even(int(event["width"]))
-            self.height = _make_even(int(event["height"]))
+            # Render at the physical (backing-store) size; renderview carries it as
+            # pwidth/pheight, older clients only sent width/height.
+            self.width = _make_even(int(event.get("pwidth", event["width"])))
+            self.height = _make_even(int(event.get("pheight", event["height"])))
 
     def snapshot_events(self) -> list[EventDict]:
         """Return a copy of all events received so far, in order."""

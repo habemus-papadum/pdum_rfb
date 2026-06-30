@@ -7,6 +7,11 @@ the public API.
 
 ## End-to-end data flow
 
+This is the **per-connection, session-internal** view. The public entry point is
+`display.publish(ndarray)`, which stores the latest frame; each connection's
+`_ClientFeed` is the `FrameSource` the session pulls from below, and input drained
+by `display.poll_events()` is what arrives as `handle_event` here.
+
 ```text
  Python                                   Browser (main thread)        Worker
  ------                                   ---------------------        ------
@@ -118,7 +123,7 @@ or thread scheduling.
 
 ## The H.264 path
 
-`PyAvH264Encoder` uses a bare `av.CodecContext.create("libx264", "w")`, which emits
+`H264CpuEncoder` uses a bare `av.CodecContext.create("libx264", "w")`, which emits
 **Annex B** with in-band SPS/PPS — exactly WebCodecs' Annex B mode (never route
 through an mp4 muxer, which produces AVCC). The gaps in the original sketch are
 fixed:
@@ -174,12 +179,15 @@ Main → worker: `init` (transfers the canvas + url + options), `event`, `resize
 
 ### Event normalization (main thread)
 
-`events.ts` maps DOM events to the common vocabulary. Coordinates go through
-`pointerToFramebuffer(cssX, cssY, geom)` = `round(css × backing/cssSize)`, clamped
-to the backing bounds — so the server always gets framebuffer-pixel coordinates,
-even under a device pixel ratio or a `maxBackingDimension` cap.
-`computeBackingSize` derives the backing store and the effective ratio reported in
-`set_viewport`.
+`events.ts` maps DOM events to the [renderview vocabulary](https://github.com/pygfx/renderview)
+(shared by jupyter_rfb / pygfx / fastplotlib). Coordinates go through
+`pointerToCanvas(cssX, cssY, rect)` = logical canvas pixels (`clientX − rect.left`,
+top-left origin) — the publisher maps logical → its framebuffer using the `ratio`
+carried on resize. `mapButton`/`mapButtons` translate DOM button enums/bitmask to
+renderview's `0=none,1=left,2=right,3=middle` (button) and pressed-button tuple
+(buttons). `computeBackingSize` derives the backing store and the effective ratio
+reported in `set_viewport` (logical `width`/`height` + physical `pwidth`/`pheight` +
+`ratio`).
 
 ## Module map
 
@@ -196,16 +204,23 @@ src/pdum/rfb/
   types.py          RawFrame, EncodedPayload, InputEvent, FrameSource/EncoderBackend protocols (dep-free)
   protocol.py       envelope, header builders, control parsing, select_transport
   session.py        RfbSession: loops, backpressure, keyframe policy
-  display.py        Display (publish/poll_events/aclose) + internal _ClientFeed
+  display.py        Display (publish/poll_events/aclose) + internal _ClientFeed (per connection)
   auth.py           AuthContext / Authenticator / Principal (pluggable, no JWT dep)
   transport.py      Channel protocol + WebSocketTransport (ASGI/WebTransport seam)
-  sources.py        BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (internal)
+  sources.py        BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (internal now)
+  gpu.py            zero-copy GPU helpers: rgb_to_nv12, cuda_frame, context sharing, probes
+  metrics.py        SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
+  adaptive.py       AdaptiveQualityController (opt-in via serve(adaptive=True))
+  benchmark.py      `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
+  cli.py            `pdum-rfb` CLI: doctor (probe encode paths) + benchmark
   server.py         serve()->Display, _ConnectionServer (HTTP side channel), `python -m` CLI
   encoders/
-    base.py         registry + build_encoder  (registers pyav + nvenc)
+    base.py         registry + build_encoder (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum)
     image.py        ImageEncoder (Pillow)
-    pyav_h264.py    PyAvH264Encoder + libx264_available / self_test
-    nvenc.py        NvencH264Encoder (GPU h264_nvenc) + nvenc_available
+    h264_cpu.py    H264CpuEncoder + h264_cpu_available / self_test
+    nvenc_cpu.py        NvencCpuEncoder (host-input GPU h264_nvenc) + nvenc_cpu_available
+    nvenc_gpu_pyav.py   NvencGpuPyavEncoder (zero-copy CUDA NV12 -> h264_nvenc, PyAV >= 18)
+    nvenc_gpu_pdum.py    NvencGpuPdumEncoder (PyAV-free; rides habemus-papadum-nvenc / pdum.nvenc)
   testing.py        SyntheticFrameSource, fakes, NAL/decode helpers, fixture gen
 
 widgets/src/
@@ -232,22 +247,28 @@ Three layers verify the system with no display and no manual clicking:
 3. **Browser e2e (Playwright + headless Chromium).** `webServer` boots the Python
    server (streaming the deterministic `test_card` pattern) and a production build
    of the demo. A spec decodes real frames, **reads back canvas pixels** via the
-   `capture` hook, and compares them — for the displayed `seq` — against
-   `expectedQuadrantColor`, the TypeScript mirror of Python's `render_test_pattern`
-   (flat quadrant colors keep lossy decode within tolerance). A second spec injects
-   real pointer/key/wheel events and asserts the server received the normalized
-   versions via `GET /recorded-events`. The image path is unconditional; the H.264
-   path is gated on `VideoDecoder.isConfigSupported` and skipped-with-log where the
-   browser lacks `avc1`.
+   `capture` hook, and checks they form a valid `render_test_pattern(k)` frame — the
+   four palette colors in the correct spatial cycle, via `matchedRotation` (the
+   TypeScript mirror of Python's `render_test_pattern`; flat quadrant colors keep
+   lossy decode within tolerance). The check is on the frame's *structure*, not a
+   specific `seq`: the browser-visible `lastDisplayedSeq` is a per-client wire
+   counter, not the server's render counter, so the two need not match. A second
+   spec injects real pointer/key/wheel events and asserts the server received the
+   normalized versions via `GET /recorded-events`. The image path is unconditional;
+   the H.264 path is gated on `VideoDecoder.isConfigSupported` and skipped-with-log
+   where the browser lacks `avc1`.
 
 ## Extension points
 
 - **Encoders.** `register_video_encoder(name, factory)` + the `has_nvenc` flag in
-  `select_transport` are where a PyNvVideoCodec/NVENC backend slots in with no
-  changes to the session or transport.
-- **Frame sources.** Subclass `BaseFrameSource` (or implement the `FrameSource`
-  protocol) — CPU NumPy today; CUDA/OpenGL sources can produce non-CPU `RawFrame`s
-  for a GPU encoder later.
+  `select_transport` are the seam new backends slot into with no changes to the
+  session or transport. Three NVENC backends already ride it: `nvenc_cpu` (host-input
+  `h264_nvenc`), `nvenc_gpu_pyav` (zero-copy CUDA→NVENC via PyAV ≥ 18), and `nvenc_gpu_pdum`
+  (PyAV-free, via the sibling `pdum.nvenc` package).
+- **Frames.** Push `ndarray`s, **CuPy/DLPack CUDA tensors**, or `RawFrame`s to
+  `Display.publish()` — a CUDA tensor becomes a `memory="cuda"` frame for the GPU
+  encoders. The internal per-connection `_ClientFeed` is the `FrameSource` the
+  session pulls; `BaseFrameSource` remains for internal/test use.
 - **Transport.** The session only needs an object with `await send(...)` and async
   iteration. A future logical-channel `Transport`/`Channel` abstraction (WebSocket
   now, WebTransport later — see the addendum) can wrap this without touching the

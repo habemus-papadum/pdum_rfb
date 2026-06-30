@@ -45,9 +45,9 @@ def _h264_importable() -> bool:
 def _nvenc_usable() -> bool:
     """True if a hardware NVENC H.264 encoder is available on this host."""
     try:
-        from .encoders.nvenc import nvenc_available
+        from .encoders.nvenc_cpu import nvenc_cpu_available
 
-        return nvenc_available()
+        return nvenc_cpu_available()
     except Exception:  # pragma: no cover - defensive (e.g. av not installed)
         return False
 
@@ -89,26 +89,37 @@ class _ConnectionServer:
             self.has_nvenc = _nvenc_usable() if self.has_h264 else False
         else:
             self.has_nvenc = has_nvenc and self.has_h264
-        # Zero-copy CUDA path is opt-in (gpu=True) and validated up front: the
-        # publisher pushes CUDA frames and every viewer's H.264 encoder reads them
-        # directly. Requires the full stack (PyAV >= 18 + CuPy + NVENC GPU).
+        # GPU encode is opt-in (gpu=True) and validated up front: the publisher pushes
+        # CUDA frames and every viewer's H.264 encoder reads them directly. Two
+        # backends, preferred in this order:
+        #   1. nvenc_gpu_pdum  — habemus-papadum-nvenc (pdum.nvenc); PyAV-free, fastest;
+        #   2. nvenc_gpu_pyav — zero-copy via PyAV >= 18 (needs the PyAV-18 stack).
         self.gpu = bool(gpu)
         if self.gpu:
-            if not self.has_h264:
-                raise RuntimeError("gpu=True requires H.264 (got has_h264=False)")
-            from .gpu import cuda_zerocopy_available
+            from .encoders.nvenc_gpu_pdum import nvenc_gpu_pdum_available
 
-            if not cuda_zerocopy_available():
-                raise RuntimeError(
-                    "gpu=True but the zero-copy CUDA→NVENC path is unavailable. "
-                    "Needs CuPy + an NVENC GPU + PyAV >= 18 (call "
-                    "pdum.rfb.gpu.enable_cuda_context_sharing() before any CuPy use). "
-                    "See pdum.rfb.gpu.cuda_zerocopy_available() and docs/gpu_zerocopy.md."
-                )
-            self.has_nvenc = True
-            self.video_encoder = "nvenc_cuda"
+            if nvenc_gpu_pdum_available():
+                # The SDK provides the H.264 transport itself, so it does not need
+                # PyAV — flip has_h264 on so select_transport offers H.264 either way.
+                self.has_h264 = True
+                self.has_nvenc = True
+                self.video_encoder = "nvenc_gpu_pdum"
+            else:
+                from .gpu import cuda_zerocopy_available
+
+                if not (self.has_h264 and cuda_zerocopy_available()):
+                    raise RuntimeError(
+                        "gpu=True but no usable GPU encoder. Install either "
+                        "habemus-papadum-nvenc (pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]') "
+                        "or CuPy + an NVENC GPU + PyAV >= 18 (call "
+                        "pdum.rfb.gpu.enable_cuda_context_sharing() before any CuPy use). "
+                        "See pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available(), "
+                        "pdum.rfb.gpu.cuda_zerocopy_available(), and docs/gpu_zerocopy.md."
+                    )
+                self.has_nvenc = True
+                self.video_encoder = "nvenc_gpu_pyav"
         else:
-            self.video_encoder = "nvenc" if self.has_nvenc else "pyav"
+            self.video_encoder = "nvenc_cpu" if self.has_nvenc else "h264_cpu"
         self.fps = fps
         self.bitrate = bitrate
         self.max_inflight = max_inflight
@@ -262,10 +273,11 @@ async def serve(
         ``None`` auto-detects; ``False`` forces the CPU/image fallback. ``has_nvenc``
         selects the GPU encoder when an NVENC-capable device is present.
     gpu:
-        Opt in to the **zero-copy CUDA→NVENC** path: the publisher pushes CUDA
-        frames (CuPy/DLPack NV12 or rgb) and each viewer's H.264 encoder reads them
-        directly, no host copy. Validated at startup; raises if the stack
-        (PyAV >= 18 + CuPy + NVENC GPU) is unavailable. Call
+        Opt in to **GPU encode**: the publisher pushes CUDA frames (CuPy/DLPack NV12
+        or rgb) and each viewer's H.264 encoder reads them directly, no host copy.
+        Prefers the **PyAV-free NVENC SDK** backend (``habemus-papadum-nvenc``) when
+        available, else the **zero-copy CUDA→NVENC** backend (PyAV >= 18). Validated
+        at startup; raises if neither is usable. For the PyAV-18 path, call
         :func:`pdum.rfb.gpu.enable_cuda_context_sharing` before any CuPy use.
     authenticate:
         Optional async hook (see :mod:`pdum.rfb.auth`); rejected connections are

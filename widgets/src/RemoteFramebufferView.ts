@@ -4,7 +4,6 @@
 // a mount/effect and call dispose() on cleanup.
 
 import {
-  type BackingGeometry,
   computeBackingSize,
   normalizeKeyEvent,
   normalizePointerEvent,
@@ -138,15 +137,6 @@ export class RemoteFramebufferView {
     return canvas;
   }
 
-  private geometry(rect: DOMRect): BackingGeometry {
-    return {
-      cssWidth: rect.width,
-      cssHeight: rect.height,
-      backingWidth: this.backingWidth,
-      backingHeight: this.backingHeight,
-    };
-  }
-
   private post(msg: MainToWorker): void {
     if (!this.disposed) this.worker.postMessage(msg);
   }
@@ -161,12 +151,12 @@ export class RemoteFramebufferView {
       }
     }
     const rect = this.canvas.getBoundingClientRect();
-    this.post({ type: "event", event: normalizePointerEvent(ev, rect, this.geometry(rect)) });
+    this.post({ type: "event", event: normalizePointerEvent(ev, rect) });
   };
 
   private onWheel = (ev: WheelEvent): void => {
     const rect = this.canvas.getBoundingClientRect();
-    this.post({ type: "event", event: normalizeWheelEvent(ev, rect, this.geometry(rect)) });
+    this.post({ type: "event", event: normalizeWheelEvent(ev, rect) });
   };
 
   private onKey = (ev: KeyboardEvent): void => {

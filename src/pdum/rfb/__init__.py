@@ -8,8 +8,8 @@ The public API is push-based: start a server with :func:`serve`, then
 ``publish()`` frames to the returned :class:`Display` from your own loop and drain
 input with :meth:`Display.poll_events`.
 
-The PyAV-dependent H.264 symbols (``PyAvH264Encoder``, ``NvencH264Encoder``,
-``h264_available``, ``nvenc_available``) are loaded lazily via :pep:`562` so base
+The PyAV-dependent H.264 symbols (``H264CpuEncoder``, ``NvencCpuEncoder``,
+``h264_available``, ``nvenc_cpu_available``) are loaded lazily via :pep:`562` so base
 (image-only) installs without the optional ``av`` dependency can still
 ``import pdum.rfb``.
 """
@@ -45,15 +45,15 @@ __all__ = [
     "Authenticator",
     "BackendSelection",
     "Channel",
-    "CudaNvencEncoder",  # lazy
+    "NvencGpuPyavEncoder",  # lazy
     "Display",
     "EncodedPayload",
     "EncoderBackend",
     "ImageEncoder",
     "InputEvent",
-    "NvencH264Encoder",  # lazy
+    "NvencCpuEncoder",  # lazy
     "Principal",
-    "PyAvH264Encoder",  # lazy
+    "H264CpuEncoder",  # lazy
     "QualityTarget",
     "RawFrame",
     "RfbSession",
@@ -63,12 +63,12 @@ __all__ = [
     "available_video_encoders",
     "build_encoder",
     "cuda_frame",
-    "cuda_nvenc_available",  # lazy
+    "nvenc_gpu_pyav_available",  # lazy
     "cuda_zerocopy_available",
     "enable_cuda_context_sharing",
     "gpu",
     "h264_available",  # lazy
-    "nvenc_available",  # lazy
+    "nvenc_cpu_available",  # lazy
     "pack_binary_message",
     "register_video_encoder",
     "select_transport",
@@ -77,9 +77,9 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .encoders.nvenc import NvencH264Encoder, nvenc_available
-    from .encoders.nvenc_cuda import CudaNvencEncoder, cuda_nvenc_available
-    from .encoders.pyav_h264 import PyAvH264Encoder, h264_available
+    from .encoders.h264_cpu import H264CpuEncoder, h264_available
+    from .encoders.nvenc_cpu import NvencCpuEncoder, nvenc_cpu_available
+    from .encoders.nvenc_gpu_pyav import NvencGpuPyavEncoder, nvenc_gpu_pyav_available
     from .server import serve
 
 
@@ -90,18 +90,18 @@ def __getattr__(name: str):
     about double execution; the H.264 symbols are lazy so base installs without
     the optional ``av`` dependency can still ``import pdum.rfb``.
     """
-    if name in ("PyAvH264Encoder", "h264_available"):
-        from .encoders import pyav_h264
+    if name in ("H264CpuEncoder", "h264_available"):
+        from .encoders import h264_cpu
 
-        return getattr(pyav_h264, name)
-    if name in ("NvencH264Encoder", "nvenc_available"):
-        from .encoders import nvenc
+        return getattr(h264_cpu, name)
+    if name in ("NvencCpuEncoder", "nvenc_cpu_available"):
+        from .encoders import nvenc_cpu
 
-        return getattr(nvenc, name)
-    if name in ("CudaNvencEncoder", "cuda_nvenc_available"):
-        from .encoders import nvenc_cuda
+        return getattr(nvenc_cpu, name)
+    if name in ("NvencGpuPyavEncoder", "nvenc_gpu_pyav_available"):
+        from .encoders import nvenc_gpu_pyav
 
-        return getattr(nvenc_cuda, name)
+        return getattr(nvenc_gpu_pyav, name)
     if name == "serve":
         from . import server
 

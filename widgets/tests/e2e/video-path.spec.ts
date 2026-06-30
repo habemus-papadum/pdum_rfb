@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { type CapturedImage, channelsClose, expectedQuadrantColor, sampleQuadrant } from "../testPattern";
+import { type CapturedImage, matchedRotation, sampleQuadrant } from "../testPattern";
 
 const WS = "ws://127.0.0.1:8770";
 
@@ -35,12 +35,12 @@ test("h264 path decodes the test pattern (gated on WebCodecs avc1 support)", asy
     (window as unknown as { __rfb: { capture(): Promise<unknown> } }).__rfb.capture(),
   )) as CapturedImage & { lastDisplayedSeq: number };
 
-  for (let q = 0; q < 4; q++) {
-    const actual = sampleQuadrant(cap, q);
-    const expectedColor = expectedQuadrantColor(cap.lastDisplayedSeq, q);
-    expect(
-      channelsClose(actual, expectedColor, 30),
-      `quadrant ${q} @ seq ${cap.lastDisplayedSeq}: got ${actual}, want ${expectedColor}`,
-    ).toBe(true);
-  }
+  // Decoded frame must be render_test_pattern(k) for some rotation k (palette colors
+  // in the right spatial cycle); not tied to lastDisplayedSeq (a per-client wire
+  // counter, not the server's render counter). Wider tol for H.264 YUV drift.
+  const quads = [0, 1, 2, 3].map((q) => sampleQuadrant(cap, q));
+  expect(
+    matchedRotation(cap, 30),
+    `quadrants ${JSON.stringify(quads)} (seq ${cap.lastDisplayedSeq}) match no palette rotation`,
+  ).toBeGreaterThanOrEqual(0);
 });

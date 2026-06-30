@@ -1,30 +1,28 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Nehal Patel / pdum.rfb contributors.
 //
-// nvenc_spike.cpp — a thin pybind11 binding over NVIDIA's NvEncoderCuda SDK
-// helper (vendored verbatim under ../third_party). This is the *only* hand-written
-// C++ in the spike; the NVIDIA files are unmodified. It exists to answer two
-// questions cheaply:
+// nvenc_ext.cpp — `pdum.nvenc._nvenc`: a thin pybind11 binding over NVIDIA's
+// NvEncoderCuda SDK helper (vendored verbatim under ../third_party, unmodified —
+// see PROVENANCE.md). This is the *only* hand-written C++ in the package.
 //
-//   1. Does NVIDIA's Video Codec SDK encoder C++ build + run on CPython 3.14
-//      with a current pybind11 (the original PyNvVideoCodec pins pybind11 2.10.0,
-//      which does not)?
-//   2. Can we encode a GPU-resident NV12 frame (from any __cuda_array_interface__
-//      producer: CuPy / PyTorch / Numba) into H.264 Annex B with no host copy,
-//      and see the encode stages in Nsight Systems?
+// It encodes a GPU-resident NV12 frame (from any __cuda_array_interface__ producer
+// — CuPy / PyTorch / Numba) into H.264/HEVC Annex B with no host copy, and needs no
+// PyAV. Built against a current pybind11 (upstream PyNvVideoCodec pins 2.10.0, which
+// can't build on Python 3.14). One CMake target per NVENC ABI (12.1 / 13.0); the
+// Python loader (pdum/nvenc/__init__.py) picks the one the driver supports.
 //
-// It is deliberately minimal: fixed-resolution NV12 in, H.264/HEVC Annex B bytes
-// out, one NvEncoderCuda per instance. The full integration (fitting pdum.rfb's
-// EncoderBackend protocol, reconfigure, SEI, etc.) is out of scope — see
+// Fixed-resolution NV12 in, Annex B bytes out, one NvEncoderCuda per instance.
+//
+// Input path: NvEncoder::GetNextInputFrame() returns an NVENC-owned device surface;
+// NvEncoderCuda::CopyToDeviceFrame does an on-GPU (device->device) NV12 copy into it.
+// That single intra-GPU copy is negligible vs the host round-trip the CPU path pays;
+// true zero-copy (NvEncoder::RegisterResource) is a follow-up. See
 // docs/nvenc_sdk_evaluation.md.
-//
-// Input path: NvEncoder::GetNextInputFrame() returns an NVENC-owned device
-// surface; NvEncoderCuda::CopyToDeviceFrame does an on-GPU (device->device) NV12
-// copy into it. That single intra-GPU copy is negligible vs the host round-trip
-// the CPU path pays; true zero-copy (NvEncoder::RegisterResource) is a follow-up.
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <dlfcn.h>
 
 #include <cstdint>
 #include <cstring>
@@ -80,10 +78,32 @@ static NV_ENC_TUNING_INFO pick_tuning(const std::string &t) {
     throw std::invalid_argument("unknown tuning (want ll/ull/hq): " + t);
 }
 
-class NvencSpike {
+// Does the host driver support the NVENC API version this module was built against?
+// A cheap probe (dlopen + NvEncodeAPIGetMaxSupportedVersion; no encode session) the
+// Python loader uses to pick between the 12.1 and 13.0 ABI builds. Mirrors the check
+// NvEncoder::LoadNvEncApi makes before it would otherwise hard-fail.
+static bool nvenc_supported() {
+    void *h = dlopen("libnvidia-encode.so.1", RTLD_LAZY);
+    if (!h) return false;
+    using GetMaxVer = int (*)(uint32_t *);
+    auto get_max = reinterpret_cast<GetMaxVer>(dlsym(h, "NvEncodeAPIGetMaxSupportedVersion"));
+    bool ok = false;
+    if (get_max) {
+        uint32_t driver_max = 0;
+        if (get_max(&driver_max) == 0) {
+            const uint32_t want = (NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION;
+            ok = want <= driver_max;
+        }
+    }
+    dlclose(h);
+    return ok;
+}
+
+class NvencEncoder {
 public:
-    NvencSpike(int width, int height, const std::string &codec, const std::string &preset,
-               const std::string &tuning, int fps, int gop, int bitrate, int gpu_id, size_t cuda_context)
+    NvencEncoder(int width, int height, const std::string &codec, const std::string &preset,
+               const std::string &tuning, int fps, int gop, int bitrate, int gpu_id, size_t cuda_context,
+               int extra_output_delay)
         : m_width(width), m_height(height) {
         if (width <= 0 || height <= 0 || (width & 1) || (height & 1))
             throw std::invalid_argument("width/height must be positive and even");
@@ -102,8 +122,14 @@ public:
         const bool is_hevc = (codec == "hevc" || codec == "h265");
         GUID codec_guid = is_hevc ? NV_ENC_CODEC_HEVC_GUID : NV_ENC_CODEC_H264_GUID;
 
+        // nExtraOutputDelay drives NvEncoder's output pipeline depth (output delay =
+        // frameIntervalP + lookahead + extra - 1). 0 => zero-latency, synchronous
+        // 1-in-1-out (each encode() returns its own frame's access unit) — what a
+        // low-latency stream wants. Raise it (NVIDIA's default is 3) to overlap encode
+        // with rendering for throughput, at the cost of that many frames of latency.
         m_enc = new NvEncoderCuda(m_ctx, /*cuStream=*/nullptr, (uint32_t)width, (uint32_t)height,
-                                  NV_ENC_BUFFER_FORMAT_NV12);
+                                  NV_ENC_BUFFER_FORMAT_NV12,
+                                  (uint32_t)(extra_output_delay < 0 ? 0 : extra_output_delay));
 
         NV_ENC_INITIALIZE_PARAMS init = {NV_ENC_INITIALIZE_PARAMS_VER};
         NV_ENC_CONFIG cfg = {NV_ENC_CONFIG_VER};
@@ -140,7 +166,7 @@ public:
         m_enc->CreateEncoder(&init);
     }
 
-    ~NvencSpike() { close(); }
+    ~NvencEncoder() { close(); }
 
     py::bytes encode(py::object frame, bool force_idr) {
         PDUM_NVTX_RANGE("pdum.encode");
@@ -230,26 +256,32 @@ private:
     NvEncoderCuda *m_enc = nullptr;
 };
 
-PYBIND11_MODULE(_nvenc_spike, m) {
-    m.doc() = "pdum.rfb encode-only NVENC spike (thin binding over NVIDIA NvEncoderCuda)";
+PYBIND11_MODULE(_nvenc, m) {
+    m.doc() = "pdum.nvenc — GPU NV12 -> H.264/HEVC Annex B via NVIDIA NvEncoderCuda";
 #ifdef USE_NVTX
     m.attr("nvtx_enabled") = true;
 #else
     m.attr("nvtx_enabled") = false;
 #endif
-    py::class_<NvencSpike>(m, "NvencSpike")
-        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, int, size_t>(),
+    m.attr("nvenc_api_version") = (NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION;
+    m.def("supported", &nvenc_supported,
+          "True if the host NVIDIA driver supports this build's NVENC API version "
+          "(used by the loader to pick the 12.1 vs 13.0 ABI).");
+    py::class_<NvencEncoder>(m, "NvencEncoder")
+        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, int, size_t, int>(),
              py::arg("width"), py::arg("height"), py::arg("codec") = "h264", py::arg("preset") = "p3",
              py::arg("tuning") = "ll", py::arg("fps") = 30, py::arg("gop") = 30, py::arg("bitrate") = 0,
-             py::arg("gpu_id") = 0, py::arg("cuda_context") = 0,
+             py::arg("gpu_id") = 0, py::arg("cuda_context") = 0, py::arg("extra_output_delay") = 0,
              "Create an NV12->H.264/HEVC Annex B encoder. Pass cuda_context=0 to retain "
-             "the device primary context (shared with CuPy/PyTorch).")
-        .def("encode", &NvencSpike::encode, py::arg("frame"), py::arg("force_idr") = false,
+             "the device primary context (shared with CuPy/PyTorch). extra_output_delay=0 "
+             "(default) is zero-latency (each encode() returns its own frame); raise it "
+             "to overlap encode with rendering for throughput, at a latency cost.")
+        .def("encode", &NvencEncoder::encode, py::arg("frame"), py::arg("force_idr") = false,
              "Encode one GPU-resident NV12 frame (any __cuda_array_interface__ tensor of "
              "shape (H*3//2, W) uint8). Returns Annex B bytes (may be empty while NVENC fills "
              "its pipeline).")
-        .def("flush", &NvencSpike::flush, "Flush the encoder; returns any remaining Annex B bytes.")
-        .def("close", &NvencSpike::close)
-        .def_property_readonly("width", &NvencSpike::width)
-        .def_property_readonly("height", &NvencSpike::height);
+        .def("flush", &NvencEncoder::flush, "Flush the encoder; returns any remaining Annex B bytes.")
+        .def("close", &NvencEncoder::close)
+        .def_property_readonly("width", &NvencEncoder::width)
+        .def_property_readonly("height", &NvencEncoder::height);
 }

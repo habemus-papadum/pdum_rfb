@@ -40,3 +40,28 @@ export function channelsClose(
     Math.abs(a[2] - b[2]) <= tol
   );
 }
+
+/**
+ * Find the rotation `k` such that every quadrant matches `QUADRANT_COLORS[(q+k)%4]`
+ * within `tol`; returns `k` (0..3) or -1 if none matches.
+ *
+ * Any `render_test_pattern(seq)` frame is the palette cyclically rotated by `seq`
+ * across the four quadrants, so a correctly decoded frame matches exactly one `k`.
+ * We verify the frame's *structure* (the four distinct palette colors in the right
+ * spatial cycle) rather than tying it to a specific seq: the browser-visible
+ * `lastDisplayedSeq` is a per-client wire counter, not the server's render counter
+ * (latest-frame-wins re-numbers per connection), so the two need not be equal.
+ */
+export function matchedRotation(img: CapturedImage, tol: number): number {
+  for (let k = 0; k < 4; k++) {
+    let ok = true;
+    for (let q = 0; q < 4; q++) {
+      if (!channelsClose(sampleQuadrant(img, q), QUADRANT_COLORS[(q + k) % 4], tol)) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return k;
+  }
+  return -1;
+}

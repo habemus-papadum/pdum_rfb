@@ -14,6 +14,14 @@ uv add 'habemus-papadum-rfb[h264]'    # + CPU H.264 (PyAV / libx264)
 `import pdum.rfb` works even without the `h264` extra — the PyAV-dependent
 symbols load lazily, so an image-only deployment never imports `av`.
 
+!!! tip "Developing on this repo?"
+    Clone it and run `./scripts/setup.sh` — one idempotent command bootstraps the
+    whole workspace (Python via `uv sync --frozen`, the browser client, pre-commit
+    hooks). On a Linux box with an NVIDIA GPU and a CUDA toolkit it also builds the
+    PyAV-free NVENC SDK encoder automatically; the `RFB_GPU` env var
+    (`auto` default / `force` / `0`) overrides that. See
+    [Repository & Development](development.md).
+
 ## Mental model
 
 The API is **push**: you own your loop and publish frames into a shared `Display`;
@@ -93,10 +101,14 @@ display.publish(render(state))
 
 `poll_events()` drains the input from **all** connected viewers as a list of
 `InputEvent`s (`client_id`, `principal`, `event`, `received_us`). The `event` dict
-follows a common vocabulary (`pointer_move`, `pointer_down`, `pointer_up`, `wheel`,
-`key_down`, `key_up`, `set_viewport`). In a shared display the publisher owns the
-resolution, so `set_viewport`/`resize` is **informational** (recorded on the event,
-not applied to the frame size). Prefer the single-loop poll style above; an
+follows the [renderview vocabulary](https://github.com/pygfx/renderview) shared by
+jupyter_rfb / pygfx / fastplotlib (`pointer_move`, `pointer_down`, `pointer_up`,
+`wheel`, `key_down`, `key_up`, `resize`): coordinates are **logical** (canvas) pixels,
+`button` is `0=none,1=left,2=right,3=middle`, `buttons` is a tuple of pressed buttons,
+and `modifiers` are capitalized (`"Shift"`, `"Control"`, …). A `resize` (sent on the
+wire as `set_viewport`) carries logical `width`/`height`, physical `pwidth`/`pheight`,
+and `ratio`. In a shared display the publisher owns the resolution, so `resize` is
+**informational** (recorded on the event, not applied to the frame size). Prefer the single-loop poll style above; an
 `async for ev in display.events()` iterator is also available for a dedicated task.
 
 ## Running the server
@@ -181,6 +193,54 @@ Useful flags: `--pattern {test_card,gradient,bouncing_box,counter,checkerboard,s
 publish loop streaming a deterministic pattern, so any browser (or the demo page)
 can connect with no extra setup.
 
+## The rendercanvas backend
+
+If you render with [`wgpu`](https://wgpu-py.readthedocs.io) / `pygfx` / `fastplotlib`,
+`pdum.rfb` ships a [`rendercanvas`](https://rendercanvas.readthedocs.io) backend so your
+scene streams to the browser over this library's transport — the spiritual equivalent of
+`jupyter_rfb`, but with H.264/WebCodecs and per-client backpressure. It is **cross-platform
+(macOS + Linux)**: the rendered frame is downloaded to a host array and published, so no
+CUDA/NVENC is required.
+
+```bash
+uv add 'habemus-papadum-rfb[rendercanvas]'   # the backend; bring your own wgpu + pygfx
+```
+
+```python
+import asyncio
+import pdum.rfb as rfb
+from pdum.rfb.rendercanvas import RfbRenderCanvas, loop
+import pygfx
+
+async def main():
+    display = await rfb.serve(1280, 720, port=8765)         # normal pdum.rfb server
+    canvas = RfbRenderCanvas(display=display, size=(1280, 720))
+    renderer = pygfx.renderers.WgpuRenderer(canvas)
+    scene, camera = build_scene()                            # your pygfx scene
+    pygfx.OrbitController(camera, register_events=renderer)  # mouse/keyboard control
+
+    def animate():
+        renderer.render(scene, camera)
+        canvas.request_draw(animate)
+
+    canvas.request_draw(animate)
+    try:
+        await loop.run_async()                               # runs on the current asyncio loop
+    finally:
+        await display.aclose()
+
+asyncio.run(main())
+```
+
+How it fits the push model: each rendered frame is `publish()`ed to the `Display`, and
+browser input (pointer / wheel / key) is drained from the display and delivered to the
+**canvas** event system — so `pygfx` controllers just work. (With this backend you do *not*
+call `display.poll_events()` yourself; the backend drains it.) The canvas size is the
+render resolution and what gets published; browser resize is informational (the publisher
+owns the resolution). Keep the size **even** for the H.264 path. See
+[the design doc](rendercanvas_backend.md) for internals and the (separate, Linux-only)
+zero-copy GPU track.
+
 ## Encoders
 
 You rarely construct an encoder directly — `serve()` does it via
@@ -189,11 +249,11 @@ You rarely construct an encoder directly — `serve()` does it via
 - **`ImageEncoder(mode="jpeg"|"png"|"webp", quality=80)`** — one independent
   image per frame (always a keyframe). Great for snapshots, stills, and mostly
   static plots. Use JPEG/WebP while interacting, PNG for a lossless final still.
-- **`PyAvH264Encoder(width, height, fps, bitrate, codec_string)`** — CPU H.264
+- **`H264CpuEncoder(width, height, fps, bitrate, codec_string)`** — CPU H.264
   via libx264, emitting **Annex B** access units for WebCodecs. Configured for low
   latency (`ultrafast`/`zerolatency`, no B-frames, periodic IDR). Forced keyframes
   are real IDRs with in-band SPS/PPS.
-- **`NvencH264Encoder(width, height, fps, bitrate, codec_string)`** — hardware
+- **`NvencCpuEncoder(width, height, fps, bitrate, codec_string)`** — hardware
   H.264 on an NVIDIA GPU via **NVENC**. A drop-in for the libx264 encoder (same
   Annex B output, same forced-IDR/no-B-frame low-latency config) that offloads
   encoding to the GPU, freeing the CPU and lowering encode latency. Requires a
@@ -202,12 +262,12 @@ You rarely construct an encoder directly — `serve()` does it via
 Check availability and self-test at runtime:
 
 ```python
-from pdum.rfb.encoders.pyav_h264 import libx264_available, self_test
-assert libx264_available()
+from pdum.rfb.encoders.h264_cpu import h264_cpu_available, self_test
+assert h264_cpu_available()
 assert self_test()   # encodes a few frames and decodes them back with PyAV
 
-from pdum.rfb import nvenc_available
-if nvenc_available():       # OS + PyAV `h264_nvenc` + a real GPU open all checked
+from pdum.rfb import nvenc_cpu_available
+if nvenc_cpu_available():       # OS + PyAV `h264_nvenc` + a real GPU open all checked
     ...                     # serve() will then auto-select the GPU encoder
 ```
 
@@ -228,13 +288,13 @@ uv add 'habemus-papadum-rfb[nvenc]'   # same PyAV wheel as [h264]; documents int
 back automatically otherwise:
 
 ```python
-server = await serve(source_factory)                 # GPU if available, else CPU
-server = await serve(source_factory, has_nvenc=False) # force the CPU libx264 path
+display = await serve(1280, 720)                 # GPU if available, else CPU
+display = await serve(1280, 720, has_nvenc=False) # force the CPU libx264 path
 ```
 
 From the CLI, `--no-nvenc` forces the CPU path and `--force-image` disables H.264
 entirely; the startup line prints which encoder was selected. Availability is
-verified at runtime by `nvenc_available()` (caches its result and retries the GPU
+verified at runtime by `nvenc_cpu_available()` (caches its result and retries the GPU
 probe, since consumer cards cap concurrent NVENC sessions).
 
 ### Zero-copy GPU encoding (CUDA → NVENC)
@@ -252,15 +312,26 @@ display.publish(render_on_gpu())             # a CuPy (H, W, 3) uint8 array
 ```
 
 This is ~2.4–4.3× lower per-frame latency than the host path and frees the CPU.
-It **requires PyAV ≥ 18** (gated by `rfb.cuda_zerocopy_available()`); on PyAV 17.x a
-pure-Python workaround is impossible, so you build PyAV from source. Full details,
-the conversion helpers, and the build recipe are in
+
+`serve(gpu=True)` chooses between **two** GPU backends automatically:
+
+- **`nvenc_gpu_pdum`** (preferred) — the PyAV-free NVIDIA Video Codec SDK encoder from the
+  sibling package `habemus-papadum-nvenc` (`import pdum.nvenc`). It needs **no PyAV
+  at all**, so it works today on Python 3.14 with a single `pip install`
+  (`habemus-papadum-rfb[gpu-nvenc-sdk]`). Gated by `nvenc_gpu_pdum_available()`. It's
+  the fastest path measured — see [the SDK evaluation](nvenc_sdk_evaluation.md).
+- **`nvenc_gpu_pyav`** (fallback) — the `from_dlpack` → `h264_nvenc` path above. It
+  **requires PyAV ≥ 18** (gated by `rfb.cuda_zerocopy_available()`); on PyAV 17.x a
+  pure-Python workaround is impossible, so you build PyAV from source.
+
+If neither is usable, `serve(gpu=True)` raises at startup. Full details, the
+conversion helpers, and the build recipe are in
 [the GPU zero-copy guide](gpu_zerocopy.md).
 
 ### Registering a custom encoder
 
-The video-encoder registry is the extension seam (this is where an NVENC backend
-would slot in):
+The video-encoder registry is the extension seam — the `nvenc_cpu`, `nvenc_gpu_pyav`, and
+`nvenc_gpu_pdum` backends all ride it, and your own encoder slots in the same way:
 
 ```python
 from pdum.rfb import register_video_encoder
@@ -289,8 +360,8 @@ select_transport(["webcodecs/h264-annexb", "image/jpeg"], has_h264=True)
 Policy (guide §12): prefer H.264 when the client supports `avc1` **and** a video
 encoder is available (NVENC preferred over libx264 when present), otherwise fall
 back to the best shared image format. `serve()` sets `has_nvenc` from
-`nvenc_available()` and then builds the registered `"nvenc"` encoder instead of
-`"pyav"`; the transport negotiation itself is identical either way.
+`nvenc_cpu_available()` and then builds the registered `"nvenc_cpu"` encoder instead of
+`"h264_cpu"`; the transport negotiation itself is identical either way.
 
 ## Backpressure & timestamps
 
@@ -358,7 +429,7 @@ uv run python -m pdum.rfb.server --adaptive --pattern checkerboard
 ```
 
 ```python
-server = await serve(source_factory, adaptive=True)   # or RfbServer(..., adaptive=True)
+display = await serve(1280, 720, adaptive=True)
 ```
 
 The policy lives in the pure `AdaptiveQualityController` (thresholds, factors, and

@@ -94,7 +94,7 @@ async def test_feed_parks_until_publish():
 async def test_poll_events_drains_and_tags_identity():
     d = Display(16, 16)
     feed = d._make_feed("client-1", {"email": "a@b.c"})
-    await feed.handle_event({"type": "pointer_move", "x": 1, "y": 2, "buttons": 0})
+    await feed.handle_event({"type": "pointer_move", "x": 1, "y": 2, "buttons": []})
     await feed.handle_event({"type": "key_down", "key": "a"})
     evs = d.poll_events()
     assert [e.event["type"] for e in evs] == ["pointer_move", "key_down"]
@@ -106,8 +106,10 @@ async def test_poll_events_drains_and_tags_identity():
 async def test_resize_is_informational_only():
     d = Display(64, 48)
     feed = d._make_feed("a", None)
-    await feed.handle_event({"type": "set_viewport", "width": 128, "height": 96, "pixel_ratio": 2})
-    assert feed.viewport == (128, 96, 2.0)
+    await feed.handle_event(
+        {"type": "set_viewport", "width": 64, "height": 48, "pwidth": 128, "pheight": 96, "ratio": 2}
+    )
+    assert feed.viewport == (128, 96, 2.0)  # tracks the physical (render-buffer) size
     assert (d.width, d.height) == (64, 48)  # publisher owns resolution, not the client
     assert d.poll_events()[0].event["type"] == "set_viewport"
 

@@ -3,8 +3,10 @@
 This evaluates **PyNvVideoCodec** (NVIDIA's Python binding over the Video Codec SDK
 encoder, `NvEncoderCuda`) as an alternative GPU H.264/HEVC backend for `pdum.rfb`,
 versus the current PyAV `h264_nvenc` path. The source drop lives in
-`vendor/PyNvVideoCodec_2.1.0/` (gitignored); a working **encode-only spike** lives
-in `vendor/nvenc-encode-spike/` (committed). For the PyAV path this complements, see
+`vendor/PyNvVideoCodec_2.1.0/` (gitignored). The encode-only spike that proved this
+out has since been **productionized** as the `packages/nvenc/` workspace package —
+**`habemus-papadum-nvenc`** (`import pdum.nvenc`), published to PyPI, shipping both
+NVENC 12.1 and 13.0 ABIs. For the PyAV path this complements, see
 [GPU zero-copy encoding](gpu_zerocopy.md).
 
 ## TL;DR
@@ -53,10 +55,10 @@ source:
 
 ## Spike results
 
-`vendor/nvenc-encode-spike/` is a thin pybind11 binding over NVIDIA's **verbatim**
+`packages/nvenc/` is a thin pybind11 binding over NVIDIA's **verbatim**
 `NvEncoderCuda` (under `third_party/`, MIT, unmodified — see `PROVENANCE.md`), with
-all our code + NVTX instrumentation in `src/`. Measured on this box (RTX 4090 Laptop,
-driver R580, Ubuntu 24.04, CUDA 12.5/13.0):
+all our code + NVTX instrumentation in `src/cpp/nvenc_ext.cpp`. Measured on this box
+(RTX 4090 Laptop, driver R580, Ubuntu 24.04, CUDA 12.5/13.0):
 
 | Check | Result |
 | ----- | ------ |
@@ -64,7 +66,8 @@ driver R580, Ubuntu 24.04, CUDA 12.5/13.0):
 | Encode GPU-resident NV12 from a **CuPy** CAI tensor, no host copy | ✅ 60 frames @1080p |
 | Output is valid **H.264 Annex B** (in-band SPS/PPS) | ✅ start code `00 00 00 01 67`, decoded back by PyAV |
 | **No PyAV** in the encode path | ✅ (PyAV used only to *verify* the bitstream) |
-| Self-contained **wheel** (`auditwheel`, excl. driver libs) | ✅ `pdum_rfb_nvenc_sdk-…-cp314-…manylinux_2_34…whl`, 112 KB |
+| Self-contained **wheel** (`auditwheel`, excl. driver libs) | ✅ `habemus_papadum_nvenc-…-cp314-…manylinux…whl`, ~223 KB (both ABIs) |
+| **Dual NVENC ABI** (12.1 + 13.0) selected by driver at import | ✅ loads `_nvenc_130` on R580; `_nvenc_121` Annex B decodes too |
 | Wheel in a **clean venv** (`env -i`, no `LD_LIBRARY_PATH`/system ffmpeg) | ✅ imports + encodes; needs only the host driver |
 | **NVTX** profiling build (`USE_NVTX=ON`) | ✅ compiles; ranges active |
 
@@ -97,29 +100,35 @@ makes awkward — most likely **live `Reconfigure()`** for adaptive bitrate (pai
 deciding factor is PyAV 18's release timing: once it ships, our path is a one-line
 install and the SDK's main advantage (no PyAV) evaporates.
 
-## Integration plan (if we pursue it)
+## Integration plan
 
 It slots into the existing encoder seam; the architecture already anticipated this.
+**All steps are done.**
 
-1. **Promote the spike** to a maintained encode-only package (the `third_party/`
-   verbatim subset + our binding), built into a wheel hosted on **GitHub Releases**
-   (`build-wheel.sh` already does this). True zero-copy via `RegisterResource`.
-2. **New backend** `encoders/nvenc_sdk.py` registered as `"nvenc_sdk"` via
-   `register_video_encoder(...)` — the same seam `nvenc_cuda.py` uses. Implement the
-   `EncoderBackend` protocol: fixed-resolution, keyframe-on-resize, monotonic
-   timestamps, latest-frame-wins. Feed it our on-GPU `gpu.rgb_to_nv12` output (one
-   contiguous NV12 buffer — exactly NVENC's input layout). Map `request_keyframe` →
-   `NV_ENC_PIC_FLAG_FORCEIDR`; low-latency tuning, ~1 s IDR cadence, no B-frames,
-   `repeatSPSPPS=1` (in-band parameter sets — the spike already sets these).
-3. **Availability probe** `nvenc_sdk_available()` (import the built module + a
-   one-frame self-test), mirroring `gpu.cuda_zerocopy_available()`. `serve(gpu=True)`
-   prefers whichever backend is present (SDK or PyAV).
-4. **Context sharing reused as-is**: `enable_cuda_context_sharing()` and the
-   CuPy/PyTorch/JAX primary-context story carry over — the binding takes a
-   `cuda_context`, so we hand it the shared primary context.
-5. **Extra**: `habemus-papadum-rfb[gpu-nvenc-sdk]` already exists in `pyproject.toml`
-   (pulls CuPy; the SDK wheel installs from Releases, since PyPI forbids the
-   direct-reference URL — same pattern as the PyAV wheel).
+1. ✅ **Promoted** to the maintained encode-only package `packages/nvenc/`
+   (`habemus-papadum-nvenc`, `import pdum.nvenc`) — the `third_party/` verbatim subset
+   + our binding, built into a self-contained wheel (`build-wheel.sh`) and **published
+   to PyPI** by `scripts/publish.sh`. Ships both NVENC **12.1 + 13.0** ABIs, selected
+   by the driver at import. True zero-copy via `RegisterResource` is still a follow-up.
+2. ✅ **New backend** `encoders/nvenc_gpu_pdum.py` (`NvencGpuPdumEncoder`, registered
+   `"nvenc_gpu_pdum"`) implements the `EncoderBackend` protocol: fixed-resolution (resize
+   rebuilds + keyframes via the session's `encoder_factory`), real timestamps,
+   `force_keyframe → NV_ENC_PIC_FLAG_FORCEIDR`, in-band SPS/PPS, no B-frames. It feeds
+   the encoder our on-GPU `gpu.rgb_to_nv12` output (CUDA `nv12` frames pass straight
+   through). **Zero-latency** is essential here: NvEncoder's default `nExtraOutputDelay=3`
+   delays output by 3 frames (~100 ms) *and* makes a single `encode()` return a *later*
+   frame's AU — wrong seq attribution. The binding exposes `extra_output_delay` and the
+   backend sets it to **0** (synchronous 1-in-1-out), so each AU returns from its own
+   `encode()` call.
+3. ✅ **Availability probe** `nvenc_gpu_pdum_available()` (CuPy + `pdum.nvenc`
+   importable + a real two-frame encode, no decode so it stays PyAV-free; cached).
+   `serve(gpu=True)` **prefers** the SDK backend when present, else `nvenc_gpu_pyav` (PyAV≥18).
+4. ✅ **Context sharing reused as-is**: the binding takes `cuda_context=0` → retains the
+   device **primary** context (the one CuPy uses), so device pointers are valid to NVENC
+   with no cross-context copy. NVTX ranges are compiled in by default (header-only).
+5. ✅ **Extra**: `habemus-papadum-rfb[gpu-nvenc-sdk]` pulls `habemus-papadum-nvenc`
+   (the SDK wheel) **+ CuPy** straight from PyPI — a normal dependency, since the SDK
+   source is MIT and the wheel is clean to publish (unlike the LGPL PyAV-18 wheel).
 
 ## Licensing
 
@@ -127,4 +136,4 @@ PyNvVideoCodec and the SDK headers are **MIT** (per-file headers preserved in
 `third_party/`); our binding/build code is MIT. A built wheel carries MIT
 obligations only and bundles **no** `libcuda`/`libnvidia-encode` — those are host
 driver components. To refresh against a newer SDK, re-copy the files listed in
-`vendor/nvenc-encode-spike/PROVENANCE.md`.
+`packages/nvenc/PROVENANCE.md`.

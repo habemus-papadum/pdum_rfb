@@ -1,0 +1,44 @@
+# habemus-papadum-nvenc (import: pdum.nvenc) — GPU NV12 -> H.264/HEVC Annex B via
+# NVIDIA's Video Codec SDK encoder, no PyAV. A workspace member of pdum_rfb.
+#
+# Build/publish via scripts/publish.sh (which runs build-wheel.sh + auditwheel). A
+# build needs the CUDA toolkit; the wheel needs only the host NVIDIA driver.
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "habemus-papadum-nvenc"
+# Kept in lockstep with habemus-papadum-rfb by scripts/release.sh (the "-alpha" dev
+# suffix is the release script's convention; PEP 440 canonicalizes it to 0.1.0a0).
+version = "0.1.0-alpha"
+description = "Zero-PyAV GPU H.264/HEVC encode (NVIDIA Video Codec SDK / NVENC) for pdum.rfb"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Nehal Patel" }]
+keywords = ["nvenc", "h264", "hevc", "cuda", "gpu", "video", "encoder"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Repository = "https://github.com/habemus-papadum/pdum_rfb"
+Documentation = "https://github.com/habemus-papadum/pdum_rfb"
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.21"
+cmake.build-type = "Release"
+# Ships the pdum.nvenc namespace package; the CMake install drops the _nvenc_* .so
+# into pdum/nvenc/. No pdum/__init__.py -> PEP 420 namespace shared with pdum.rfb.
+wheel.packages = ["src/pdum"]
+
+# NVTX profiling ranges are ON by default: header-only, no runtime lib bundled, and a
+# no-op (a few ns/range) when no profiler is attached — so released wheels are
+# Nsight-profileable for free. Override with -C cmake.define.USE_NVTX=OFF to disable.
+[tool.scikit-build.cmake.define]
+USE_NVTX = "ON"

@@ -53,7 +53,7 @@ async def test_handshake_event_and_side_channel():
             assert header["type"] == "image_frame" and header["seq"] == 0
             assert header["width"] == 64 and header["height"] == 48 and len(payload) > 0
 
-            move = {"type": "pointer_move", "x": 5, "y": 6, "buttons": 1}
+            move = {"type": "pointer_move", "x": 5, "y": 6, "buttons": [1]}
             await ws.send(json.dumps({"type": "event", "event": move}))
             for _ in range(50):
                 if display.recorded:

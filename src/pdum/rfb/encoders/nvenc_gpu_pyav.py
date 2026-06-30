@@ -1,6 +1,6 @@
 """Zero-copy CUDA → NVENC H.264 encoder (the roadmap's GPU-buffer path).
 
-Unlike :class:`~pdum.rfb.encoders.nvenc.NvencH264Encoder` — which takes a host
+Unlike :class:`~pdum.rfb.encoders.nvenc.NvencCpuEncoder` — which takes a host
 ``rgb24`` frame, reformats it to ``yuv420p`` on the CPU, and lets NVENC upload it
 — this backend encodes a **CUDA-resident** frame directly: a CuPy / DLPack NV12
 buffer is handed to ``h264_nvenc`` via ``av.VideoFrame.from_dlpack`` with no host
@@ -29,25 +29,25 @@ from fractions import Fraction
 
 from ..gpu import cuda_zerocopy_available, enable_cuda_context_sharing, nv12_planes, rgb_to_nv12
 from ..protocol import DEFAULT_H264_CODEC
-from .nvenc import _NVENC_CODEC, NVENC_MIN_WIDTH
-from .pyav_h264 import PyAvH264Encoder
+from .h264_cpu import H264CpuEncoder
+from .nvenc_cpu import _NVENC_CODEC, NVENC_MIN_WIDTH
 
 
-def cuda_nvenc_available() -> bool:
+def nvenc_gpu_pyav_available() -> bool:
     """True if the zero-copy CUDA→NVENC path is usable (see :func:`cuda_zerocopy_available`)."""
     return cuda_zerocopy_available()
 
 
-class CudaNvencEncoder(PyAvH264Encoder):
+class NvencGpuPyavEncoder(H264CpuEncoder):
     """Encode CUDA (or host, with upload) frames to H.264 Annex B via NVENC, zero-copy.
 
-    Drop-in for :class:`~pdum.rfb.encoders.nvenc.NvencH264Encoder` (same
+    Drop-in for :class:`~pdum.rfb.encoders.nvenc.NvencCpuEncoder` (same
     constructor / ``EncoderBackend`` interface); only the input handling differs.
     Frames narrower than :data:`~pdum.rfb.encoders.nvenc.NVENC_MIN_WIDTH` are
     rejected (NVENC cannot open below it), and dimensions must be even (NV12).
     """
 
-    encoder_label = "pyav-nvenc-cuda"
+    encoder_label = "nvenc-gpu-pyav"
 
     def __init__(
         self,
@@ -119,7 +119,7 @@ class CudaNvencEncoder(PyAvH264Encoder):
                 raise ValueError(f"nv12 frame shape {packed.shape!r} != encoder {self._nv12.shape!r}")
             return packed
         if frame.pixel_format not in ("rgb24", "rgba8"):
-            raise TypeError(f"CudaNvencEncoder cannot encode {frame.pixel_format!r} frames")
+            raise TypeError(f"NvencGpuPyavEncoder cannot encode {frame.pixel_format!r} frames")
         # rgb24/rgba8, CUDA or host: convert (uploading first if host) into the
         # reusable staging buffer. delay=0 means the prior frame is fully consumed
         # before we overwrite, so a single reused buffer is safe.
@@ -148,7 +148,7 @@ class CudaNvencEncoder(PyAvH264Encoder):
 
 def self_test(width: int = 256, height: int = 256, frames: int = 8) -> bool:
     """Encode a few synthetic CUDA NV12 frames via zero-copy NVENC and decode back."""
-    if not cuda_nvenc_available():
+    if not nvenc_gpu_pyav_available():
         return False
 
     import cupy as cp
@@ -157,7 +157,7 @@ def self_test(width: int = 256, height: int = 256, frames: int = 8) -> bool:
     from ..testing import decode_annexb
 
     width = max(width, NVENC_MIN_WIDTH)
-    enc = CudaNvencEncoder(width=width, height=height, fps=int(frames))
+    enc = NvencGpuPyavEncoder(width=width, height=height, fps=int(frames))
     chunks: list[bytes] = []
     for seq in range(frames):
         nv12 = cp.empty((height + height // 2, width), cp.uint8)

@@ -1,9 +1,10 @@
-// DOM event -> normalized event vocabulary. The server is sent framebuffer-pixel
-// coordinates (CSS coords scaled by the effective backing ratio), so it maps 1:1
-// to its render buffer. Pure helpers here are unit-tested in node.
+// DOM event -> normalized event vocabulary (the renderview spec; see eventTypes.ts).
+// The server is sent *logical* canvas coordinates (CSS pixels relative to the canvas,
+// top-left origin); the publisher owns the render resolution and maps logical -> its
+// own framebuffer using the `ratio` carried on resize events. Pure helpers here are
+// unit-tested in node.
 
 import {
-  type BackingGeometry,
   LINE_HEIGHT_PX,
   type Modifier,
   type ModifierSource,
@@ -16,29 +17,45 @@ export * from "./eventTypes";
 
 export function extractModifiers(ev: ModifierSource): Modifier[] {
   const mods: Modifier[] = [];
-  if (ev.shiftKey) mods.push("shift");
-  if (ev.ctrlKey) mods.push("ctrl");
-  if (ev.altKey) mods.push("alt");
-  if (ev.metaKey) mods.push("meta");
+  if (ev.shiftKey) mods.push("Shift");
+  if (ev.ctrlKey) mods.push("Control");
+  if (ev.altKey) mods.push("Alt");
+  if (ev.metaKey) mods.push("Meta");
   return mods;
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v;
+/** Map a DOM `MouseEvent.button` to the renderview button (0=none,1=left,2=right,3=middle). */
+export function mapButton(domButton: number): number {
+  switch (domButton) {
+    case 0:
+      return 1; // left
+    case 1:
+      return 3; // middle
+    case 2:
+      return 2; // right
+    case 3:
+      return 4; // back
+    case 4:
+      return 5; // forward
+    default:
+      return 0; // none (DOM uses -1 for pointermove with no button change)
+  }
 }
 
-/** Map a CSS-space point to integer framebuffer pixel coordinates. */
-export function pointerToFramebuffer(
-  cssX: number,
-  cssY: number,
-  geom: BackingGeometry,
-): { x: number; y: number } {
-  const sx = geom.cssWidth > 0 ? geom.backingWidth / geom.cssWidth : 1;
-  const sy = geom.cssHeight > 0 ? geom.backingHeight / geom.cssHeight : 1;
-  return {
-    x: clamp(Math.round(cssX * sx), 0, Math.max(0, geom.backingWidth - 1)),
-    y: clamp(Math.round(cssY * sy), 0, Math.max(0, geom.backingHeight - 1)),
-  };
+/** Map a DOM `MouseEvent.buttons` bitmask to a renderview tuple of pressed buttons. */
+export function mapButtons(domButtons: number): number[] {
+  const out: number[] = [];
+  if (domButtons & 1) out.push(1); // left
+  if (domButtons & 2) out.push(2); // right
+  if (domButtons & 4) out.push(3); // middle
+  if (domButtons & 8) out.push(4); // back
+  if (domButtons & 16) out.push(5); // forward
+  return out;
+}
+
+/** Map a CSS-space point to logical canvas coordinates (top-left origin). */
+export function pointerToCanvas(cssX: number, cssY: number, rect: DOMRect): { x: number; y: number } {
+  return { x: cssX - rect.left, y: cssY - rect.top };
 }
 
 /** Normalize a wheel delta to pixels (deltaMode 0=pixel, 1=line, 2=page). */
@@ -48,35 +65,36 @@ export function wheelDeltaToPixels(delta: number, deltaMode: number, pageSizePx:
   return delta;
 }
 
-export function normalizePointerEvent(
-  ev: PointerEvent,
-  rect: DOMRect,
-  geom: BackingGeometry,
-): NormalizedPointerEvent {
-  const { x, y } = pointerToFramebuffer(ev.clientX - rect.left, ev.clientY - rect.top, geom);
+export function normalizePointerEvent(ev: PointerEvent, rect: DOMRect): NormalizedPointerEvent {
+  const { x, y } = pointerToCanvas(ev.clientX, ev.clientY, rect);
   const type =
     ev.type === "pointerdown"
       ? "pointer_down"
       : ev.type === "pointerup"
         ? "pointer_up"
         : "pointer_move";
-  return { type, x, y, button: ev.button, buttons: ev.buttons, modifiers: extractModifiers(ev) };
+  return {
+    type,
+    x,
+    y,
+    button: mapButton(ev.button),
+    buttons: mapButtons(ev.buttons),
+    modifiers: extractModifiers(ev),
+    timestamp: ev.timeStamp / 1000,
+  };
 }
 
-export function normalizeWheelEvent(
-  ev: WheelEvent,
-  rect: DOMRect,
-  geom: BackingGeometry,
-): NormalizedWheelEvent {
-  const { x, y } = pointerToFramebuffer(ev.clientX - rect.left, ev.clientY - rect.top, geom);
+export function normalizeWheelEvent(ev: WheelEvent, rect: DOMRect): NormalizedWheelEvent {
+  const { x, y } = pointerToCanvas(ev.clientX, ev.clientY, rect);
   return {
     type: "wheel",
     x,
     y,
-    dx: wheelDeltaToPixels(ev.deltaX, ev.deltaMode, geom.cssWidth),
-    dy: wheelDeltaToPixels(ev.deltaY, ev.deltaMode, geom.cssHeight),
-    mode: "pixel",
+    dx: wheelDeltaToPixels(ev.deltaX, ev.deltaMode, rect.width),
+    dy: wheelDeltaToPixels(ev.deltaY, ev.deltaMode, rect.height),
+    buttons: mapButtons(ev.buttons),
     modifiers: extractModifiers(ev),
+    timestamp: ev.timeStamp / 1000,
   };
 }
 
@@ -86,6 +104,7 @@ export function normalizeKeyEvent(ev: KeyboardEvent): NormalizedKeyEvent {
     key: ev.key,
     code: ev.code,
     modifiers: extractModifiers(ev),
+    timestamp: ev.timeStamp / 1000,
   };
 }
 

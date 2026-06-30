@@ -4,7 +4,7 @@ Stream a **GPU-resident** framebuffer straight to NVENC with **no host copy**: a
 CUDA NV12 (or RGB) buffer — a CuPy / PyTorch / any `__dlpack__` tensor — is handed
 to `h264_nvenc` via PyAV's `VideoFrame.from_dlpack`, and the encoder reads device
 memory directly. This is the GPU counterpart to the host
-[`NvencH264Encoder`](guide_python.md), which uploads host `rgb24` and reformats to
+[`NvencCpuEncoder`](guide_python.md), which uploads host `rgb24` and reformats to
 `yuv420p` on the CPU first.
 
 For a render-on-GPU scientific pipeline this removes the CPU color-conversion and
@@ -95,7 +95,7 @@ runs an actual one-frame encode to be sure, and caches the result):
 
 1. **CuPy** — `cupy-cuda13x` / `cupy-cuda12x` (cp314 wheels exist; works on 3.14).
 2. **An NVENC-capable GPU + driver** — same gate as the host NVENC backend
-   (`pdum.rfb.encoders.nvenc.nvenc_available()`).
+   (`pdum.rfb.encoders.nvenc.nvenc_cpu_available()`).
 3. **PyAV that can *encode* CUDA frames — PyAV ≥ 18.** `from_dlpack` (frame
    *creation*) is in 17.0, but feeding a CUDA frame to an encoder — adopting the
    frame's `hw_frames_ctx` before `avcodec_open2` — lands in **18.0**
@@ -272,17 +272,17 @@ All of `pdum.rfb.gpu` lazy-imports CuPy, so importing it is always safe.
 | `cuda_frame(array, *, pixel_format="auto", ...)` | Wrap a device tensor as a CUDA `RawFrame` for `publish()`. |
 | `to_host_rgb(frame)` | Download a CUDA frame to host `rgb24` (used by the image fallback). |
 | `HostFrameAdapter(inner)` | Wrap a host encoder so it tolerates CUDA frames (downloads first). |
-| `CudaNvencEncoder` | The `EncoderBackend` (registered as `"nvenc_cuda"`). |
+| `NvencGpuPyavEncoder` | The `EncoderBackend` (registered as `"nvenc_gpu_pyav"`). |
 
 `publish()` accepts a CuPy `(H,W,3|4)` tensor directly (or a `cuda_frame` for NV12),
-and `serve(gpu=True)` selects `CudaNvencEncoder` for every viewer.
+and `serve(gpu=True)` selects `NvencGpuPyavEncoder` for every viewer.
 
 ## Architecture & integration
 
 - `RawFrame.memory == "cuda"` (the type already modelled this) carries the device
   tensor; `Display.publish` tags CuPy/DLPack tensors automatically.
-- `CudaNvencEncoder` (`encoders/nvenc_cuda.py`) subclasses the host
-  `PyAvH264Encoder`, swapping only the input handling: it accepts a CUDA `nv12`
+- `NvencGpuPyavEncoder` (`encoders/nvenc_gpu_pyav.py`) subclasses the host
+  `H264CpuEncoder`, swapping only the input handling: it accepts a CUDA `nv12`
   frame (true zero-copy), a CUDA `rgb24`/`rgba8` frame (on-GPU convert first), or a
   host frame (uploaded then converted — a graceful fallback). It reuses one
   contiguous NV12 staging buffer (safe because `delay=0` consumes each frame before
@@ -326,7 +326,7 @@ the PyAV-18 dependency but adds a build step and a hand-maintained binding. If t
 SDK source is available, the most interesting evaluation is whether a thin
 PyNvVideoCodec build (or a minimal `cffi` shim) can match the PyAV path's latency
 while accepting the *same* DLPack frames `gpu.cuda_frame` already produces — in
-which case it could slot in behind the same `register_video_encoder("nvenc_cuda",
+which case it could slot in behind the same `register_video_encoder("nvenc_gpu_pyav",
 ...)` seam.
 
 ## Caveats

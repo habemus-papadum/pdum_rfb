@@ -95,14 +95,18 @@ async def test_keyframe_forced_after_drop():
 
 async def test_event_and_set_viewport_reach_source():
     session, _, source = _make_session()
-    await session._handle_control({"type": "event", "event": {"type": "pointer_move", "x": 10, "y": 20, "buttons": 1}})
+    await session._handle_control(
+        {"type": "event", "event": {"type": "pointer_move", "x": 10, "y": 20, "buttons": [1]}}
+    )
     assert source.events[-1]["type"] == "pointer_move"
     assert source.events[-1]["x"] == 10
 
-    await session._handle_control({"type": "set_viewport", "width": 800, "height": 600, "pixel_ratio": 2})
-    assert source.current_size == (800, 600)
+    await session._handle_control(
+        {"type": "set_viewport", "width": 400, "height": 300, "pwidth": 800, "pheight": 600, "ratio": 2}
+    )
+    assert source.current_size == (800, 600)  # source renders at the physical size
     assert source.events[-1]["type"] == "resize"
-    assert source.events[-1]["width"] == 800
+    assert source.events[-1]["pwidth"] == 800
 
 
 async def test_encoder_rebuilt_and_keyframe_forced_on_size_change():
