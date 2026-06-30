@@ -60,12 +60,12 @@
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
-            <a id="prevFileLink" class="nav" href="z_2fafe82766576da9_pyav_h264_py.html">&#xab; prev</a> &nbsp; &nbsp;
+            <a id="prevFileLink" class="nav" href="z_2fafe82766576da9_nvenc_gpu_pyav_py.html">&#xab; prev</a> &nbsp; &nbsp;
             <a id="indexLink" class="nav" href="index.html">&Hat; index</a> &nbsp; &nbsp;
             <a id="nextFileLink" class="nav" href="z_6034c9c2e63fb306_metrics_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-06-30 13:52 +0000
+            created at 2026-06-30 20:10 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -85,7 +85,7 @@
     <p class="pln"><span class="n"><a id="t3" href="#t3">3</a></span><span class="t"><span class="str">This module lets a CUDA-resident frame (a CuPy / PyTorch / any ``__dlpack__`` or</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t4" href="#t4">4</a></span><span class="t"><span class="str">``__cuda_array_interface__`` tensor) be encoded by NVENC **without a round-trip</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t5" href="#t5">5</a></span><span class="t"><span class="str">through host memory** &#8212; the encoder reads the device buffer directly. It is the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t6" href="#t6">6</a></span><span class="t"><span class="str">zero-copy counterpart to :mod:`pdum.rfb.encoders.nvenc` (which uploads host</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t6" href="#t6">6</a></span><span class="t"><span class="str">zero-copy counterpart to :mod:`pdum.rfb.encoders.nvenc_cpu` (which uploads host</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t7" href="#t7">7</a></span><span class="t"><span class="str">``rgb24`` and reformats to ``yuv420p`` on the CPU first).</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t8" href="#t8">8</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t9" href="#t9">9</a></span><span class="t"><span class="str">Everything here lazy-imports CuPy, so ``import pdum.rfb.gpu`` is always safe; the</span>&nbsp;</span><span class="r"></span></p>
@@ -439,7 +439,7 @@
     <p class="pln"><span class="n"><a id="t357" href="#t357">357</a></span><span class="t">    <span class="str">"""True if the zero-copy CUDA&#8594;NVENC path is usable in this process (cached).</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t358" href="#t358">358</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t359" href="#t359">359</a></span><span class="t"><span class="str">    Checks, in order: CuPy importable; an NVENC-capable GPU/driver</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t360" href="#t360">360</a></span><span class="t"><span class="str">    (:func:`pdum.rfb.encoders.nvenc.nvenc_available`); and that PyAV can actually</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t360" href="#t360">360</a></span><span class="t"><span class="str">    (:func:`pdum.rfb.encoders.nvenc_cpu.nvenc_cpu_available`); and that PyAV can actually</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t361" href="#t361">361</a></span><span class="t"><span class="str">    encode a CUDA frame (PyAV &#8805; 18 or a from-source build with the fix). The</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t362" href="#t362">362</a></span><span class="t"><span class="str">    self-test opens an NVENC session, so it runs at most once per process.</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t363" href="#t363">363</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -451,9 +451,9 @@
     <p class="run"><span class="n"><a id="t369" href="#t369">369</a></span><span class="t">    <span class="key">if</span> <span class="nam">importlib</span><span class="op">.</span><span class="nam">util</span><span class="op">.</span><span class="nam">find_spec</span><span class="op">(</span><span class="str">"cupy"</span><span class="op">)</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t370" href="#t370">370</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t371" href="#t371">371</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t372" href="#t372">372</a></span><span class="t">        <span class="key">from</span> <span class="op">.</span><span class="nam">encoders</span><span class="op">.</span><span class="nam">nvenc</span> <span class="key">import</span> <span class="nam">nvenc_available</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t372" href="#t372">372</a></span><span class="t">        <span class="key">from</span> <span class="op">.</span><span class="nam">encoders</span><span class="op">.</span><span class="nam">nvenc_cpu</span> <span class="key">import</span> <span class="nam">nvenc_cpu_available</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t373" href="#t373">373</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t374" href="#t374">374</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">nvenc_available</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t374" href="#t374">374</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">nvenc_cpu_available</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t375" href="#t375">375</a></span><span class="t">            <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t376" href="#t376">376</a></span><span class="t">    <span class="key">except</span> <span class="nam">Exception</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t377" href="#t377">377</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
@@ -462,12 +462,12 @@
 <footer>
     <div class="content">
         <p>
-            <a class="nav" href="z_2fafe82766576da9_pyav_h264_py.html">&#xab; prev</a> &nbsp; &nbsp;
+            <a class="nav" href="z_2fafe82766576da9_nvenc_gpu_pyav_py.html">&#xab; prev</a> &nbsp; &nbsp;
             <a class="nav" href="index.html">&Hat; index</a> &nbsp; &nbsp;
             <a class="nav" href="z_6034c9c2e63fb306_metrics_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-06-30 13:52 +0000
+            created at 2026-06-30 20:10 +0000
         </p>
     </div>
 </footer>
