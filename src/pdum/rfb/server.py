@@ -31,7 +31,15 @@ from .adaptive import AdaptiveQualityController
 from .auth import AuthContext, Authenticator
 from .display import Display, _ClientFeed
 from .encoders.base import build_encoder
-from .protocol import UnsupportedClient, config_message, parse_control, select_transport
+from .protocol import (
+    CAP_H264_ANNEXB,
+    DEFAULT_H264_CODEC,
+    BackendSelection,
+    UnsupportedClient,
+    config_message,
+    parse_control,
+    select_transport,
+)
 from .session import RfbSession
 from .transport import WebSocketTransport
 
@@ -172,6 +180,11 @@ class _StreamHost:
         self.still_after = still_after
         self.stats_interval = stats_interval
         self.authenticate = authenticate
+        # Live-switchable backend state (driven by the demo TUI). image_mode applies when
+        # the active transport is "image"; _force_transport pins new connections to the
+        # chosen transport (None = capability auto-negotiation, the default).
+        self.image_mode = "jpeg"
+        self._force_transport: str | None = None
 
     async def handler(self, connection: Any) -> None:
         """Drive one ``websockets`` connection (the standalone ``serve()`` path)."""
@@ -199,7 +212,7 @@ class _StreamHost:
 
             supported = hello.get("supported", [])
             try:
-                selection = select_transport(supported, has_h264=self.has_h264, has_nvenc=self.has_nvenc)
+                selection = self._selection_for(supported)
             except UnsupportedClient:
                 await conn.close(1003, "no supported transport")
                 return
@@ -208,23 +221,7 @@ class _StreamHost:
             feed = self.display._make_feed(client_id, principal)
             width, height = self.display.width, self.display.height
 
-            def factory(w: int, h: int, bitrate: int, fps: int):
-                encoder = build_encoder(
-                    selection,
-                    width=w,
-                    height=h,
-                    fps=fps,
-                    bitrate=bitrate,
-                    video_encoder=self.video_encoder,
-                )
-                # In GPU mode the publisher pushes CUDA frames; an image-transport
-                # viewer's host encoder is wrapped so those frames are downloaded.
-                if self.gpu and selection.transport == "image":
-                    from .gpu import HostFrameAdapter
-
-                    encoder = HostFrameAdapter(encoder)
-                return encoder
-
+            factory = self._make_factory(selection)
             encoder = factory(width, height, self.bitrate, self.fps)
             transport = "webcodecs" if selection.transport == "h264" else "image"
             await conn.send(config_message(transport=transport, width=width, height=height, codec=selection.codec))
@@ -262,6 +259,65 @@ class _StreamHost:
                 self.display._remove(client_id, feed, session)
         except websockets.ConnectionClosed:
             pass
+
+    def _make_factory(self, selection: BackendSelection) -> Any:
+        """Build the per-connection encoder factory for ``selection``.
+
+        Reads ``self.video_encoder`` at call time, so a live backend switch that updates
+        it is picked up on rebuild. Shared by initial connect and the live swap.
+        """
+
+        def factory(w: int, h: int, bitrate: int, fps: int):
+            encoder = build_encoder(
+                selection, width=w, height=h, fps=fps, bitrate=bitrate, video_encoder=self.video_encoder
+            )
+            # In GPU mode the publisher pushes CUDA frames; an image-transport viewer's
+            # host encoder is wrapped so those frames are downloaded first.
+            if self.gpu and selection.transport == "image":
+                from .gpu import HostFrameAdapter
+
+                encoder = HostFrameAdapter(encoder)
+            return encoder
+
+        return factory
+
+    def _selection_for(self, supported: list[str]) -> BackendSelection:
+        """Negotiate a transport, honoring a forced backend (clamped to client caps)."""
+        if self._force_transport == "h264" and CAP_H264_ANNEXB in supported and (self.has_h264 or self.has_nvenc):
+            return BackendSelection(transport="h264", codec=DEFAULT_H264_CODEC)
+        if self._force_transport == "image":
+            mode = self.image_mode if f"image/{self.image_mode}" in supported else "jpeg"
+            return BackendSelection(transport="image", mime=f"image/{mode}", image_mode=mode)
+        return select_transport(supported, has_h264=self.has_h264, has_nvenc=self.has_nvenc)
+
+    def switch_backend(self, backend: str) -> None:
+        """Switch every live viewer (and new connections) to ``backend``.
+
+        ``backend`` is a video-encoder name (``h264_cpu``, ``nvenc_cpu``,
+        ``nvenc_gpu_pyav``, ``nvenc_gpu_pdum``, ``vtenc``) or ``image:<mode>``
+        (``image:jpeg``/``image:png``/``image:webp``). Rebuilds each session's encoder and
+        re-sends ``config``; the browser follows data-driven on the next keyframe. Must run
+        on the event-loop thread.
+        """
+        if backend.startswith("image:"):
+            self.image_mode = backend.split(":", 1)[1]
+            self._force_transport = "image"
+            selection = BackendSelection(transport="image", mime=f"image/{self.image_mode}", image_mode=self.image_mode)
+        else:
+            self.video_encoder = backend
+            self._force_transport = "h264"
+            selection = BackendSelection(transport="h264", codec=DEFAULT_H264_CODEC)
+        for session in list(self.display._sessions):
+            session.request_reconfigure(factory=self._make_factory(selection), selection=selection)
+
+    def set_quality(self, *, bitrate: int | None = None, fps: int | None = None) -> None:
+        """Retune bitrate/fps for the stream and every live viewer (encoder rebuild)."""
+        if bitrate is not None:
+            self.bitrate = bitrate
+        if fps is not None:
+            self.fps = fps
+        for session in list(self.display._sessions):
+            session.request_reconfigure(bitrate=bitrate, fps=fps)
 
     async def _authenticate(self, conn: Any, hello: dict) -> Any:
         """Return the principal, ``None`` (anonymous), or ``_REJECTED``."""

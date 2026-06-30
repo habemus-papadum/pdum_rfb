@@ -237,6 +237,14 @@ Useful flags: `--pattern {test_card,gradient,bouncing_box,counter,checkerboard,s
 publish loop streaming a deterministic pattern, so any browser (or the demo page)
 can connect with no extra setup.
 
+### The interactive demo harness
+
+For a hands-on tour of the whole stack, `pdum-rfb demo` (from the `[demo]` extra) brings
+up a live feed, serves the browser client via Vite, and opens a Textual TUI to switch demo
+scenes and **encode backends live** (image ⇄ libx264 ⇄ VideoToolbox ⇄ NVENC), retune
+bitrate/fps, and watch per-session stats — all on one WebSocket, no reconnect. `pdum-rfb
+demo --smoke` runs the same machinery headlessly as a self-test. See `docs/demo.md`.
+
 ## The rendercanvas backend
 
 If you render with [`wgpu`](https://wgpu-py.readthedocs.io) / `pygfx` / `fastplotlib`,

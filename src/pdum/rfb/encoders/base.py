@@ -60,6 +60,14 @@ def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
     return NvencGpuPdumEncoder(**kwargs)
 
 
+def _vtenc_factory(**kwargs) -> EncoderBackend:
+    # Lazy: macOS hardware H.264 via Apple VideoToolbox (habemus-papadum-vtenc / pdum.vtenc);
+    # gated by pdum.rfb.encoders.vtenc.vtenc_available.
+    from .vtenc import VideoToolboxEncoder
+
+    return VideoToolboxEncoder(**kwargs)
+
+
 # The CPU H.264 backend is always *registered*; whether it can be *built* still
 # depends on PyAV being importable (handled by select_transport via has_h264).
 register_video_encoder("h264_cpu", _h264_cpu_factory)
@@ -75,6 +83,9 @@ register_video_encoder("nvenc_gpu_pyav", _nvenc_gpu_pyav_factory)
 # prefers it when available; gated by
 # pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
 register_video_encoder("nvenc_gpu_pdum", _nvenc_gpu_pdum_factory)
+# macOS hardware H.264 via Apple VideoToolbox (habemus-papadum-vtenc / pdum.vtenc);
+# gated by pdum.rfb.encoders.vtenc.vtenc_available.
+register_video_encoder("vtenc", _vtenc_factory)
 
 
 def build_encoder(

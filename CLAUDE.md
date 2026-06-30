@@ -109,6 +109,10 @@ src/pdum/rfb/
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
+  cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo
+  demos.py        Demo registry: CPU pattern scenes + paint (interactive) + mlx_shader (Metal)
+  demo_tui.py     `pdum-rfb demo` orchestration: serve + render loop + Vite launch + smoke() self-test
+  demo_app.py     the Textual TUI (lazy `[demo]` import): live scene/backend switch, quality, stats
 
 widgets/src/
   index.ts                  public exports
@@ -258,6 +262,8 @@ adapters (§4). Tabled: AV1/HEVC (§5), codec/rendering upgrades (§6), WebTrans
   metrics, adaptive, testing helpers).
 - `docs/guide_javascript.md` — browser client guide (`RemoteFramebufferView`,
   options, framework integration, CSP/worker packaging).
+- `docs/demo.md` — the `pdum-rfb demo` harness (Textual TUI + Vite client): live scene /
+  backend switching, quality retune, stats, the `--smoke` headless self-test.
 - `docs/gpu_zerocopy.md` — zero-copy CUDA→NVENC (CuPy/DLPack NV12 → `h264_nvenc`):
   `serve(gpu=True)`, the helpers, NV12, the PyAV-18 requirement + why no pure-Python
   monkey-patch, the from-source recipe, the NVENC-SDK alternative, benchmarks.

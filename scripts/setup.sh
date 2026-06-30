@@ -76,6 +76,36 @@ case "$RFB_GPU" in
         ;;
 esac
 
+# Auto-detect the macOS VideoToolbox backend. The native encoder (habemus-papadum-vtenc
+# -> pdum.vtenc, the mac-vt extra) builds on any Apple-Silicon Mac with the Xcode
+# Command Line Tools (clang + system frameworks); the mac-dev group adds MLX so the
+# end-to-end example/tests run. Non-mac / Intel / no-CLT boxes fall through untouched.
+#   RFB_VT=auto (default) build it iff Apple-Silicon + clang are present
+#   RFB_VT=force          build it regardless
+#   RFB_VT=0|off|no       never build it
+RFB_VT="${RFB_VT:-auto}"
+vt_capable() {
+    [ "$(uname -s)" = "Darwin" ] || return 1
+    [ "$(uname -m)" = "arm64" ] || return 1
+    command -v clang >/dev/null 2>&1 || return 1  # Xcode CLT to compile the .mm
+    return 0
+}
+case "$RFB_VT" in
+    0 | off | false | no)
+        echo "   VideoToolbox extra disabled (RFB_VT=$RFB_VT)"
+        ;;
+    force)
+        echo "   VideoToolbox extra forced (RFB_VT=force); will build pdum.vtenc"
+        EXTRA_ARGS+=(--extra mac-vt --group mac-dev)
+        ;;
+    *) # auto
+        if vt_capable; then
+            echo "   Apple Silicon + Xcode CLT detected -> building pdum.vtenc (editable) + MLX"
+            EXTRA_ARGS+=(--extra mac-vt --group mac-dev)
+        fi
+        ;;
+esac
+
 if ! uv sync --frozen ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; then
     if [ ${#EXTRA_ARGS[@]} -gt 0 ]; then
         echo "   ⚠ GPU extra sync failed; retrying base-only so you still have a working env."

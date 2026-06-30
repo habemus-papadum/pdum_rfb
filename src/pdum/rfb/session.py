@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 from .adaptive import AdaptiveQualityController
 from .metrics import SessionMetrics
-from .protocol import header_for, pack_binary_message, parse_control
+from .protocol import config_message, header_for, pack_binary_message, parse_control
 from .types import EncodedPayload, EncoderBackend, FrameSource
 
 try:  # A client disconnect is a normal lifecycle event, not an error.
@@ -149,6 +149,49 @@ class RfbSession:
         self.metrics.inflight = len(self.inflight)
         self.metrics.record_sent(payload_bytes=len(payload.payload), keyframe=payload.keyframe, now=now)
 
+    #: Pending live reconfigure (backend/transport/params). Set by
+    #: :meth:`request_reconfigure` and applied at the top of an encode step so it never
+    #: races the off-thread ``encoder.encode``. ``None`` when idle.
+    _reconfig: dict | None = None
+
+    def request_reconfigure(
+        self,
+        *,
+        factory: EncoderFactory | None = None,
+        selection: Any = None,
+        bitrate: int | None = None,
+        fps: int | None = None,
+    ) -> None:
+        """Queue a live encoder swap and/or quality change.
+
+        Applied before the next encode (never mid-encode). ``factory`` swaps the encoder
+        backend/transport; ``selection`` (a :class:`~pdum.rfb.protocol.BackendSelection`)
+        triggers a fresh ``config`` to the client; ``bitrate``/``fps`` retune quality.
+        Must be called on the event-loop thread (it only stores state).
+        """
+        self._reconfig = {"factory": factory, "selection": selection, "bitrate": bitrate, "fps": fps}
+
+    async def _apply_reconfigure(self, width: int, height: int) -> None:
+        """Apply a pending :meth:`request_reconfigure` between encode steps."""
+        req, self._reconfig = self._reconfig, None
+        if req is None:
+            return
+        if req["factory"] is not None:
+            self.encoder_factory = req["factory"]
+        if req["bitrate"] is not None:
+            self.bitrate = req["bitrate"]
+        if req["fps"] is not None:
+            self.fps = req["fps"]
+        if self.encoder_factory is not None:
+            self.encoder.close()
+            self.encoder = self.encoder_factory(width, height, self.bitrate, self.fps)
+            self._enc_size = (width, height)
+            self.force_keyframe = True  # next frame is a self-contained keyframe (KeyframeGate)
+        sel = req["selection"]
+        if sel is not None:
+            transport = "webcodecs" if sel.transport == "h264" else "image"
+            await self.ws.send(config_message(transport=transport, width=width, height=height, codec=sel.codec))
+
     def _ensure_encoder_for(self, width: int, height: int) -> None:
         """Rebuild the (fixed-resolution) encoder if the frame size changed."""
         size = (width, height)
@@ -187,6 +230,8 @@ class RfbSession:
             self.metrics.record_dropped(now=self._clock())
             return "dropped"
 
+        if self._reconfig is not None:
+            await self._apply_reconfigure(frame.width, frame.height)
         self._ensure_encoder_for(frame.width, frame.height)
         force = self.force_keyframe
         t0 = self._clock()

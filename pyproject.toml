@@ -83,6 +83,22 @@ rendercanvas = [
 asgi = [
     "starlette>=0.37",
 ]
+# macOS hardware H.264 via Apple VideoToolbox — the sibling package habemus-papadum-vtenc
+# (import pdum.vtenc), built from packages/vtenc/ (a uv workspace member). It needs NO
+# PyAV and works on Python 3.14; the runtime requirement is just macOS (the VideoToolbox
+# frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
+# group). See docs/mlx_metal_videotoolbox_encoder_design.md.
+mac-vt = [
+    "habemus-papadum-vtenc",
+]
+# `pdum-rfb demo` — an interactive Textual TUI that publishes a live feed, serves the
+# browser client (Vite dev), and lets you switch encode backends / retune quality on the
+# fly while watching per-session stats. A dev/eval harness, not a runtime dep.
+demo = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "textual>=1.0",
+]
 
 
 [build-system]
@@ -107,6 +123,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 habemus-papadum-nvenc = { workspace = true }
+habemus-papadum-vtenc = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -128,9 +145,16 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "typer>=0.12",
     "starlette>=0.37",  # exercises the [asgi] adapter in tests (TestClient WS)
+    "textual>=1.0",  # the `pdum-rfb demo` TUI harness
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",
+]
+# Dev-box-only (macOS) MLX so the VideoToolbox backend can be exercised end-to-end
+# (render frames in MLX -> NV12 -> VtEncoder). MLX is the example/test frame producer,
+# not a shipped runtime dep of the library. Mirrors gpu-dev.
+mac-dev = [
+    "mlx>=0.21; sys_platform == 'darwin'",
 ]
 # Dev-box-only render stack (NOT shipped) to exercise the rendercanvas backend end-to-end.
 # The library's runtime dep is just the `[rendercanvas]` extra; wgpu/pygfx are dev tooling.

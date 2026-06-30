@@ -303,6 +303,53 @@ else:
         if skipped:
             console.print(f"[dim]skipped (unavailable): {', '.join(skipped)} — run `pdum-rfb doctor`[/]")
 
+    @app.command()
+    def demo(
+        width: int = typer.Option(1280, help="framebuffer width (even)"),
+        height: int = typer.Option(720, help="framebuffer height (even)"),
+        port: int = typer.Option(8765, help="WebSocket/HTTP server port"),
+        web_port: int = typer.Option(5173, help="Vite dev-server port"),
+        fps: int = typer.Option(30, help="publish frame rate"),
+        bitrate: str = typer.Option("8M", help="initial H.264/NVENC bitrate, e.g. 8M"),
+        host: str = typer.Option("127.0.0.1", help="server bind host"),
+        vite: bool = typer.Option(True, "--vite/--no-vite", help="launch the Vite dev server for the client"),
+        web_url: str = typer.Option(None, help="use this client URL instead of launching Vite"),
+        widgets_dir: str = typer.Option(None, help="path to the widgets/ workspace (Vite root)"),
+        smoke: bool = typer.Option(False, help="headless self-test: every backend + a param change, no TUI"),
+    ) -> None:
+        """Interactive demo: a live feed + browser client + a TUI to switch backends on the fly."""
+        import asyncio
+
+        from . import demo_tui
+
+        w = width - (width % 2)
+        h = height - (height % 2)
+        if smoke:
+            asyncio.run(demo_tui.smoke(width=w, height=h, fps=fps))
+            return
+        try:
+            import textual  # noqa: F401
+        except ModuleNotFoundError:
+            sys.stderr.write("The demo TUI needs Textual.\n  pip install 'habemus-papadum-rfb[demo]'\n")
+            raise SystemExit(1) from None
+        try:
+            asyncio.run(
+                demo_tui.run_demo(
+                    width=w,
+                    height=h,
+                    host=host,
+                    port=port,
+                    fps=fps,
+                    bitrate=demo_tui._parse_bitrate(bitrate),
+                    web_port=web_port,
+                    no_vite=not vite,
+                    web_url_override=web_url,
+                    widgets_dir=widgets_dir,
+                )
+            )
+        except KeyboardInterrupt:
+            pass
+
 
 if __name__ == "__main__":
     app()

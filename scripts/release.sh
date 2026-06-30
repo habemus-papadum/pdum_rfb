@@ -7,11 +7,11 @@ This script automates the release process:
 3. Calculates release version (strips -alpha)
 4. Runs validation (lint, Python tests, widget tests, docs build)
 5. Updates version files (pyproject.toml, __init__.py, widgets/package.json,
-   packages/nvenc/pyproject.toml) — all in lockstep
+   packages/nvenc/pyproject.toml, packages/vtenc/pyproject.toml) — all in lockstep
 6. Updates uv.lock with new version
 7. Creates release commit and tag
 8. Pushes tag to origin
-9. Publishes both Python packages to PyPI (habemus-papadum-rfb + -nvenc, via publish.sh)
+9. Publishes the Python packages to PyPI (habemus-papadum-rfb + -nvenc + -vtenc, via publish.sh)
 10. Builds and publishes the widgets to npm (@habemus-papadum/rfb-widgets)
 11. Creates GitHub release (triggers docs deployment)
 12. Bumps to next development version with -alpha
@@ -46,9 +46,11 @@ PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 INIT_PY = REPO_ROOT / "src" / "pdum" / "rfb" / "__init__.py"
 WIDGETS_DIR = REPO_ROOT / "widgets"
 PACKAGE_JSON = WIDGETS_DIR / "package.json"
-# Sibling workspace package habemus-papadum-nvenc (import pdum.nvenc); released in
-# lockstep with the rfb package, so its version is bumped alongside the others.
+# Sibling workspace packages habemus-papadum-nvenc (import pdum.nvenc) and
+# habemus-papadum-vtenc (import pdum.vtenc); both released in lockstep with the rfb
+# package, so their versions are bumped alongside the others.
 NVENC_PYPROJECT = REPO_ROOT / "packages" / "nvenc" / "pyproject.toml"
+VTENC_PYPROJECT = REPO_ROOT / "packages" / "vtenc" / "pyproject.toml"
 
 class StepCategory(Enum):
     """Categories of release steps."""
@@ -221,12 +223,16 @@ def read_current_version() -> None:
     nvenc_version = read_version_from_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")')
     console.print(f"  [cyan]packages/nvenc/pyproject.toml:[/cyan] {nvenc_version}")
 
-    if not (pyproject_version == init_version == package_json_version == nvenc_version):
+    vtenc_version = read_version_from_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")')
+    console.print(f"  [cyan]packages/vtenc/pyproject.toml:[/cyan] {vtenc_version}")
+
+    if not (pyproject_version == init_version == package_json_version == nvenc_version == vtenc_version):
         console.print("[red]✗ ERROR:[/red] Version mismatch!")
         console.print(f"  [yellow]pyproject.toml:[/yellow] {pyproject_version}")
         console.print(f"  [yellow]__init__.py:[/yellow] {init_version}")
         console.print(f"  [yellow]widgets/package.json:[/yellow] {package_json_version}")
         console.print(f"  [yellow]packages/nvenc/pyproject.toml:[/yellow] {nvenc_version}")
+        console.print(f"  [yellow]packages/vtenc/pyproject.toml:[/yellow] {vtenc_version}")
         sys.exit(1)
 
     ctx.current_version = pyproject_version
@@ -302,6 +308,7 @@ def update_version_files() -> None:
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.release_version)
     write_package_json_version(PACKAGE_JSON, ctx.release_version)
     write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.release_version)
+    write_version_to_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.release_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] in all files"
     )
@@ -325,6 +332,7 @@ def create_release_commit() -> None:
             str(INIT_PY),
             str(PACKAGE_JSON),
             str(NVENC_PYPROJECT),
+            str(VTENC_PYPROJECT),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -354,15 +362,20 @@ def push_tag() -> None:
 
 
 def publish_to_pypi() -> None:
-    """Publish BOTH Python packages to PyPI via scripts/publish.sh.
+    """Publish the Python packages to PyPI via scripts/publish.sh.
 
-    publish.sh builds + publishes habemus-papadum-rfb (hatch) and the native
-    habemus-papadum-nvenc wheels, and loads .env for credentials. Set SKIP_NVENC=1
-    to publish only rfb.
+    publish.sh builds + publishes habemus-papadum-rfb (hatch) plus the native
+    habemus-papadum-nvenc (Linux+CUDA) and habemus-papadum-vtenc (macOS) wheels, and
+    loads .env for credentials. Each native package only builds on its own platform, so
+    publish.sh auto-skips the off-platform one (use NVENC_WHEEL_DIR / VTENC_WHEEL_DIR to
+    publish prebuilt CI wheels, or SKIP_NVENC=1 / SKIP_VTENC=1 to opt out).
     """
-    console.rule("[bold blue]Publishing to PyPI (rfb + nvenc)")
+    console.rule("[bold blue]Publishing to PyPI (rfb + nvenc + vtenc)")
 
-    run_command(["./scripts/publish.sh"], "Running publish.sh (habemus-papadum-rfb + habemus-papadum-nvenc)")
+    run_command(
+        ["./scripts/publish.sh"],
+        "Running publish.sh (habemus-papadum-rfb + -nvenc + -vtenc)",
+    )
 
 
 def publish_to_npm() -> None:
@@ -475,6 +488,7 @@ def update_to_dev_version() -> None:
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.next_dev_version)
     write_package_json_version(PACKAGE_JSON, ctx.next_dev_version)
     write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
+    write_version_to_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] in all files"
     )
@@ -498,6 +512,7 @@ def create_dev_commit() -> None:
             str(INIT_PY),
             str(PACKAGE_JSON),
             str(NVENC_PYPROJECT),
+            str(VTENC_PYPROJECT),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -628,10 +643,10 @@ STEPS: list[Step] = [
     Step(
         id="publish_pypi",
         name="Publish to PyPI",
-        description="Build + publish both Python packages (habemus-papadum-rfb + -nvenc)",
+        description="Build + publish the Python packages (habemus-papadum-rfb + -nvenc + -vtenc)",
         category=StepCategory.RELEASE,
         action=publish_to_pypi,
-        notes="nvenc build needs a CUDA toolkit; SKIP_NVENC=1 for rfb only",
+        notes="nvenc builds on Linux+CUDA, vtenc on macOS; off-platform auto-skips (use *_WHEEL_DIR for CI wheels)",
     ),
     Step(
         id="publish_npm",

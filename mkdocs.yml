@@ -16,6 +16,7 @@ nav:
   - Python Guide: guide_python.md
   - JavaScript Guide: guide_javascript.md
   - Internals: internals.md
+  - Demo harness (pdum-rfb demo): demo.md
   - Features:
       - Still after settle: still_after_settle.md
       - Multiple streams: multiple_streams.md

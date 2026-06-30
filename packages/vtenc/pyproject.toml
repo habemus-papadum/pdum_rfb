@@ -1,0 +1,39 @@
+# habemus-papadum-vtenc (import: pdum.vtenc) — host NV12 -> H.264 Annex B via Apple's
+# VideoToolbox, no PyAV. The macOS counterpart of habemus-papadum-nvenc; a workspace
+# member of pdum_rfb.
+#
+# Build/publish via scripts/publish.sh (which runs build-wheel.sh + delocate). A build
+# needs only the Xcode Command Line Tools (clang + the macOS SDK frameworks); the wheel
+# needs nothing beyond macOS itself (all frameworks are system-provided).
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "habemus-papadum-vtenc"
+# Kept in lockstep with habemus-papadum-rfb by scripts/release.sh.
+version = "0.1.0-alpha"
+description = "Zero-PyAV macOS H.264 encode (Apple VideoToolbox) for pdum.rfb"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Nehal Patel" }]
+keywords = ["videotoolbox", "h264", "metal", "mlx", "macos", "video", "encoder"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS :: MacOS X",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Repository = "https://github.com/habemus-papadum/pdum_rfb"
+Documentation = "https://github.com/habemus-papadum/pdum_rfb"
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.21"
+cmake.build-type = "Release"
+# Ships the pdum.vtenc namespace package; the CMake install drops the _vtenc .so into
+# pdum/vtenc/. No pdum/__init__.py -> PEP 420 namespace shared with pdum.rfb / pdum.nvenc.
+wheel.packages = ["src/pdum"]
