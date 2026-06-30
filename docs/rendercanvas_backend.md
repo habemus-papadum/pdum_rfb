@@ -1,12 +1,14 @@
 # A `rendercanvas` backend for `pdum.rfb`
 
-> **Status: implemented.** The backend ships as `pdum.rfb.rendercanvas`
+> **Status: implemented & CI-tested.** The backend ships as `pdum.rfb.rendercanvas`
 > (`RfbRenderCanvas` / `RenderCanvas`), behind the optional `[rendercanvas]` extra. It is
 > **cross-platform (macOS + Linux)** — the bitmap present path is a host download, no
 > CUDA/NVENC. Bridge-level tests (`tests/test_rendercanvas_backend.py`, present→publish +
-> event translation + lifecycle) pass against `rendercanvas` 2.6.3; the full pygfx-on-wgpu
-> render round-trip needs a GPU/adapter and is run manually. This doc is the design +
-> rationale; for usage see the [Python guide](guide_python.md#the-rendercanvas-backend).
+> event translation + lifecycle) run against `rendercanvas` 2.6.3, **and** a full
+> `pygfx`-on-`wgpu` render round-trip (`tests/test_rendercanvas_render.py`) runs in CI on
+> **Mesa lavapipe** (software Vulkan — no GPU needed). Runnable example:
+> `examples/rendercanvas_pygfx.py`. This doc is the design + rationale; for usage see the
+> [Python guide](guide_python.md#the-rendercanvas-backend).
 
 **Question.** This project is similar in spirit to `jupyter_rfb`. The `rendercanvas`
 package (the canvas-abstraction layer under `pygfx` / `fastplotlib` / `wgpu`) ships a
@@ -170,12 +172,18 @@ because we aligned `pdum.rfb` to renderview, the shim is a two-key rename rather
 button/modifier/coordinate translation table — and it collapses to the **identity** once
 `rendercanvas` itself adopts `type` (the migration its own back-compat notes promise).
 
-### What's tested vs. manual
+### What's tested
 
 | Item | Status |
 | --- | --- |
 | present → `publish`, event key-rename + pump, lifecycle | ✅ `tests/test_rendercanvas_backend.py` (vs real `rendercanvas` 2.6.3, no GPU) |
-| Full `pygfx`-on-`wgpu` render → browser round-trip | manual (needs a GPU/adapter; macOS + Linux) |
+| Full `pygfx`-on-`wgpu` render → published frame | ✅ `tests/test_rendercanvas_render.py` — a real cube on **Mesa lavapipe** (software Vulkan), in CI; skips cleanly where no wgpu adapter exists |
+
+The render test self-selects lavapipe on Linux when present (deterministic, GPU-free) and
+otherwise uses whatever adapter is available (a GPU, or Metal on macOS). CI installs it
+with `apt-get install mesa-vulkan-drivers`. The dev render stack (`rendercanvas` + `wgpu` +
+`pygfx`) is the `viz` dependency group, auto-installed by `uv sync` (see
+[Repository & Development](development.md)).
 
 **Verdict: a clear, low-risk feature.** The CPU download in `"bitmap"` present is the
 same cost `jupyter_rfb` already pays; we simply replace JPEG-over-ipywidgets with this

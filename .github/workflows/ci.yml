@@ -36,6 +36,9 @@ jobs:
       - name: Run Linting
         run: uv run ruff check .
 
+      - name: Install Mesa lavapipe (software Vulkan for the rendercanvas render test)
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+
       - name: Run Tests with Coverage
         run: uv run pytest --cov=src/pdum/rfb --cov-report=xml --cov-report=term
       - name: Build Documentation
@@ -80,7 +83,8 @@ jobs:
           enable-cache: true
 
       - name: Install Python deps (for the e2e test server)
-        run: uv sync --frozen
+        # The e2e server doesn't render with wgpu/pygfx, so skip the heavy `viz` group.
+        run: uv sync --frozen --no-group viz
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4

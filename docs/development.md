@@ -55,12 +55,20 @@ The project uses **uv exclusively**. Key rules:
   | `nvenc` | `av` | host-memory NVENC (same wheel; documents intent) |
   | `gpu-cuda12` / `gpu-cuda13` | CuPy | zero-copy CUDA→NVENC (needs PyAV ≥ 18) |
   | `gpu-nvenc-sdk` | `habemus-papadum-nvenc` + CuPy | PyAV-free GPU H.264 (recommended) |
+  | `rendercanvas` | `rendercanvas` | the [rendercanvas backend](rendercanvas_backend.md) (bring your own wgpu/pygfx) |
   | `cli` | `typer`, `rich` | `pdum-rfb doctor` / `pdum-rfb benchmark` |
 
   | Group | Pulls | For |
   | --- | --- | --- |
   | `dev` (default) | pytest, ruff, mkdocs(+plugins), hatch, av, pre-commit, … | everyday dev |
+  | `viz` (default) | rendercanvas, wgpu, pygfx | exercise the rendercanvas backend / `examples/rendercanvas_pygfx.py` |
   | `gpu-dev` | CuPy | GPU tests/benchmarks on a machine with a device |
+
+  `[tool.uv] default-groups = ["dev", "viz"]` makes `uv sync` install the `viz` render
+  stack automatically on a dev box. The render test (`tests/test_rendercanvas_render.py`)
+  uses Mesa **lavapipe** (software Vulkan) — `apt install mesa-vulkan-drivers` — so it runs
+  GPU-free; it skips cleanly where no wgpu adapter exists. CI jobs that don't render pass
+  `--no-group viz` to stay lean.
 
 - **The native member builds only when asked.** `habemus-papadum-nvenc` needs a
   CUDA toolkit (scikit-build-core); install it into the env with
@@ -125,7 +133,7 @@ via `scripts/release.sh`.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | push / PR to `main` | Two jobs. **test**: `setup.sh`, ruff, pytest + coverage (comment + badge), `mkdocs build`. **widgets**: pnpm typecheck, Vitest, and Playwright e2e (it `uv sync`s Python to boot the e2e test server). |
+| `ci.yml` | push / PR to `main` | Two jobs. **test**: `setup.sh`, ruff, install Mesa lavapipe, pytest + coverage (comment + badge — incl. the lavapipe `rendercanvas` render test), `mkdocs build`. **widgets**: pnpm typecheck, Vitest, and Playwright e2e (`uv sync --frozen --no-group viz` to boot the e2e test server). |
 | `docs.yml` | on release published / manual | Build the MkDocs site and deploy to GitHub Pages. |
 | `gpu-tests.yml` | weekly (Mon) / manual | The **only** place GPU paths run in CI. Needs a self-hosted runner labelled `gpu`; runs the `tests/test_gpu.py` tier, `pdum-rfb doctor`, and the benchmark. Stays queued (never runs on the hosted pool) if no such runner exists. |
 | `build-nvenc-sdk-wheel.yml` | manual | Build `habemus-papadum-nvenc` wheels in a manylinux_2_28 + CUDA container as a validation artifact (no GPU needed to *build*). Build-only. |
