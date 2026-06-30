@@ -1,4 +1,4 @@
-import { RemoteFramebufferView } from "../src/index";
+import { RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
 
 const params = new URLSearchParams(location.search);
 // Defaults to the `pdum.rfb.server` CLI default port; override with ?ws=...
@@ -8,14 +8,39 @@ const transport = params.get("transport") ?? "auto";
 const stage = document.getElementById("stage") as HTMLElement;
 const statsEl = document.getElementById("stats") as HTMLElement;
 
+// A small live HUD built entirely from `onStats` — the worked example in
+// docs/metrics_adaptive.md. The `server*` / `target*` rows show "—" until the
+// server is started with `--stats-interval` (and/or `--adaptive`).
+const mbps = (bps?: number) => (bps === undefined ? "—" : `${(bps / 1e6).toFixed(1)} Mbps`);
+const ms = (v?: number) => (v === undefined ? "—" : `${v.toFixed(0)} ms`);
+const n1 = (v?: number) => (v === undefined ? "—" : v.toFixed(1));
+
+let connState: ConnectionState = "connecting";
+
+function renderHud(s: Stats): void {
+  const rows: [string, string][] = [
+    ["state", connState],
+    ["transport", s.transport],
+    ["displayed", `${s.framesDisplayed} (dropped ${s.framesDropped})`],
+    ["decode queue", String(s.decodeQueueSize)],
+    ["rtt", ms(s.serverRttMs)],
+    ["server fps", n1(s.serverFpsSent)],
+    ["server bitrate", mbps(s.serverBitrateBps)],
+    ["encode", ms(s.serverEncodeMs)],
+    ["target bitrate", mbps(s.targetBitrate)],
+    ["target fps", n1(s.targetFps)],
+  ];
+  statsEl.textContent = rows.map(([k, v]) => `${k.padEnd(15)}${v}`).join("\n");
+}
+
 const view = new RemoteFramebufferView(stage, {
   url: wsUrl,
   imageOnly: transport === "image",
-  onStats: (s) => {
-    statsEl.textContent = JSON.stringify(s, null, 2);
-  },
+  onStats: renderHud,
   onState: (st) => {
+    connState = st;
     statsEl.dataset.state = st;
+    renderHud(view.stats);
   },
 });
 

@@ -20,6 +20,7 @@ nav:
       - Still after settle: still_after_settle.md
       - Multiple streams: multiple_streams.md
       - ASGI / Starlette adapter: asgi.md
+      - Metrics & adaptive quality: metrics_adaptive.md
   - Repository & Development: development.md
   - Performance: performance.md
   - GPU / hardware encode:

@@ -422,6 +422,10 @@ frames are sparse.
 
 ## Measuring & adapting the encoder
 
+> For the **end-to-end** story — including how to render these in the browser UI —
+> see [Metrics & adaptive quality](metrics_adaptive.md). This section is the
+> server-side API.
+
 ### Per-session metrics
 
 Every session accumulates the metrics the guide lists (§14): encode time, payload

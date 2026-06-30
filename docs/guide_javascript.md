@@ -52,7 +52,8 @@ When the server is started with `stats_interval` (and/or `adaptive`), it also pu
 authoritative server-truth metrics that `Stats` surfaces as optional fields:
 `serverRttMs`, `serverFpsSent`, `serverBitrateBps`, `serverEncodeMs`,
 `serverDropped`, and the adaptive `targetBitrate` / `targetFps` (undefined until the
-server sends them).
+server sends them). For the full loop and a worked stats-HUD example, see
+[Metrics & adaptive quality](metrics_adaptive.md).
 
 ### Authentication
 
