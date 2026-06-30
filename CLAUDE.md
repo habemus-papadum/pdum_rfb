@@ -10,7 +10,12 @@ distilled from `docs/`).
 streams a server-rendered framebuffer to a browser over a WebSocket, with input
 events flowing back. The target use case is scientific/interactive visualization —
 render in Python, view and interact in the browser. It is **not** a generic VNC
-clone; the design is tuned for sparse, on-demand-rendered scientific scenes.
+clone, but it spans the whole cadence range: from **sparse, on-demand scenes**
+(jupyter_rfb-style, render only when state changes) to **high-frame-rate interactive
+streaming** (low-latency H.264/WebCodecs, zero-copy CUDA→NVENC when rendering on GPU).
+The publisher owns the loop and the cadence; the library never imposes a fixed tick.
+Unlike jupyter_rfb it is **not tied to Jupyter/ipywidgets comms** — a plain WebSocket,
+so it runs in any page, app, or headless box.
 
 Two halves:
 

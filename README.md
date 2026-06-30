@@ -12,8 +12,24 @@
 **Render a framebuffer in Python, view and interact with it in the browser.**
 `pdum.rfb` streams a server-rendered framebuffer to a browser over a WebSocket and
 sends pointer/keyboard/resize events back. It targets **scientific and interactive
-visualization** — sparse, on-demand-rendered scenes — rather than being a generic
-VNC clone.
+visualization** across the whole cadence range — from **sparse, on-demand scenes**
+(render only when state changes) to **high-frame-rate interactive streaming**
+(low-latency H.264/WebCodecs). You own the loop and pick the cadence; the library
+never imposes a fixed game-engine tick. It is **not** a generic VNC clone.
+
+> **Coming from [`jupyter_rfb`](https://github.com/vispy/jupyter_rfb)?** Same idea —
+> render in Python, view in the browser, events flow back, same
+> [renderview event vocabulary](docs/rendercanvas_backend.md) — so it slots under
+> `rendercanvas` / `pygfx` / `fastplotlib`. What's different:
+> - **Not tied to Jupyter.** Frames travel over a plain WebSocket, not ipywidgets/kernel
+>   comms — the same server drives a standalone web page, a desktop webview, or a headless
+>   box, no notebook required.
+> - **High frame rates.** Alongside the per-frame image path (every frame a keyframe, à la
+>   `jupyter_rfb`), a low-latency **H.264/WebCodecs** path with per-client backpressure and
+>   keyframe policy streams continuous, interactive framerates — not just occasional redraws.
+> - **Zero-copy on the GPU.** When you render on CUDA, frames can go **straight to NVENC**
+>   (CUDA NV12 → H.264) with no host round-trip — see
+>   [GPU zero-copy](docs/gpu_zerocopy.md).
 
 The repo ships two halves:
 

@@ -2,10 +2,12 @@
 
 `pdum.rfb` (PyPI: **`habemus-papadum-rfb`**) streams a server-rendered framebuffer
 to a browser over a WebSocket, with pointer/keyboard/resize events flowing back.
-You **render in Python** and **view and interact in the browser** — the target use
-case is scientific and interactive visualization, where scenes are sparse and
-rendered on demand rather than at a fixed game-engine cadence. It is **not** a
-generic VNC clone; the design is tuned for that workload.
+You **render in Python** and **view and interact in the browser**. The target is
+scientific and interactive visualization across the whole cadence range — from
+**sparse, on-demand scenes** (render only when state changes) to **high-frame-rate
+streaming** (low-latency H.264/WebCodecs, GPU-rendered). You own the loop and the
+cadence; the library never imposes a fixed game-engine tick. It is **not** a generic
+VNC clone.
 
 The project ships two halves:
 
@@ -13,6 +15,26 @@ The project ships two halves:
 - a **browser client** — `@habemus-papadum/rfb-widgets`, a TypeScript package whose
   decoding runs entirely in a **Web Worker** that owns the WebSocket, the decoder,
   and a transferred `OffscreenCanvas`, keeping your main thread free.
+
+## Compared to `jupyter_rfb`
+
+[`jupyter_rfb`](https://github.com/vispy/jupyter_rfb) pioneered "render in Python, view in
+the browser" for notebooks, and `pdum.rfb` speaks the same
+[renderview event vocabulary](rendercanvas_backend.md) — so it drops in under
+`rendercanvas` / `pygfx` / `fastplotlib`. Three differences shape it:
+
+- **Not tied to Jupyter.** Frames travel over a plain WebSocket, not ipywidgets/kernel
+  comms. The same server drives a standalone web page, a desktop webview, or a fully
+  headless box — no notebook or kernel in the loop.
+- **Built for high frame rates.** Beyond the per-frame image path (every frame a keyframe,
+  like `jupyter_rfb`), a low-latency **H.264/WebCodecs** path adds per-client backpressure
+  and a keyframe policy — made for continuous, interactive framerates, not just the
+  occasional redraw.
+- **Zero-copy on the GPU.** When you render on CUDA, frames can go **straight to NVENC**
+  (CUDA NV12 → H.264) without a host round-trip — via PyAV's `h264_nvenc` or the PyAV-free
+  `pdum.nvenc` encoder. See [GPU zero-copy](gpu_zerocopy.md).
+
+Whether you push every 16 ms or once a minute is entirely up to your loop.
 
 ## The mental model: push
 
