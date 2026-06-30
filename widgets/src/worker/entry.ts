@@ -14,6 +14,7 @@ import type {
   VideoChunkHeader,
 } from "../protocol";
 import { unpackBinaryMessage } from "../protocol";
+import { applyServerStats, applySetQuality } from "../serverStats";
 import type { MainToWorker, Stats, WorkerInitOptions, WorkerToMain } from "../types";
 import { decodeImageFrame } from "./imageDecode";
 import { Renderer } from "./renderer";
@@ -29,7 +30,7 @@ let cssWidth = 0;
 let cssHeight = 0;
 let initOptions: WorkerInitOptions = {};
 
-const stats: Stats = {
+let stats: Stats = {
   framesDisplayed: 0,
   framesDropped: 0,
   lastDisplayedSeq: -1,
@@ -55,6 +56,21 @@ function onDisplayed(seq: number, decodeQueueSize: number): void {
   stats.decodeQueueSize = decodeQueueSize;
   send({ type: "ack", seq, decode_queue_size: decodeQueueSize, displayed: true } satisfies AckMsg);
   post({ type: "stats", stats: { ...stats } });
+}
+
+function handleControl(control: { type: string; [k: string]: unknown }): void {
+  // Server -> client control. `config` advances negotiation; `set_quality` and
+  // `stats` carry adaptive targets / server-truth metrics we fold into Stats so
+  // the app's onStats sees authoritative RTT, fps, and bitrate.
+  if (control.type === "config") {
+    post({ type: "state", state: "negotiated" });
+  } else if (control.type === "set_quality") {
+    stats = applySetQuality(stats, control as never);
+    post({ type: "stats", stats: { ...stats } });
+  } else if (control.type === "stats") {
+    stats = applyServerStats(stats, control as never);
+    post({ type: "stats", stats: { ...stats } });
+  }
 }
 
 async function handleBinary(buf: ArrayBuffer): Promise<void> {
@@ -94,8 +110,7 @@ async function startConnection(url: string): Promise<void> {
 
   ws.onmessage = (ev: MessageEvent) => {
     if (typeof ev.data === "string") {
-      const control = JSON.parse(ev.data);
-      if (control.type === "config") post({ type: "state", state: "negotiated" });
+      handleControl(JSON.parse(ev.data));
       return;
     }
     void handleBinary(ev.data as ArrayBuffer);

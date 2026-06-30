@@ -39,17 +39,37 @@ def test_cooldown_suppresses_rapid_changes():
     assert c.update({"decode_queue_size": 5}, now=10.5) is None  # within cooldown
 
 
-def test_floor_tightens_inflight():
-    c = AdaptiveQualityController(min_bitrate=1_000_000, bitrate=1_000_000, max_inflight=3, inflight=3, cooldown_s=0.0)
+def test_floored_bitrate_lowers_fps_first():
+    # Bitrate at the floor, fps headroom left: ease the frame rate before latency.
+    c = AdaptiveQualityController(
+        min_bitrate=1_000_000, bitrate=1_000_000, max_inflight=3, inflight=3, fps=30, min_fps=10, cooldown_s=0.0
+    )
     target = c.update({"decode_queue_size": 9}, now=0.0)
     assert target is not None
-    assert target.max_inflight == 2  # bitrate already at floor -> tighten latency
+    assert target.fps < 30
+    assert target.max_inflight == 3  # inflight untouched while fps still has room
+
+
+def test_floor_tightens_inflight():
+    # Bitrate AND fps both floored -> tighten latency.
+    c = AdaptiveQualityController(
+        min_bitrate=1_000_000,
+        bitrate=1_000_000,
+        max_inflight=3,
+        inflight=3,
+        min_fps=30,
+        fps=30,
+        cooldown_s=0.0,
+    )
+    target = c.update({"decode_queue_size": 9}, now=0.0)
+    assert target is not None
+    assert target.max_inflight == 2  # bitrate + fps already at floor -> tighten latency
 
 
 async def test_session_applies_adaptation_and_rebuilds_encoder():
     builds: list[int] = []
 
-    def factory(w, h, bitrate):
+    def factory(w, h, bitrate, fps):
         builds.append(bitrate)
         return FakeEncoder()
 

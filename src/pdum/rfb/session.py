@@ -31,8 +31,8 @@ try:  # A client disconnect is a normal lifecycle event, not an error.
 except Exception:  # pragma: no cover - websockets is a base dependency
     _ConnectionClosed = ()  # type: ignore[assignment]
 
-#: Rebuilds a fixed-resolution encoder for a new (width, height, bitrate).
-EncoderFactory = Callable[[int, int, int], EncoderBackend]
+#: Rebuilds a fixed-resolution encoder for a new (width, height, bitrate, fps).
+EncoderFactory = Callable[[int, int, int, int], EncoderBackend]
 
 
 class RfbSession:
@@ -50,6 +50,7 @@ class RfbSession:
         fps: int = 30,
         adaptive: AdaptiveQualityController | None = None,
         still_after: float | None = None,
+        stats_interval: float | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.source = source
@@ -61,6 +62,8 @@ class RfbSession:
         self.fps = fps
         self.adaptive = adaptive
         self.still_after = still_after
+        self.stats_interval = stats_interval
+        self._last_stats_t = -1e9
         self._clock = clock or time.monotonic
 
         self.force_keyframe = True
@@ -105,6 +108,7 @@ class RfbSession:
                 decode_queue_size=int(data.get("decode_queue_size", 0)),
                 now=now,
             )
+            await self._maybe_send_stats(now)
         elif kind == "request_keyframe":
             self.force_keyframe = True
         elif kind == "event":
@@ -153,7 +157,7 @@ class RfbSession:
             return
         if size != self._enc_size and self.encoder_factory is not None:
             self.encoder.close()
-            self.encoder = self.encoder_factory(width, height, self.bitrate)
+            self.encoder = self.encoder_factory(width, height, self.bitrate, self.fps)
             self.force_keyframe = True
             self._enc_size = size
 
@@ -232,6 +236,34 @@ class RfbSession:
         for payload in payloads:
             await self.send_payload(payload)
 
+    async def _maybe_send_stats(self, now: float) -> None:
+        """Push a server-truth ``stats`` control message to the client, throttled.
+
+        Opt-in via ``stats_interval``: lets the browser surface authoritative
+        server-side metrics (RTT, fps, bitrate, encode time, the adaptive targets)
+        in its ``Stats`` — the client only sees its own decode side otherwise.
+        """
+        if self.stats_interval is None or now - self._last_stats_t < self.stats_interval:
+            return
+        self._last_stats_t = now
+        snap = self.metrics_snapshot()
+        await self.ws.send(
+            json.dumps(
+                {
+                    "type": "stats",
+                    "rtt_ms": snap["rtt_ms"],
+                    "fps_sent": snap["fps_sent"],
+                    "fps_acked": snap["fps_acked"],
+                    "bitrate_bps": snap["bitrate_bps"],
+                    "encode_ms": snap["encode_ms"],
+                    "decode_queue_size": snap["decode_queue_size"],
+                    "dropped": snap["frames_dropped"],
+                    "target_bitrate": snap["target_bitrate"],
+                    "target_fps": snap["target_fps"],
+                }
+            )
+        )
+
     async def _maybe_adapt(self) -> None:
         """Apply an adaptive-quality decision, if the controller requests one."""
         if self.adaptive is None:
@@ -240,13 +272,14 @@ class RfbSession:
         if target is None:
             return
         self.max_inflight = target.max_inflight
-        if target.bitrate != self.bitrate:
-            self.bitrate = target.bitrate
-            if self.encoder_factory is not None and self._enc_size is not None:
-                w, h = self._enc_size
-                self.encoder.close()
-                self.encoder = self.encoder_factory(w, h, self.bitrate)
-                self.force_keyframe = True
+        rebuild = target.bitrate != self.bitrate or target.fps != self.fps
+        self.bitrate = target.bitrate
+        self.fps = target.fps
+        if rebuild and self.encoder_factory is not None and self._enc_size is not None:
+            w, h = self._enc_size
+            self.encoder.close()
+            self.encoder = self.encoder_factory(w, h, self.bitrate, self.fps)
+            self.force_keyframe = True
         await self.ws.send(json.dumps({"type": "set_quality", "bitrate": self.bitrate, "fps": self.fps}))
 
     async def encode_loop(self) -> None:

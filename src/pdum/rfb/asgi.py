@@ -140,6 +140,7 @@ def _stream_host(
     max_inflight: int,
     adaptive: bool,
     still_after: float | None,
+    stats_interval: float | None,
     authenticate: Authenticator | None,
 ) -> _StreamHost:
     return _StreamHost(
@@ -152,6 +153,7 @@ def _stream_host(
         max_inflight=max_inflight,
         adaptive=adaptive,
         still_after=still_after,
+        stats_interval=stats_interval,
         authenticate=authenticate,
         gpu=gpu,
     )
@@ -169,6 +171,7 @@ def rfb_endpoint(
     max_inflight: int = 2,
     adaptive: bool = False,
     still_after: float | None = None,
+    stats_interval: float | None = None,
     authenticate: Authenticator | None = None,
 ) -> Endpoint:
     """Return a Starlette WebSocket endpoint that streams one :class:`Display`.
@@ -194,6 +197,7 @@ def rfb_endpoint(
         max_inflight=max_inflight,
         adaptive=adaptive,
         still_after=still_after,
+        stats_interval=stats_interval,
         authenticate=authenticate,
     )
 

@@ -21,26 +21,40 @@ work order**. We proceed one item at a time, committing at each milestone:
    [Multiple streams](multiple_streams.md))
 3. ~~**§3** — ASGI / Starlette adapter~~ ✅ **done** (`[asgi]` extra,
    `pdum.rfb.asgi.rfb_endpoint`; WebTransport stays deferred; see [ASGI](asgi.md))
-4. **§1** — adaptive / metrics remaining polish — **▶ next**
+4. ~~**§1** — adaptive / metrics remaining polish~~ ✅ **done** (fps lever,
+   server→client `stats` push surfaced in the client `Stats`; resolution-scale left
+   to the publisher — see §1 below)
+
+All four planned items are done. Remaining open ideas live in their sections below
+(notably §5 AV1/HEVC, §6 codec upgrades, and the WebTransport half of §3), tabled
+until prioritized.
 
 **Skipped** (by request): **§4** framework & notebook adapters. **Tabled** (revisit
 later): **§5** remaining (AV1 / HEVC / zero-copy interop) and **§6** (rendering &
-codec upgrades). **Done:** §2, §3, §7, §8.
+codec upgrades). **Done:** §1, §2, §3, §7, §8.
 
-## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ next — remaining polish**
+## 1. Measure & adapt the software encoder ✅ _(done)_
 
 - **Per-session metrics** — `metrics.py` (`SessionMetrics`): encode_ms, payload
   bytes, in-flight, ACK RTT, decode-queue depth, fps, bitrate; exposed via
-  `session.metrics_snapshot()` and `GET /metrics`.
+  `session.metrics_snapshot()` and `GET /metrics` (`GET /streams/<name>/metrics`).
 - **Offline benchmark** — `python -m pdum.rfb.benchmark`: image vs H.264 across
   patterns/resolutions with **real PSNR** (decodes the output back).
 - **Adaptive quality** — `adaptive.py` (`AdaptiveQualityController`), opt-in via
-  `serve(adaptive=True)` / `--adaptive`: lowers bitrate (then tightens in-flight at
-  the floor) on congestion, recovers when healthy, with a cooldown; rebuilds the
-  encoder and emits `set_quality`.
+  `serve(adaptive=True)` / `--adaptive`: three levers in order — bitrate, then **fps**
+  (rebuilds the encoder at the new rate), then in-flight — on congestion, recovering
+  when healthy, with a cooldown; emits `set_quality`.
+- **Client surfacing** ✅ — opt-in server→client `stats` push
+  (`serve(stats_interval=…)` / `--stats-interval`): the browser folds authoritative
+  RTT / fps / bitrate / encode-time / adaptive targets into its `Stats`
+  (`serverRttMs`, `targetFps`, …) via `onStats`; the worker now acts on `set_quality`
+  and `stats` instead of ignoring them.
 
-Remaining polish: surface RTT/quality in the client `Stats` and have the worker act
-on `set_quality`; add a `fps` knob; resolution-scale adaptation.
+Remaining (open): **resolution-scale adaptation** is deliberately left to the
+publisher — in the push model you own the framebuffer resolution, so the clean place
+to drop it is the render loop (publish a smaller array; the encoder rebuilds and the
+browser re-`configure()`s). A server-driven hint could be added later if a real need
+appears.
 
 ## 2. "Still after interaction settles" ✅ _(done)_ _(addendum §1)_
 

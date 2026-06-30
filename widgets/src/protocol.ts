@@ -111,7 +111,16 @@ export interface SetQualityMsg {
 }
 export interface StatsMsg {
   type: "stats";
-  server_queue: number;
-  dropped: number;
+  // Authoritative server-side metrics (see SessionMetrics.snapshot); all optional
+  // so the client tolerates partial/extended payloads.
+  rtt_ms?: number;
+  fps_sent?: number;
+  fps_acked?: number;
+  bitrate_bps?: number;
+  encode_ms?: number;
+  decode_queue_size?: number;
+  dropped?: number;
+  target_bitrate?: number;
+  target_fps?: number;
 }
 export type ServerControl = ConfigMsg | SetQualityMsg | StatsMsg;

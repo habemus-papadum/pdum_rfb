@@ -6,14 +6,17 @@ transport- and encoder-agnostic: it only emits a :class:`QualityTarget`; the
 session decides how to apply it (rebuild the H.264 encoder at the new bitrate,
 tighten the in-flight ceiling).
 
-Two knobs, applied in order:
+Three knobs, applied in order under congestion:
 
 * **bitrate** — the primary lever; reduce when congested, recover when healthy;
-* **max in-flight** — the latency lever; once bitrate is at the floor and the
-  client is still behind, tighten the in-flight ceiling so latest-frame-wins
-  drops more aggressively.
+* **fps** — once bitrate is at the floor and the client is still behind, lower the
+  target frame rate (the encoder is rebuilt at the new rate, lightening both encode
+  cost and bandwidth);
+* **max in-flight** — the latency lever; once bitrate *and* fps are at their floors,
+  tighten the in-flight ceiling so latest-frame-wins drops more aggressively.
 
-A cooldown prevents thrashing (each bitrate change costs a keyframe).
+Recovery walks back up when healthy. A cooldown prevents thrashing (each bitrate /
+fps change costs a keyframe).
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ class QualityTarget:
 
     bitrate: int
     max_inflight: int
+    fps: int
 
 
 @dataclass
@@ -40,6 +44,11 @@ class AdaptiveQualityController:
     min_inflight: int = 1
     max_inflight: int = 3
     inflight: int = 3
+
+    min_fps: int = 10
+    max_fps: int = 30
+    fps: int = 30
+    fps_step: int = 5
 
     queue_high: int = 3  # decode_queue_size above this is "congested"
     rtt_high_ms: float = 150.0
@@ -61,20 +70,23 @@ class AdaptiveQualityController:
         congested = queue > self.queue_high or (rtt > 0 and rtt > self.rtt_high_ms)
         healthy = queue <= 1 and (rtt == 0 or rtt < self.rtt_low_ms)
 
-        new_bitrate, new_inflight = self.bitrate, self.inflight
+        new_bitrate, new_inflight, new_fps = self.bitrate, self.inflight, self.fps
         if congested:
             new_bitrate = max(self.min_bitrate, int(self.bitrate * self.down_factor))
-            if new_bitrate == self.bitrate:  # already at the floor; tighten latency
-                new_inflight = max(self.min_inflight, self.inflight - 1)
+            if new_bitrate == self.bitrate:  # bitrate floored; ease the frame rate
+                new_fps = max(self.min_fps, self.fps - self.fps_step)
+                if new_fps == self.fps:  # fps floored too; tighten latency
+                    new_inflight = max(self.min_inflight, self.inflight - 1)
         elif healthy:
             new_bitrate = min(self.max_bitrate, int(self.bitrate * self.up_factor))
             new_inflight = min(self.max_inflight, self.inflight + 1)
+            new_fps = min(self.max_fps, self.fps + self.fps_step)
         else:
             return None
 
-        if new_bitrate == self.bitrate and new_inflight == self.inflight:
+        if (new_bitrate, new_inflight, new_fps) == (self.bitrate, self.inflight, self.fps):
             return None
 
-        self.bitrate, self.inflight = new_bitrate, new_inflight
+        self.bitrate, self.inflight, self.fps = new_bitrate, new_inflight, new_fps
         self._last_change = now
-        return QualityTarget(bitrate=new_bitrate, max_inflight=new_inflight)
+        return QualityTarget(bitrate=new_bitrate, max_inflight=new_inflight, fps=new_fps)

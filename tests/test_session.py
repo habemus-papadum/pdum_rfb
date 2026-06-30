@@ -5,6 +5,8 @@ helpers (``_encode_step`` / ``_handle_control``) — no real sockets or threads'
 scheduling, so the invariants are exact.
 """
 
+import json
+
 import numpy as np
 import pytest
 
@@ -114,8 +116,8 @@ async def test_event_and_set_viewport_reach_source():
 async def test_encoder_rebuilt_and_keyframe_forced_on_size_change():
     builds: list[tuple[int, int, int]] = []
 
-    def factory(w, h, bitrate):
-        builds.append((w, h, bitrate))
+    def factory(w, h, bitrate, fps):
+        builds.append((w, h, bitrate, fps))
         return FakeEncoder()
 
     session, _, _ = _make_session(encoder=FakeEncoder(), factory=factory)
@@ -124,7 +126,7 @@ async def test_encoder_rebuilt_and_keyframe_forced_on_size_change():
     assert builds == []
     session.force_keyframe = False
     session._ensure_encoder_for(128, 96)  # size change -> rebuild + keyframe
-    assert builds == [(128, 96, 5_000_000)]
+    assert builds == [(128, 96, 5_000_000, 30)]  # carries the session fps
     assert session.force_keyframe is True
 
 
@@ -182,6 +184,33 @@ async def test_still_skipped_when_client_behind():
     # Settled, but the client hasn't acked: the still is skipped, not queued.
     assert await session._encode_step() == "still"
     assert len(ws.sent) == 1  # only the live frame went out
+
+
+async def test_stats_interval_pushes_server_stats_to_client():
+    clock = _FakeClock()
+    source = SyntheticFrameSource(pattern="solid", width=64, height=48, fps=1000, pace=False)
+    ws = FakeWebSocket()
+    session = RfbSession(source, FakeEncoder(), ws, max_inflight=100, stats_interval=1.0, clock=clock)
+
+    await session._encode_step()  # seq 0 sent (binary)
+    clock.advance(0.05)
+    await session._handle_control({"type": "ack", "seq": 0, "decode_queue_size": 2})
+    stats = [json.loads(m) for m in ws.sent if isinstance(m, str)]
+    assert len(stats) == 1 and stats[0]["type"] == "stats"
+    assert stats[0]["rtt_ms"] > 0 and stats[0]["decode_queue_size"] == 2
+    assert "target_fps" in stats[0] and "bitrate_bps" in stats[0]
+
+    # Throttled: a second ack within the interval does not push again.
+    clock.advance(0.1)
+    await session._handle_control({"type": "ack", "seq": 0, "decode_queue_size": 1})
+    assert sum(isinstance(m, str) for m in ws.sent) == 1
+
+
+async def test_no_stats_pushed_without_interval():
+    session, ws, _ = _make_session(max_inflight=100)
+    await session._encode_step()
+    await session._handle_control({"type": "ack", "seq": 0})
+    assert all(not isinstance(m, str) for m in ws.sent)  # no control text messages
 
 
 async def test_metrics_track_encode_send_and_ack_rtt():

@@ -438,7 +438,15 @@ When using `serve(..., record_events=...)` or the CLI, the same port exposes the
 
 ```bash
 curl http://127.0.0.1:8765/metrics   # JSON array, one object per active session
+# per stream: curl http://127.0.0.1:8765/streams/<name>/metrics
 ```
+
+To surface these in the **browser** too, opt in to a periodic server→client `stats`
+push — `serve(..., stats_interval=1.0)` (or `--stats-interval 1.0`). Each client then
+receives the authoritative RTT, fps, bitrate, encode time, and adaptive targets and
+folds them into its `Stats` (the `serverRttMs` / `serverBitrateBps` / `targetFps` …
+fields), delivered to the view's `onStats` callback. Without it, the client only
+knows its own decode side.
 
 ### Offline benchmark
 
@@ -463,23 +471,35 @@ both return a `BenchmarkResult`.
 
 ### Adaptive quality
 
-Enable a controller that lowers bitrate (and, at the floor, tightens the in-flight
-ceiling) when the client's decode queue or ACK latency grows, and recovers when it
-drains — with a cooldown so it doesn't thrash (each bitrate change costs a
-keyframe). It is **opt-in**:
+Enable a controller that reacts to the client's decode-queue depth and ACK latency
+with three levers, applied in order, and recovers when the client drains — with a
+cooldown so it doesn't thrash (each change costs a keyframe). It is **opt-in**:
+
+1. **bitrate** — the primary lever (reduce when congested, recover when healthy);
+2. **fps** — once bitrate is at its floor and still congested, ease the frame rate
+   (the encoder is rebuilt at the new rate);
+3. **max in-flight** — once bitrate *and* fps are floored, tighten the in-flight
+   ceiling so latest-frame-wins drops more aggressively.
 
 ```bash
-uv run python -m pdum.rfb.server --adaptive --pattern checkerboard
+uv run python -m pdum.rfb.server --adaptive --stats-interval 1.0 --pattern checkerboard
 ```
 
 ```python
-display = await serve(1280, 720, adaptive=True)
+display = await serve(1280, 720, adaptive=True, stats_interval=1.0)
 ```
 
-The policy lives in the pure `AdaptiveQualityController` (thresholds, factors, and
-cooldown are constructor args); the session applies its `QualityTarget` by
-rebuilding the H.264 encoder at the new bitrate (forcing a keyframe) and sending an
-informational `set_quality` message to the client.
+The policy lives in the pure `AdaptiveQualityController` (thresholds, factors, fps
+step, and cooldown are constructor args); the session applies its `QualityTarget` by
+rebuilding the encoder at the new bitrate/fps (forcing a keyframe) and sending an
+informational `set_quality` message to the client. Pair it with `stats_interval` so
+the browser can show what the controller is doing (see the metrics note above).
+
+> _Resolution-scale adaptation_ (a fourth lever) is intentionally **not** automatic:
+> in the push model the publisher owns the framebuffer resolution, so the clean place
+> to drop resolution is your render loop (publish a smaller array — the encoder
+> rebuilds and the browser re-`configure()`s itself). It is noted as future work in
+> the [roadmap](roadmap.md).
 
 ## Testing helpers
 

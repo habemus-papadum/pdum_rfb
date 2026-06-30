@@ -44,6 +44,16 @@ export interface Stats {
   lastDisplayedSeq: number;
   decodeQueueSize: number;
   transport: "image" | "webcodecs" | "none";
+  // Server-truth metrics, populated from the server's `stats` / `set_quality`
+  // control messages (undefined until the server pushes them; enable with
+  // `serve(stats_interval=...)`). The decode-side fields above are always local.
+  serverRttMs?: number;
+  serverFpsSent?: number;
+  serverBitrateBps?: number;
+  serverEncodeMs?: number;
+  serverDropped?: number;
+  targetBitrate?: number;
+  targetFps?: number;
 }
 
 export type WorkerToMain =

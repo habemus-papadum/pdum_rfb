@@ -46,8 +46,13 @@ interface RfbViewOptions {
 ```
 
 `ConnectionState` is `connecting | open | negotiated | closed | error`. `Stats`
-reports `framesDisplayed`, `framesDropped`, `lastDisplayedSeq`, `decodeQueueSize`,
-and `transport` (`image | webcodecs | none`).
+reports the local decode side — `framesDisplayed`, `framesDropped`,
+`lastDisplayedSeq`, `decodeQueueSize`, and `transport` (`image | webcodecs | none`).
+When the server is started with `stats_interval` (and/or `adaptive`), it also pushes
+authoritative server-truth metrics that `Stats` surfaces as optional fields:
+`serverRttMs`, `serverFpsSent`, `serverBitrateBps`, `serverEncodeMs`,
+`serverDropped`, and the adaptive `targetBitrate` / `targetFps` (undefined until the
+server sends them).
 
 ### Authentication
 

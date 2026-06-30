@@ -121,6 +121,7 @@ class _StreamHost:
         max_inflight: int = 2,
         adaptive: bool = False,
         still_after: float | None = None,
+        stats_interval: float | None = None,
         authenticate: Authenticator | None = None,
         gpu: bool = False,
     ) -> None:
@@ -169,6 +170,7 @@ class _StreamHost:
         self.max_inflight = max_inflight
         self.adaptive = adaptive
         self.still_after = still_after
+        self.stats_interval = stats_interval
         self.authenticate = authenticate
 
     async def handler(self, connection: Any) -> None:
@@ -206,12 +208,12 @@ class _StreamHost:
             feed = self.display._make_feed(client_id, principal)
             width, height = self.display.width, self.display.height
 
-            def factory(w: int, h: int, bitrate: int):
+            def factory(w: int, h: int, bitrate: int, fps: int):
                 encoder = build_encoder(
                     selection,
                     width=w,
                     height=h,
-                    fps=self.fps,
+                    fps=fps,
                     bitrate=bitrate,
                     video_encoder=self.video_encoder,
                 )
@@ -223,7 +225,7 @@ class _StreamHost:
                     encoder = HostFrameAdapter(encoder)
                 return encoder
 
-            encoder = factory(width, height, self.bitrate)
+            encoder = factory(width, height, self.bitrate, self.fps)
             transport = "webcodecs" if selection.transport == "h264" else "image"
             await conn.send(config_message(transport=transport, width=width, height=height, codec=selection.codec))
 
@@ -233,6 +235,8 @@ class _StreamHost:
                     bitrate=self.bitrate,
                     max_inflight=self.max_inflight,
                     inflight=self.max_inflight,
+                    max_fps=self.fps,
+                    fps=self.fps,
                 )
                 if self.adaptive
                 else None
@@ -247,6 +251,7 @@ class _StreamHost:
                 fps=self.fps,
                 adaptive=controller,
                 still_after=self.still_after,
+                stats_interval=self.stats_interval,
             )
             self.display._register_session(session)
             closer = asyncio.create_task(_close_feed_on_disconnect(conn, feed))
@@ -346,6 +351,7 @@ class Server:
         gpu: bool = False,
         adaptive: bool = False,
         still_after: float | None = None,
+        stats_interval: float | None = None,
         authenticate: Authenticator | None = None,
         record_events: bool = False,
         event_log: str | Path | None = None,
@@ -378,6 +384,7 @@ class Server:
             max_inflight=max_inflight,
             adaptive=adaptive,
             still_after=still_after,
+            stats_interval=stats_interval,
             authenticate=authenticate,
             gpu=gpu,
         )
@@ -499,6 +506,7 @@ async def serve(
     gpu: bool = False,
     adaptive: bool = False,
     still_after: float | None = None,
+    stats_interval: float | None = None,
     authenticate: Authenticator | None = None,
     origins: list[str | None] | None = None,
     record_events: bool = False,
@@ -533,6 +541,15 @@ async def serve(
         path, a clean **IDR** on the video path — so the settled image is crisp even
         though the live stream is lossy. ``None`` (default) disables it. See
         ``docs/still_after_settle.md``.
+    adaptive:
+        Enable adaptive quality (bitrate → fps → in-flight, with recovery): the
+        encoder is rebuilt as the controller reacts to the client's decode-queue
+        depth and RTT. Pairs well with ``stats_interval`` so the browser can show it.
+    stats_interval:
+        Opt in to a periodic server→client ``stats`` control message (seconds, e.g.
+        ``1.0``) carrying authoritative server metrics — RTT, fps, bitrate, encode
+        time, and the adaptive targets — so the browser can surface them in its
+        ``Stats``. ``None`` (default) sends none.
     authenticate:
         Optional async hook (see :mod:`pdum.rfb.auth`); rejected connections are
         closed with code ``4401`` before any frame is sent.
@@ -560,6 +577,7 @@ async def serve(
         gpu=gpu,
         adaptive=adaptive,
         still_after=still_after,
+        stats_interval=stats_interval,
         authenticate=authenticate,
         record_events=record_events,
         event_log=event_log,
@@ -628,6 +646,7 @@ async def _amain(args: argparse.Namespace) -> None:
         gpu=args.gpu,
         adaptive=args.adaptive,
         still_after=args.still_after,
+        stats_interval=args.stats_interval,
         record_events=args.record_events,
         event_log=args.event_log,
     )
@@ -686,7 +705,14 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="zero-copy CUDA→NVENC: upload pattern frames to the GPU and encode them directly (needs CuPy + PyAV>=18)",
     )
-    parser.add_argument("--adaptive", action="store_true", help="enable adaptive bitrate/backpressure")
+    parser.add_argument("--adaptive", action="store_true", help="enable adaptive bitrate/fps/backpressure")
+    parser.add_argument(
+        "--stats-interval",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="push server-truth stats (RTT/fps/bitrate) to the client every N seconds (e.g. 1.0)",
+    )
     parser.add_argument(
         "--still-after",
         type=float,
