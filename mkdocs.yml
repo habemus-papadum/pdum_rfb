@@ -13,9 +13,14 @@ theme:
 nav:
   - Home: index.md
   - Overview: remote_framebuffer.md
+  - Installation: installation.md
   - Python Guide: guide_python.md
   - JavaScript Guide: guide_javascript.md
   - Internals: internals.md
+  - Performance: performance.md
+  - GPU / hardware encode:
+      - Zero-copy CUDA→NVENC (PyAV): gpu_zerocopy.md
+      - NVENC SDK evaluation: nvenc_sdk_evaluation.md
   - Roadmap: roadmap.md
   - API: reference.md
   - Design Notes:

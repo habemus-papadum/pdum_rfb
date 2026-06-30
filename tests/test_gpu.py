@@ -21,10 +21,27 @@ import pytest
 from pdum.rfb import gpu
 from pdum.rfb.encoders.base import available_video_encoders
 
-HAS_CUPY = importlib.util.find_spec("cupy") is not None
+
+def _cupy_usable() -> bool:
+    """CuPy importable *and* a CUDA device present.
+
+    CuPy is a dev dependency, so it is installed in CI on GPU-less runners too; the
+    GPU tests must skip there, not error. Requiring a live device gates correctly.
+    """
+    if importlib.util.find_spec("cupy") is None:
+        return False
+    try:
+        import cupy as cp
+
+        return cp.cuda.runtime.getDeviceCount() > 0
+    except Exception:
+        return False
+
+
+HAS_CUPY = _cupy_usable()
 ZEROCOPY = HAS_CUPY and gpu.cuda_zerocopy_available()
 
-requires_cupy = pytest.mark.skipif(not HAS_CUPY, reason="cupy not installed")
+requires_cupy = pytest.mark.skipif(not HAS_CUPY, reason="cupy unavailable (not installed or no CUDA device)")
 requires_zerocopy = pytest.mark.skipif(
     not ZEROCOPY, reason="zero-copy CUDA NVENC unavailable (needs CuPy + NVENC GPU + PyAV>=18)"
 )

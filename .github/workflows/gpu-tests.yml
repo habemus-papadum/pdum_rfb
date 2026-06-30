@@ -1,0 +1,64 @@
+# Weekly GPU smoke + benchmark — runs the GPU test tier and `pdum-rfb benchmark`
+# on real NVIDIA hardware. The normal CI (ci.yml) runs GPU-less and skips these,
+# so this is the only place the GPU paths are exercised in CI.
+#
+# REQUIRES a GPU runner. Either:
+#   * a self-hosted runner on an NVIDIA box, labelled `gpu` (free; register via
+#     repo Settings → Actions → Runners), or
+#   * a GitHub-hosted GPU "larger runner" (paid; Team/Enterprise) — swap `runs-on`
+#     for that runner's label.
+# With no such runner registered this workflow simply stays queued; it never runs
+# on the default GitHub-hosted pool.
+name: gpu-tests
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  gpu:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync deps (incl. the gpu-dev group -> CuPy)
+        run: uv sync --frozen --group gpu-dev
+
+      - name: Install the latest released NVENC SDK wheel (optional)
+        continue-on-error: true   # only adds the nvenc-sdk rows; fine if no release yet
+        run: |
+          uv run --group gpu-dev python - <<'PY'
+          import json, urllib.request, subprocess, sys
+          api = "https://api.github.com/repos/${{ github.repository }}/releases"
+          rels = json.load(urllib.request.urlopen(api))
+          urls = [a["browser_download_url"]
+                  for r in rels for a in r.get("assets", [])
+                  if a["name"].startswith("pdum_rfb_nvenc_sdk-") and a["name"].endswith(".whl")]
+          if urls:
+              subprocess.run([sys.executable, "-m", "pip", "install", urls[0]], check=True)
+          else:
+              print("no SDK wheel release found; skipping the nvenc-sdk rows")
+          PY
+
+      - name: doctor
+        run: uv run --group gpu-dev pdum-rfb doctor
+
+      - name: GPU test tier
+        run: uv run --group gpu-dev pytest tests/test_gpu.py -v
+
+      - name: Benchmark (image / CPU h264 / host NVENC / SDK)
+        run: |
+          uv run --group gpu-dev pdum-rfb benchmark \
+            --sizes 1280x720,1920x1080,3840x2160 --frames 120 --bitrate 10M | tee benchmark.txt
+
+      - name: Upload benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-benchmark
+          path: benchmark.txt

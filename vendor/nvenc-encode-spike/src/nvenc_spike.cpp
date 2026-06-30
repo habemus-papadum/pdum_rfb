@@ -83,7 +83,7 @@ static NV_ENC_TUNING_INFO pick_tuning(const std::string &t) {
 class NvencSpike {
 public:
     NvencSpike(int width, int height, const std::string &codec, const std::string &preset,
-               const std::string &tuning, int fps, int gop, int gpu_id, size_t cuda_context)
+               const std::string &tuning, int fps, int gop, int bitrate, int gpu_id, size_t cuda_context)
         : m_width(width), m_height(height) {
         if (width <= 0 || height <= 0 || (width & 1) || (height & 1))
             throw std::invalid_argument("width/height must be positive and even");
@@ -117,6 +117,16 @@ public:
         // pdum.rfb invariant: no B-frames (output order == input order).
         cfg.frameIntervalP = 1;
         if (gop > 0) cfg.gopLength = (uint32_t)gop;
+
+        // Target a bitrate (VBR) so benchmarks are comparable to the PyAV paths;
+        // bitrate<=0 leaves the preset's default rate control untouched.
+        if (bitrate > 0) {
+            cfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_VBR;
+            cfg.rcParams.averageBitRate = (uint32_t)bitrate;
+            cfg.rcParams.maxBitRate = (uint32_t)bitrate;
+            cfg.rcParams.vbvBufferSize = (uint32_t)(bitrate / (fps > 0 ? fps : 30));
+            cfg.rcParams.vbvInitialDelay = cfg.rcParams.vbvBufferSize;
+        }
 
         // Browser WebCodecs wants in-band SPS/PPS (VPS) repeated on every IDR.
         if (is_hevc) {
@@ -228,10 +238,10 @@ PYBIND11_MODULE(_nvenc_spike, m) {
     m.attr("nvtx_enabled") = false;
 #endif
     py::class_<NvencSpike>(m, "NvencSpike")
-        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, size_t>(),
+        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, int, size_t>(),
              py::arg("width"), py::arg("height"), py::arg("codec") = "h264", py::arg("preset") = "p3",
-             py::arg("tuning") = "ll", py::arg("fps") = 30, py::arg("gop") = 30, py::arg("gpu_id") = 0,
-             py::arg("cuda_context") = 0,
+             py::arg("tuning") = "ll", py::arg("fps") = 30, py::arg("gop") = 30, py::arg("bitrate") = 0,
+             py::arg("gpu_id") = 0, py::arg("cuda_context") = 0,
              "Create an NV12->H.264/HEVC Annex B encoder. Pass cuda_context=0 to retain "
              "the device primary context (shared with CuPy/PyTorch).")
         .def("encode", &NvencSpike::encode, py::arg("frame"), py::arg("force_idr") = false,

@@ -29,6 +29,9 @@ Homepage = "https://github.com/habemus-papadum/pdum_rfb"
 Repository = "https://github.com/habemus-papadum/pdum_rfb"
 Documentation = "https://github.com/habemus-papadum/pdum_rfb"
 
+[project.scripts]
+pdum-rfb = "pdum.rfb.cli:app"
+
 [project.optional-dependencies]
 h264 = [
     "av>=17.1.0",
@@ -68,6 +71,11 @@ gpu-cuda12 = [
 gpu-nvenc-sdk = [
     "cupy-cuda13x>=14",  # + pdum-rfb-nvenc-sdk wheel from GitHub Releases (see comment)
 ]
+# `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
+cli = [
+    "typer>=0.12",
+    "rich>=13.7",
+]
 
 
 [build-system]
@@ -95,6 +103,9 @@ dev = [
     "watchdog>=3.0.0",
     "av>=17.1.0",
     "pytest-asyncio>=1.4.0",
+    "typer>=0.12",
+]
+gpu-dev = [
     "cupy-cuda13x>=14",
 ]
 
