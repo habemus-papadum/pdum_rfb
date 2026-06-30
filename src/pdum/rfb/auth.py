@@ -55,6 +55,9 @@ class AuthContext:
     headers:
         Handshake request headers (e.g. ``Cookie``), when the transport exposes
         them. ``None`` for the plain ``hello``-token path.
+    cookies:
+        Parsed request cookies, when the transport exposes them (e.g. the ASGI
+        adapter) — the natural home for a same-origin session/OAuth cookie.
     path:
         Request path including query string, when available.
     query:
@@ -72,6 +75,7 @@ class AuthContext:
 
     token: str | None = None
     headers: Mapping[str, str] | None = None
+    cookies: Mapping[str, str] | None = None
     path: str | None = None
     query: Mapping[str, str] | None = None
     remote: tuple[str, int] | None = None

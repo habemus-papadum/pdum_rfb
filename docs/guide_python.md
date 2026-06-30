@@ -209,6 +209,22 @@ await server.aclose()
 [Multiple streams](multiple_streams.md) for routing, the REST listing, and
 per-stream auth.
 
+### Mounting in an ASGI app (Starlette / FastAPI)
+
+`serve()` runs its own `websockets` listener. If you instead want the framebuffer
+**inside** an existing Starlette/FastAPI app — same origin, sharing its TLS and
+session/OAuth cookie — install `[asgi]` and mount an endpoint over the *same*
+Display/session core:
+
+```python
+from pdum.rfb.asgi import rfb_endpoint
+app.add_websocket_route("/rfb", rfb_endpoint(display, authenticate=cookie_auth))
+```
+
+It's purely opt-in — the `serve()` path is unchanged. See the
+[ASGI / Starlette adapter](asgi.md) guide for the lifespan/publish-loop shape,
+cookie auth, and multi-stream mounting.
+
 ### The built-in CLI
 
 ```bash

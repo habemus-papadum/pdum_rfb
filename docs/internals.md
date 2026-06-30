@@ -206,7 +206,9 @@ src/pdum/rfb/
   session.py        RfbSession: loops, backpressure, keyframe policy
   display.py        Display (publish/poll_events/aclose) + internal _ClientFeed (per connection)
   auth.py           AuthContext / Authenticator / Principal (pluggable, no JWT dep)
-  transport.py      Channel protocol + WebSocketTransport (ASGI/WebTransport seam)
+  transport.py      Channel protocol + WebSocketTransport (the transport seam)
+  asgi.py           opt-in [asgi] Starlette front-end: rfb_endpoint / rfb_hub_endpoint
+                    + _AsgiConn (same core; drives _StreamHost._serve_connection)
   sources.py        BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (internal now)
   gpu.py            zero-copy GPU helpers: rgb_to_nv12, cuda_frame, context sharing, probes
   metrics.py        SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
@@ -214,7 +216,8 @@ src/pdum/rfb/
   benchmark.py      `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
   cli.py            `pdum-rfb` CLI: doctor (probe encode paths) + benchmark
   server.py         serve()->Display, serve_server()->Server hub (named streams,
-                    URL-path routing, /streams REST), _StreamHost, `python -m` CLI
+                    URL-path routing, /streams REST), _StreamHost (transport-neutral
+                    _serve_connection), _WsConn adapter, `python -m` CLI
   encoders/
     base.py         registry + build_encoder (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum)
     image.py        ImageEncoder (Pillow)

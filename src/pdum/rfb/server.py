@@ -56,17 +56,47 @@ def _nvenc_usable() -> bool:
 DEFAULT_STREAM = "default"
 
 
-async def _close_feed_on_disconnect(connection: Any, feed: _ClientFeed) -> None:
+async def _close_feed_on_disconnect(conn: Any, feed: _ClientFeed) -> None:
     """Stop ``feed`` when the socket closes, so a parked encode loop unparks.
 
     Without this, a client that disconnects while its session is idle (parked in
     ``next_frame`` waiting for the next publish) would never wake, and the
-    session's ``TaskGroup`` would not complete.
+    session's ``TaskGroup`` would not complete. ``conn`` is any connection adapter
+    exposing ``wait_closed()`` (see :class:`_WsConn` / the ASGI adapter).
     """
     try:
-        await connection.wait_closed()
+        await conn.wait_closed()
     finally:
         feed.close()
+
+
+class _WsConn(WebSocketTransport):
+    """Adapt a ``websockets`` server connection to the surface a connection lifecycle
+    needs: the session :class:`~pdum.rfb.transport.Channel` (``send`` / ``__aiter__``
+    / ``close``, inherited) **plus** ``recv`` (the initial hello), ``wait_closed``,
+    and ``auth_fields`` (handshake metadata for :class:`AuthContext`).
+
+    This is the seam that lets :meth:`_StreamHost._serve_connection` be
+    transport-neutral: the ASGI adapter implements the same surface over a Starlette
+    WebSocket, translating ``WebSocketDisconnect`` onto the ``ConnectionClosed`` the
+    session already handles.
+    """
+
+    __slots__ = ()
+
+    async def recv(self) -> Any:
+        return await self._ws.recv()
+
+    async def wait_closed(self) -> None:
+        await self._ws.wait_closed()
+
+    def auth_fields(self) -> dict:
+        req = getattr(self._ws, "request", None)
+        return {
+            "headers": getattr(req, "headers", None),
+            "path": getattr(req, "path", None),
+            "remote": getattr(self._ws, "remote_address", None),
+        }
 
 
 class _StreamHost:
@@ -142,21 +172,34 @@ class _StreamHost:
         self.authenticate = authenticate
 
     async def handler(self, connection: Any) -> None:
+        """Drive one ``websockets`` connection (the standalone ``serve()`` path)."""
+        await self._serve_connection(_WsConn(connection))
+
+    async def _serve_connection(self, conn: Any) -> None:
+        """Negotiate, authenticate, and run one session over any connection adapter.
+
+        Transport-neutral: ``conn`` is a :class:`_WsConn` for the standalone
+        ``websockets`` listener or the ASGI adapter for a Starlette WebSocket. Both
+        expose ``recv`` / ``send`` / ``close`` / ``wait_closed`` / ``auth_fields``
+        and are the session's :class:`~pdum.rfb.transport.Channel`. The adapters
+        raise the ``ConnectionClosed`` the session already handles, so this body is
+        identical for both front-ends.
+        """
         import websockets
 
         try:
-            hello = parse_control(await connection.recv())
+            hello = parse_control(await conn.recv())
 
-            principal = await self._authenticate(connection, hello)
+            principal = await self._authenticate(conn, hello)
             if principal is _REJECTED:
-                await connection.close(4401, "unauthorized")
+                await conn.close(4401, "unauthorized")
                 return
 
             supported = hello.get("supported", [])
             try:
                 selection = select_transport(supported, has_h264=self.has_h264, has_nvenc=self.has_nvenc)
             except UnsupportedClient:
-                await connection.close(1003, "no supported transport")
+                await conn.close(1003, "no supported transport")
                 return
 
             client_id = uuid4().hex
@@ -182,9 +225,7 @@ class _StreamHost:
 
             encoder = factory(width, height, self.bitrate)
             transport = "webcodecs" if selection.transport == "h264" else "image"
-            await connection.send(
-                config_message(transport=transport, width=width, height=height, codec=selection.codec)
-            )
+            await conn.send(config_message(transport=transport, width=width, height=height, codec=selection.codec))
 
             controller = (
                 AdaptiveQualityController(
@@ -199,7 +240,7 @@ class _StreamHost:
             session = RfbSession(
                 feed,
                 encoder,
-                WebSocketTransport(connection),
+                conn,
                 encoder_factory=factory,
                 max_inflight=self.max_inflight,
                 bitrate=self.bitrate,
@@ -208,7 +249,7 @@ class _StreamHost:
                 still_after=self.still_after,
             )
             self.display._register_session(session)
-            closer = asyncio.create_task(_close_feed_on_disconnect(connection, feed))
+            closer = asyncio.create_task(_close_feed_on_disconnect(conn, feed))
             try:
                 await session.run()
             finally:
@@ -217,16 +258,18 @@ class _StreamHost:
         except websockets.ConnectionClosed:
             pass
 
-    async def _authenticate(self, connection: Any, hello: dict) -> Any:
+    async def _authenticate(self, conn: Any, hello: dict) -> Any:
         """Return the principal, ``None`` (anonymous), or ``_REJECTED``."""
         if self.authenticate is None:
             return None
-        req = getattr(connection, "request", None)
+        fields = conn.auth_fields()
         ctx = AuthContext(
             token=hello.get("token"),
-            headers=getattr(req, "headers", None),
-            path=getattr(req, "path", None),
-            remote=getattr(connection, "remote_address", None),
+            headers=fields.get("headers"),
+            cookies=fields.get("cookies"),
+            path=fields.get("path"),
+            query=fields.get("query"),
+            remote=fields.get("remote"),
             hello=hello,
             stream=self.name,
         )

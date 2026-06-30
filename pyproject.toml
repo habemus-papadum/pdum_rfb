@@ -76,6 +76,13 @@ cli = [
 rendercanvas = [
     "rendercanvas>=2.0",
 ]
+# Mount the framebuffer inside an existing Starlette/FastAPI (ASGI) app over the
+# same Display/RfbSession core, so it shares the app's origin and session/OAuth
+# cookie. Purely opt-in: the standalone serve() path (zero-extra-deps websockets
+# listener) is unchanged. See docs/asgi.md.
+asgi = [
+    "starlette>=0.37",
+]
 
 
 [build-system]
@@ -120,6 +127,7 @@ dev = [
     "av>=17.1.0",
     "pytest-asyncio>=1.4.0",
     "typer>=0.12",
+    "starlette>=0.37",  # exercises the [asgi] adapter in tests (TestClient WS)
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",

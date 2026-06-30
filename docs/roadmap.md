@@ -19,14 +19,15 @@ work order**. We proceed one item at a time, committing at each milestone:
 2. ~~**§8** — multiple streams per server (named displays)~~ ✅ **done**
    (`serve_server()` / `display.server.add_stream(...)`; see
    [Multiple streams](multiple_streams.md))
-3. **§3** — ASGI / Starlette adapter (WebTransport stays deferred) — **▶ next**
-4. **§1** — adaptive / metrics remaining polish
+3. ~~**§3** — ASGI / Starlette adapter~~ ✅ **done** (`[asgi]` extra,
+   `pdum.rfb.asgi.rfb_endpoint`; WebTransport stays deferred; see [ASGI](asgi.md))
+4. **§1** — adaptive / metrics remaining polish — **▶ next**
 
 **Skipped** (by request): **§4** framework & notebook adapters. **Tabled** (revisit
 later): **§5** remaining (AV1 / HEVC / zero-copy interop) and **§6** (rendering &
-codec upgrades). **Done:** §2, §7, §8.
+codec upgrades). **Done:** §2, §3, §7, §8.
 
-## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ step 4 — remaining polish**
+## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ next — remaining polish**
 
 - **Per-session metrics** — `metrics.py` (`SessionMetrics`): encode_ms, payload
   bytes, in-flight, ACK RTT, decode-queue depth, fps, bitrate; exposed via
@@ -50,22 +51,23 @@ path. Opt in with `serve(still_after=0.15)`; zero cost while interacting, no
 client-side changes. Implemented as an optional `encode_still()` encoder capability
 fed by `Display`'s `still_frame()`. See [Still after settle](still_after_settle.md).
 
-## 3. Logical-channel transport: ASGI now, WebTransport later — **▶ step 3 (ASGI only)** _(addendum §2)_
+## 3. Logical-channel transport: ASGI now, WebTransport later — ASGI ✅ _(done)_ _(addendum §2)_
 
 This is about the *transport*, **not** multi-client (which already works over plain
-WebSocket — see the intro). The **seam exists**: `transport.py` defines a `Channel`
-protocol and a `WebSocketTransport`, `RfbSession` only needs `send` + async
-iteration, and `authenticate` is fed a transport-neutral `AuthContext`.
+WebSocket — see the intro). The **seam existed** — `transport.py`'s `Channel` +
+`WebSocketTransport`, a session that only needs `send` + async iteration, and a
+transport-neutral `AuthContext` — so the per-connection lifecycle was refactored to a
+transport-neutral `_StreamHost._serve_connection(conn)` and both front-ends share it.
 
-- **ASGI / Starlette WebSocket adapter** — _benefit: high · difficulty: moderate._
-  Mount the stream same-origin inside an existing app and reuse its session/OAuth
-  cookie. Highest-leverage transport work; drops into the `Channel` seam (translate
-  `WebSocketDisconnect` onto the `ConnectionClosed` the session already catches).
-  Purely **opt-in**: an optional `[asgi]` extra and a second front-end over the same
-  `Display`/`RfbSession` core — the standalone `serve()` path (and its
-  zero-extra-deps `websockets` listener) is unchanged. The only difference for the
-  app is that the ASGI server owns the event loop, so the `Display` is created at
-  app startup and the publish loop runs as a background task.
+- **ASGI / Starlette WebSocket adapter** ✅ — _benefit: high · difficulty: moderate._
+  Shipped as the opt-in `[asgi]` extra + `pdum.rfb.asgi` (`rfb_endpoint`,
+  `rfb_hub_endpoint`): mount the stream same-origin inside an existing
+  Starlette/FastAPI app and reuse its session/OAuth cookie (`AuthContext.cookies`).
+  A second front-end over the same `Display`/`RfbSession` core — the standalone
+  `serve()` path (and its zero-extra-deps `websockets` listener) is unchanged. The
+  adapter translates `WebSocketDisconnect` onto the `ConnectionClosed` the session
+  already catches; the app owns the loop, so the `Display` is built at startup and
+  the publish loop runs as a background task. See [ASGI](asgi.md).
 - **WebTransport (HTTP/3)** — _benefit: modest for sparse viz · difficulty: high._
   Real QUIC streams per logical lane (video / control / events / telemetry) plus
   unreliable **datagrams** for latest-wins events/acks, removing head-of-line

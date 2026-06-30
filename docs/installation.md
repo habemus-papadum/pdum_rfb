@@ -47,6 +47,18 @@ Adds PyAV (libx264). Software H.264 — far smaller than image-per-frame at the 
 quality, and it installs anywhere PyAV publishes wheels. No GPU required. This is
 the best **portable** video path.
 
+## 2b. Mount in an ASGI app — `[asgi]`
+
+```bash
+pip install 'habemus-papadum-rfb[asgi]'
+```
+
+Adds Starlette so you can host the framebuffer **inside** an existing
+Starlette/FastAPI app (same origin, sharing its TLS and session cookie) instead of
+the standalone `serve()` listener. Pure Python, installs anywhere; it's a front-end
+choice, orthogonal to which encoder you pick. See the
+[ASGI / Starlette adapter](asgi.md) guide.
+
 ## 3. Host NVENC — `[nvenc]` + an NVIDIA GPU
 
 ```bash
