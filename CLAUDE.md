@@ -1,0 +1,215 @@
+# CLAUDE.md
+
+Guidance for Claude Code when working in this repository. See `AGENTS.md` for the
+full agent rules (this file complements it with an architecture-oriented summary
+distilled from `docs/`).
+
+## What this project is
+
+`pdum.rfb` (PyPI: `habemus-papadum-rfb`) is a **Remote Frame Buffer** library: it
+streams a server-rendered framebuffer to a browser over a WebSocket, with input
+events flowing back. The target use case is scientific/interactive visualization —
+render in Python, view and interact in the browser. It is **not** a generic VNC
+clone; the design is tuned for sparse, on-demand-rendered scientific scenes.
+
+Two halves:
+
+- **Python server** — `src/pdum/rfb/` (the published package). Python **3.14+**,
+  UV-managed.
+- **Browser client** — `widgets/`, a TypeScript package published as
+  `@habemus-papadum/rfb-widgets`. All decoding runs in a **Web Worker** that owns the
+  WebSocket, the decoder, and a transferred `OffscreenCanvas`.
+
+## Core mental model
+
+The public API is **push**: you own your loop and publish frames into a shared
+`Display`; the library fans them out to every connected viewer.
+
+```
+your loop ── display.publish(ndarray) ──►  Display (latest frame, +version)
+   ▲                                          │  one per connected browser:
+   └── for ev in display.poll_events()        ├─► _ClientFeed → RfbSession → EncoderBackend → WebSocket
+       (input from all viewers, tagged        └─► _ClientFeed → RfbSession → EncoderBackend → WebSocket
+        with client_id + principal)
+```
+
+```python
+display = await rfb.serve(1280, 720, port=8765)   # starts WS server in background, returns handle
+while running:
+    for ev in display.poll_events():     # ev.client_id, ev.principal, ev.event
+        state = update(state, ev)
+    display.publish(render(state))        # sync, non-blocking, latest-wins, fans out to all viewers
+    await asyncio.sleep(1/30)             # or ad-hoc / every 60s — you own the cadence
+await display.aclose()
+```
+
+`publish()` is synchronous (stores latest frame, bumps a version, wakes feeds) and
+must run on the event-loop thread. Each browser connection gets its **own**
+`RfbSession`+encoder (per-client backpressure/keyframes), fed from the display's
+latest frame via an internal `_ClientFeed`. The encoder/transport are still chosen
+by capability negotiation. The **pull** `FrameSource` model is internal-only now
+(the session still pulls from `_ClientFeed`); `sources.py`/`SyntheticFrameSource`
+are not part of the public API.
+
+### Two transports
+
+- **Image path** — one independent image per frame (JPEG/PNG/WebP via Pillow);
+  every frame is a keyframe. Good for stills/snapshots and the lossless-final
+  still. Dependency-light (numpy, pillow, websockets).
+- **H.264 path** — CPU H.264 via PyAV/libx264 (`[h264]` extra), emitting **Annex B**
+  access units for the browser's WebCodecs `VideoDecoder`. Low-latency config
+  (`ultrafast`/`zerolatency`, no B-frames, ~1s IDR cadence, in-band SPS/PPS).
+  `import pdum.rfb` works without the extra — PyAV symbols load lazily.
+
+### Key invariants (don't break these)
+
+- **Latest-frame-wins backpressure.** At most `max_inflight` payloads unacked;
+  when the client is behind, frames are dropped **before** encoding and the next
+  sent frame is forced to a keyframe (dropping already-encoded *delta* frames would
+  strand the browser on references it never received). First frame to any client is
+  a keyframe; `request_keyframe` forces one too.
+- **Real, monotonic timestamps** propagate source → encoder → `EncodedVideoChunk`,
+  so replay/recording/sync stay correct even with sparse frames.
+- **Fixed-resolution encoders.** A resize rebuilds the encoder and forces a
+  keyframe; the browser re-`configure()`s its decoder.
+- **No B-frames** ⇒ decoder output order == input order ⇒ a FIFO of `seq`s
+  attributes displayed frames for `displayed:true` ACKs. Enabling B-frames breaks
+  this.
+- Annex B only (never route H.264 through an mp4 muxer — that yields AVCC).
+
+## Where things live
+
+```
+src/pdum/rfb/
+  types.py        RawFrame, EncodedPayload, InputEvent, FrameSource/EncoderBackend protocols (dep-free)
+  protocol.py     binary envelope, header builders, control parsing, select_transport
+  session.py      RfbSession: recv_loop/encode_loop, backpressure, keyframe policy (UNCHANGED by push)
+  display.py      Display (publish/poll_events/events/aclose) + internal _ClientFeed (per connection)
+  auth.py         AuthContext, Authenticator, Principal — pluggable auth hook (no JWT dep)
+  transport.py    Channel protocol + WebSocketTransport (seam for a future ASGI/WebTransport adapter)
+  sources.py      BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (INTERNAL now, not exported)
+  server.py       serve()->Display, _ConnectionServer (+ HTTP side channel), `python -m pdum.rfb.server` CLI
+  encoders/
+    base.py       registry + build_encoder  (registers pyav + nvenc factories)
+    image.py      ImageEncoder (Pillow)
+    pyav_h264.py  PyAvH264Encoder + libx264_available / self_test
+    nvenc.py      NvencH264Encoder (GPU H.264 via PyAV h264_nvenc) + nvenc_available
+  metrics.py      SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
+  adaptive.py     AdaptiveQualityController (opt-in via serve(adaptive=True))
+  benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
+  testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
+                  fixture gen (excluded from coverage on purpose)
+
+widgets/src/
+  index.ts                  public exports
+  RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture)
+  protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
+  workerFactory.ts          inline worker (?worker&inline)
+  worker/{entry,renderer,imageDecode,videoDecode}.ts
+```
+
+### Wire protocol
+
+One WebSocket carries two message kinds:
+- **Control (JSON text):** client→server `hello` (may carry an auth `token`), `ack`,
+  `request_keyframe`, `set_viewport`, `event`; server→client `config`, plus optional
+  `set_quality`/`stats`. Auth: `serve(authenticate=...)` is called after `hello`,
+  before `config`; rejected connections close with code `4401`. In a shared display,
+  `set_viewport`/`resize` is **informational** — the publisher owns resolution.
+- **Payloads (binary):** one self-describing envelope per image/AU —
+  `uint32le header_len | utf8 JSON header | raw bytes`. Atomic by design (no
+  header/payload pairing race). The Python packer (`pack_binary_message`) and the
+  TS unpacker (`unpackBinaryMessage`) are kept byte-compatible by **committed
+  fixtures** in `widgets/tests/fixtures/protocol/`, regenerated via
+  `python -m pdum.rfb.testing <dir>` and asserted in Vitest. If you change the
+  envelope or headers, regenerate fixtures.
+
+## Common commands
+
+Python (from repo root):
+```bash
+./scripts/setup.sh                 # idempotent bootstrap: uv sync, pnpm, widget build, hooks
+uv run pytest                      # all Python tests (runs with -s)
+uv run ruff check . && uv run ruff format .
+uv run python -m pdum.rfb.server --pattern bouncing_box --port 8765   # demo server/CLI
+uv run python -m pdum.rfb.benchmark --frames 120 --pattern gradient   # offline encoder bench
+```
+
+Widgets (from `widgets/`, uses **pnpm**):
+```bash
+pnpm install
+pnpm dev          # demo at http://localhost:5173 (?ws=...&transport=image|video)
+pnpm typecheck    # tsc for library + worker (separate DOM / WebWorker libs)
+pnpm test         # Vitest unit tests
+pnpm build        # dist/index.js (+ .d.ts), worker inlined
+pnpm e2e          # Playwright headless e2e (boots the Python server + demo)
+```
+
+## Testing strategy (three layers, all headless)
+
+1. **pytest** — protocol round-trips (+ golden fixtures for JS), image-encoder
+   validity (re-decoded with Pillow), session invariants (max_inflight,
+   keyframe-first, latest-frame-wins, forced-keyframe-on-drop, events), negotiation,
+   and H.264 Annex B **decoded back with PyAV** to prove validity. One real
+   loopback-socket integration test.
+2. **Vitest** — unpacker asserted byte-for-byte vs Python fixtures; event-coordinate
+   scaling and backpressure/keyframe-gate logic in isolation.
+3. **Playwright** — boots the Python server (deterministic `test_card`) + a prod
+   demo build, decodes real frames, reads back canvas pixels and compares to
+   `expectedQuadrantColor` (TS mirror of Python's `render_test_pattern`); a second
+   spec injects real input and checks `GET /recorded-events`. H.264 path is gated on
+   `VideoDecoder.isConfigSupported`.
+
+`SyntheticFrameSource` / `render_test_pattern` / `expected_quadrant_color` are the
+cross-language contract — keep the Python and TS sides in sync.
+
+## Extension seams
+
+- **Encoders:** `register_video_encoder(name, factory)` + the `has_nvenc` flag in
+  `select_transport`. The GPU **NVENC** backend (`encoders/nvenc.py`) already uses
+  this seam: it rides on PyAV's bundled `h264_nvenc` (no extra Python dep beyond
+  `av`; NVIDIA's `PyNvVideoCodec` is unusable on 3.14 — no wheel/sdist), is gated
+  by `nvenc_available()` (OS + GPU probe), and `serve()` auto-prefers it. A future
+  zero-copy CUDA-buffer encoder slots in the same way (roadmap §5).
+- **Frames:** push `ndarray`s (or `RawFrame`s) to `Display.publish()`. The internal
+  `_ClientFeed` (in `display.py`) is the per-connection `FrameSource` the session
+  pulls; `BaseFrameSource`/`SyntheticFrameSource` remain for internal/test use.
+- **Auth:** `serve(authenticate=async fn)` — `fn(AuthContext) -> principal | None`.
+  v1 reads the token from `hello`; `AuthContext` also carries headers/cookies/path so
+  a future same-site-cookie/ASGI path feeds the same hook. No JWT dep in the library.
+- **Transport:** `transport.py`'s `Channel` protocol + `WebSocketTransport` is the
+  seam (roadmap §3); a Starlette/ASGI or WebTransport adapter drops in without
+  touching `RfbSession` (which only needs `await send(...)` + async iteration).
+
+## Project status & roadmap
+
+Image and CPU-H.264 paths work end-to-end and are verified headlessly. Done:
+per-session metrics + `GET /metrics`, offline benchmark with real PSNR, opt-in
+adaptive quality. Next (see `docs/roadmap.md`): "lossless still after interaction
+settles", logical-channel transport abstraction, React hook + Jupyter/marimo
+(anywidget) adapters, NVENC backend (needs Linux/NVIDIA), AV1, and npm packaging.
+
+## Hard rules (from AGENTS.md — do not violate)
+
+- **NEVER modify version numbers** — humans manage them (`pyproject.toml`,
+  `__init__.py` `__version__`, docs). Flag if you think a bump is needed.
+- **NEVER run `./scripts/release.sh`** (publishes to PyPI, creates public GitHub
+  releases, pushes tags). Humans only.
+- After changing any demo notebook (`docs/demos/*.ipynb`), run
+  `./scripts/test_notebooks.sh`.
+- Conventions: src-layout, UV exclusively (`uv.lock` committed; use
+  `uv sync --frozen`), Hatchling build, ruff (target 3.14, line length 120,
+  rules E/F/W/I), NumPy-style docstrings.
+
+## Docs map
+
+- `docs/guide_python.md` — Python user guide (sources, encoders, serve(), events,
+  metrics, adaptive, testing helpers).
+- `docs/guide_javascript.md` — browser client guide (`RemoteFramebufferView`,
+  options, framework integration, CSP/worker packaging).
+- `docs/internals.md` — data flow, wire protocol, session loop, H.264 path, worker,
+  module map, testing architecture, extension points.
+- `docs/roadmap.md` — what's next.
+- `docs/remote_framebuffer.md`, `docs/remote_framebuffer_addendum.md`,
+  `docs/remote_framebuffer_implementation_guide.md` — original design notes.
+- `docs/reference.md` — auto-generated API reference (mkdocstrings).

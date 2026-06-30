@@ -1,5 +1,5 @@
 {
-  "name": "pdum-rfb-widgets",
+  "name": "@habemus-papadum/rfb-widgets",
   "version": "0.1.0-alpha",
   "description": "Framework-agnostic remote framebuffer browser client (Web Worker decoding).",
   "type": "module",
@@ -11,6 +11,9 @@
     }
   },
   "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --emitDeclarationOnly -p tsconfig.json && vite build",

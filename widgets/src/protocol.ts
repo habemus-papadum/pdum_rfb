@@ -67,6 +67,8 @@ export interface HelloMsg {
   type: "hello";
   supported: string[];
   device_pixel_ratio: number;
+  /** Optional auth credential (e.g. a Google OAuth ID token) the server verifies. */
+  token?: string;
 }
 export interface AckMsg {
   type: "ack";

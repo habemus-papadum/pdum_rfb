@@ -16,137 +16,158 @@ symbols load lazily, so an image-only deployment never imports `av`.
 
 ## Mental model
 
-A session wires together three independent concerns:
+The API is **push**: you own your loop and publish frames into a shared `Display`;
+the library fans each frame out to every connected browser.
 
 ```text
-FrameSource      -> produces RawFrame objects (your renderer)
-EncoderBackend   -> turns RawFrame into EncodedPayload (image or H.264)
-RfbSession + serve() -> WebSocket transport, negotiation, backpressure
+your loop ── display.publish(ndarray) ─►  Display (latest frame, +version)
+   ▲                                         │   one RfbSession + encoder per viewer,
+   └── for ev in display.poll_events()       └─► fed from the latest frame, negotiating
+       (input from all viewers)                  image vs H.264 per client
 ```
 
-You normally implement (or pick) a **FrameSource** and call **`serve()`**. The
-encoder and transport are chosen automatically by capability negotiation.
-
-## Producing frames
-
-### From a callback
-
-The quickest path: wrap a `render(seq, timestamp_us) -> np.ndarray` callable.
+`serve()` starts the WebSocket server in the **background** and returns the live
+`Display`. You decide the cadence — 30 fps, on demand, or every 60 s. The encoder
+and transport are still chosen automatically by capability negotiation.
 
 ```python
 import asyncio
 import numpy as np
-from pdum.rfb import RenderCallbackSource, serve
+import pdum.rfb as rfb
 
-def render(seq: int, t_us: int) -> np.ndarray:
+def render(state) -> np.ndarray:
     arr = np.zeros((480, 640, 3), dtype=np.uint8)
-    x = (seq * 4) % 640
-    arr[:, x : x + 40] = (40, 160, 220)   # a moving band
+    arr[:, state["x"] : state["x"] + 40] = (40, 160, 220)   # a moving band
     return arr
 
 async def main():
-    server = await serve(
-        lambda: RenderCallbackSource(render, width=640, height=480, fps=30)
-    )
-    async with server as s:
-        await s.serve_forever()
+    display = await rfb.serve(640, 480, port=8765)
+    state = {"x": 0}
+    try:
+        while True:
+            for ev in display.poll_events():            # drain input from all viewers
+                if ev.event["type"] == "wheel":
+                    ...                                 # ev.client_id, ev.principal too
+            state["x"] = (state["x"] + 4) % 640
+            display.publish(render(state))              # sync, latest-wins, fans out
+            await asyncio.sleep(1 / 30)
+    finally:
+        await display.aclose()
 
 asyncio.run(main())
 ```
 
-`serve()` takes a **factory** (`() -> FrameSource`) so each browser connection
-gets its own source instance.
+`publish()` is **synchronous** and non-blocking (it stores the latest frame, bumps
+a version, and wakes each viewer's session). Call it on the event-loop thread. A
+viewer that falls behind simply skips intermediate frames (latest-frame-wins).
 
 ### Frame format
 
-A `RawFrame` carries a NumPy array whose layout matches `pixel_format`:
+`publish()` accepts a contiguous `uint8` NumPy array (or a ready `RawFrame`):
 
-| `pixel_format` | array shape       | notes                                  |
-| -------------- | ----------------- | -------------------------------------- |
-| `rgb24`        | `(H, W, 3)` uint8 | the common case; required for H.264    |
-| `rgba8`        | `(H, W, 4)` uint8 | image path only (JPEG drops the alpha) |
+| array shape       | inferred `pixel_format` | notes                                  |
+| ----------------- | ----------------------- | -------------------------------------- |
+| `(H, W, 3)` uint8 | `rgb24`                 | the common case; required for H.264    |
+| `(H, W, 4)` uint8 | `rgba8`                 | image path only (JPEG drops the alpha) |
 
-Width and height are forced **even** (a `yuv420p` requirement for H.264). Arrays
-should be contiguous `uint8`; the H.264 encoder calls `np.ascontiguousarray`
-defensively, but producing contiguous arrays avoids a copy.
+For the H.264 path keep dimensions **even** (`yuv420p`) and the `pixel_format`
+constant. Publishing a **differently-shaped** array transparently resizes the
+display: each viewer's encoder is rebuilt and a keyframe forced. Don't mutate an
+array after publishing it — return a fresh array each frame (viewers share it).
 
 ### Sparse / on-demand rendering
 
 For scientific visualization the framebuffer often changes only on interaction or
-a parameter update. `OnDemandFrameSource` renders **only when marked dirty** — no
-fabricated duplicate frames — while still sending real timestamps:
+a parameter update. Just don't call `publish()` until something changes — there is
+no fixed loop to fight. Between changes every viewer's encoder is idle and no bytes
+hit the wire; a delta after a long idle still decodes (the browser keeps its
+reference state), and the next publish at a new size forces a fresh keyframe.
 
 ```python
-from pdum.rfb import OnDemandFrameSource
-
-source = OnDemandFrameSource(render, width=1280, height=720, render_on_event=True)
-# ... later, when your scene changes:
-source.mark_dirty()
+display = await rfb.serve(1280, 720)
+# ... only when your scene actually changes:
+display.publish(render(state))
 ```
 
-With `render_on_event=True` (default) any pointer/key/wheel/resize event marks the
-source dirty, so interaction re-renders automatically. Between changes,
-`next_frame()` parks, the encoder is idle, and no bytes hit the wire. This pairs
-naturally with the video path: a delta after a long idle still decodes because the
-browser's decoder keeps its reference state, and a resize forces a fresh keyframe.
+### Handling input
 
-### A full custom source
-
-Implement the `FrameSource` protocol directly when you need state or to react to
-input. Subclassing `BaseFrameSource` gives you sequence numbers, monotonic
-timestamps, fps pacing, event recording, and viewport tracking for free — you only
-write `render`:
-
-```python
-import numpy as np
-from pdum.rfb import BaseFrameSource
-
-class Plot(BaseFrameSource):
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.zoom = 1.0
-
-    def render(self, seq: int, t_us: int) -> np.ndarray:
-        # draw using self.width/self.height/self.zoom ...
-        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
-
-    async def handle_event(self, event):
-        await super().handle_event(event)      # records the event, tracks resize
-        if event["type"] == "wheel":
-            self.zoom *= 1.1 if event["dy"] < 0 else 0.9
-```
-
-Received events follow a common vocabulary (`pointer_move`, `pointer_down`,
-`pointer_up`, `wheel`, `key_down`, `key_up`, `resize`). On a `resize`,
-`BaseFrameSource` updates `self.width`/`self.height` for you; the session rebuilds
-the encoder and forces a keyframe when the frame size actually changes.
+`poll_events()` drains the input from **all** connected viewers as a list of
+`InputEvent`s (`client_id`, `principal`, `event`, `received_us`). The `event` dict
+follows a common vocabulary (`pointer_move`, `pointer_down`, `pointer_up`, `wheel`,
+`key_down`, `key_up`, `set_viewport`). In a shared display the publisher owns the
+resolution, so `set_viewport`/`resize` is **informational** (recorded on the event,
+not applied to the frame size). Prefer the single-loop poll style above; an
+`async for ev in display.events()` iterator is also available for a dedicated task.
 
 ## Running the server
 
 ### `serve()`
 
 ```python
-server = await serve(
-    source_factory,            # () -> FrameSource
+display = await serve(
+    width, height,             # initial framebuffer size (publish a new shape to resize)
     host="127.0.0.1",
-    port=8765,
-    has_h264=None,             # None = auto-detect PyAV; False = force image
-    fps=30,
+    port=8765,                 # 0 = ephemeral; read it back from display.port
+    fps=30,                    # advisory: IDR cadence / metrics target (you set the real rate)
     bitrate=12_000_000,
-    max_inflight=2,            # latest-frame-wins ceiling
+    max_inflight=2,            # per-client latest-frame-wins ceiling
+    has_h264=None,             # None = auto-detect PyAV; False = force image
+    has_nvenc=None,            # None = auto-detect NVENC GPU; True = force; False = CPU libx264
+    authenticate=None,         # async hook (see Authentication below)
+    origins=None,              # allowed Origin values (CSWSH defense)
+    record_events=False,       # also expose received events at GET /recorded-events
     event_log=None,            # path to append received events as JSONL
-    record_events=False,       # also expose them at GET /recorded-events
 )
-async with server as s:
-    await s.serve_forever()
+# ... publish in your own loop ...
+await display.aclose()         # stops the server, disconnects viewers, frees encoders
 ```
 
-`serve()` returns the underlying `websockets` server context manager. The same
-port answers a small HTTP side channel used by tests and tooling:
+`serve()` returns a started `Display` (no `serve_forever()` — you own the loop).
+The same port answers a small HTTP side channel used by tests and tooling:
 
 - `GET /health` → `ok`
+- `GET /metrics` → JSON array, one object per active session
 - `GET /recorded-events` → JSON list of received input events
 - `GET /recorded-events/reset` → clears the list
+
+### Authentication
+
+`serve(authenticate=...)` takes an async hook `fn(AuthContext) -> principal | None`,
+called once per connection right after the client's `hello`, before any frame is
+sent. Return any object to accept (it rides on every `InputEvent.principal`), or
+`None` to reject (the socket closes with code `4401`). The library ships only the
+hook and `AuthContext` — verification is your code, with **no JWT dependency**. In
+v1 the credential arrives in `hello` (`AuthContext.token`); the context also carries
+`headers`/`path` so a future same-site-cookie / ASGI transport feeds the same hook.
+
+```python
+from google.oauth2 import id_token            # your dependency, not the library's
+from google.auth.transport import requests as g_requests
+
+ALLOWED = {"alice@example.com"}
+_req = g_requests.Request()
+
+async def authenticate(ctx):
+    if not ctx.token:
+        return None
+    try:
+        claims = id_token.verify_oauth2_token(ctx.token, _req, audience=CLIENT_ID)
+    except ValueError:
+        return None
+    return claims if claims.get("email") in ALLOWED else None
+
+display = await rfb.serve(1280, 720, authenticate=authenticate)
+```
+
+The browser sends the token via the `token` option on `RemoteFramebufferView` (see
+the [JavaScript guide](guide_javascript.md)).
+
+### Multiple viewers
+
+Several browsers can connect to one `Display` and watch the same stream; each gets
+its own encoder and a keyframe on attach, and `display.client_count` reports how
+many are connected. Run several independent displays by calling `serve()` more than
+once (e.g. on different ports / from a web app that mints per-display URLs).
 
 ### The built-in CLI
 
@@ -155,10 +176,10 @@ uv run python -m pdum.rfb.server --pattern bouncing_box --port 8765
 ```
 
 Useful flags: `--pattern {test_card,gradient,bouncing_box,counter,checkerboard,solid}`,
-`--width/--height/--fps/--bitrate`, `--force-image`, `--record-events`,
-`--event-log events.jsonl`, `--max-frames N`. This streams a deterministic
-`SyntheticFrameSource`, so any browser (or the demo page) can connect with no
-extra setup.
+`--width/--height/--fps/--bitrate`, `--force-image`, `--no-nvenc`, `--adaptive`,
+`--record-events`, `--event-log events.jsonl`, `--max-frames N`. The demo owns a
+publish loop streaming a deterministic pattern, so any browser (or the demo page)
+can connect with no extra setup.
 
 ## Encoders
 
@@ -172,6 +193,11 @@ You rarely construct an encoder directly — `serve()` does it via
   via libx264, emitting **Annex B** access units for WebCodecs. Configured for low
   latency (`ultrafast`/`zerolatency`, no B-frames, periodic IDR). Forced keyframes
   are real IDRs with in-band SPS/PPS.
+- **`NvencH264Encoder(width, height, fps, bitrate, codec_string)`** — hardware
+  H.264 on an NVIDIA GPU via **NVENC**. A drop-in for the libx264 encoder (same
+  Annex B output, same forced-IDR/no-B-frame low-latency config) that offloads
+  encoding to the GPU, freeing the CPU and lowering encode latency. Requires a
+  width ≥ 160 (an NVENC hardware minimum).
 
 Check availability and self-test at runtime:
 
@@ -179,7 +205,37 @@ Check availability and self-test at runtime:
 from pdum.rfb.encoders.pyav_h264 import libx264_available, self_test
 assert libx264_available()
 assert self_test()   # encodes a few frames and decodes them back with PyAV
+
+from pdum.rfb import nvenc_available
+if nvenc_available():       # OS + PyAV `h264_nvenc` + a real GPU open all checked
+    ...                     # serve() will then auto-select the GPU encoder
 ```
+
+### Hardware NVENC (GPU H.264)
+
+The NVENC path rides on **PyAV's bundled ffmpeg** (the `av` wheel ships an ffmpeg
+built with `h264_nvenc`), so it needs no extra Python package beyond `av` — the
+real requirement is a host **NVIDIA driver + an NVENC-capable GPU**, which pip
+cannot install. (NVIDIA's own `PyNvVideoCodec` is deliberately *not* used: it
+publishes no `cp314` wheel and no sdist, so it will not install on this project's
+Python 3.14+.)
+
+```bash
+uv add 'habemus-papadum-rfb[nvenc]'   # same PyAV wheel as [h264]; documents intent
+```
+
+`serve()` **auto-detects** NVENC and prefers it over libx264 when present, falling
+back automatically otherwise:
+
+```python
+server = await serve(source_factory)                 # GPU if available, else CPU
+server = await serve(source_factory, has_nvenc=False) # force the CPU libx264 path
+```
+
+From the CLI, `--no-nvenc` forces the CPU path and `--force-image` disables H.264
+entirely; the startup line prints which encoder was selected. Availability is
+verified at runtime by `nvenc_available()` (caches its result and retries the GPU
+probe, since consumer cards cap concurrent NVENC sessions).
 
 ### Registering a custom encoder
 
@@ -212,8 +268,9 @@ select_transport(["webcodecs/h264-annexb", "image/jpeg"], has_h264=True)
 
 Policy (guide §12): prefer H.264 when the client supports `avc1` **and** a video
 encoder is available (NVENC preferred over libx264 when present), otherwise fall
-back to the best shared image format. `has_nvenc` is already a parameter so a
-future NVENC backend changes no call sites.
+back to the best shared image format. `serve()` sets `has_nvenc` from
+`nvenc_available()` and then builds the registered `"nvenc"` encoder instead of
+`"pyav"`; the transport negotiation itself is identical either way.
 
 ## Backpressure & timestamps
 

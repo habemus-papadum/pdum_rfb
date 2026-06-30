@@ -1,4 +1,4 @@
-"""Offline encoder benchmark: image vs CPU H.264, fully headless.
+"""Offline encoder benchmark: image vs CPU H.264 vs GPU NVENC, fully headless.
 
 Encodes a deterministic synthetic pattern and reports, per configuration:
 
@@ -39,6 +39,7 @@ class BenchmarkResult:
     width: int
     height: int
     frames: int
+    fps: int
     encode_ms_mean: float
     encode_ms_p95: float
     bytes_per_frame: float
@@ -98,6 +99,7 @@ def benchmark_image(
         width=width,
         height=height,
         frames=frames,
+        fps=fps,
         encode_ms_mean=float(np.mean(times)),
         encode_ms_p95=_p95(times),
         bytes_per_frame=bytes_per_frame,
@@ -106,20 +108,27 @@ def benchmark_image(
     )
 
 
-def benchmark_h264(
+def _benchmark_video(
     *,
-    bitrate: int = 8_000_000,
-    frames: int = 60,
-    width: int = 640,
-    height: int = 480,
-    fps: int = 30,
-    pattern: str = "gradient",
+    make_encoder,
+    label: str,
+    encoder_name: str,
+    frames: int,
+    width: int,
+    height: int,
+    fps: int,
+    pattern: str,
 ) -> BenchmarkResult:
-    from .encoders.pyav_h264 import PyAvH264Encoder
+    """Shared driver for the H.264 backends (libx264 / NVENC).
+
+    ``make_encoder`` is a no-arg callable returning a fresh
+    :class:`~pdum.rfb.types.EncoderBackend`; the bitstream is decoded back with
+    PyAV to measure real PSNR.
+    """
     from .testing import decode_annexb
 
     src = _source_frames(pattern, frames, width, height)
-    enc = PyAvH264Encoder(width=width, height=height, fps=fps, bitrate=bitrate)
+    enc = make_encoder()
     times: list[float] = []
     total_bytes = 0
     chunks: list[bytes] = []
@@ -140,11 +149,12 @@ def benchmark_h264(
 
     bytes_per_frame = total_bytes / frames
     return BenchmarkResult(
-        label=f"h264 {bitrate // 1_000_000}M",
-        encoder="h264",
+        label=label,
+        encoder=encoder_name,
         width=width,
         height=height,
         frames=frames,
+        fps=fps,
         encode_ms_mean=float(np.mean(times)),
         encode_ms_p95=_p95(times),
         bytes_per_frame=bytes_per_frame,
@@ -153,13 +163,77 @@ def benchmark_h264(
     )
 
 
+def benchmark_h264(
+    *,
+    bitrate: int = 8_000_000,
+    frames: int = 60,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
+    pattern: str = "gradient",
+) -> BenchmarkResult:
+    from .encoders.pyav_h264 import PyAvH264Encoder
+
+    return _benchmark_video(
+        make_encoder=lambda: PyAvH264Encoder(width=width, height=height, fps=fps, bitrate=bitrate),
+        label=f"h264 {bitrate // 1_000_000}M",
+        encoder_name="h264",
+        frames=frames,
+        width=width,
+        height=height,
+        fps=fps,
+        pattern=pattern,
+    )
+
+
+def benchmark_nvenc(
+    *,
+    bitrate: int = 8_000_000,
+    frames: int = 60,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
+    pattern: str = "gradient",
+) -> BenchmarkResult:
+    from time import sleep
+
+    from .encoders.nvenc import NvencH264Encoder
+
+    def make_encoder():
+        # Consumer GPUs cap concurrent NVENC sessions; a fresh open can transiently
+        # fail under churn, so retry a few times before giving up.
+        last: Exception | None = None
+        for _ in range(4):
+            try:
+                return NvencH264Encoder(width=width, height=height, fps=fps, bitrate=bitrate)
+            except ValueError:
+                raise  # width below the NVENC minimum is not transient
+            except Exception as exc:  # pragma: no cover - hardware/driver dependent
+                last = exc
+                sleep(0.25)
+        raise RuntimeError(f"NVENC encoder failed to open after retries: {last}")
+
+    return _benchmark_video(
+        make_encoder=make_encoder,
+        label=f"nvenc {bitrate // 1_000_000}M",
+        encoder_name="nvenc",
+        frames=frames,
+        width=width,
+        height=height,
+        fps=fps,
+        pattern=pattern,
+    )
+
+
 def format_table(results: list[BenchmarkResult]) -> str:
-    header = f"{'config':<12}{'size':>10}{'enc ms':>9}{'p95 ms':>9}{'KB/frame':>10}{'Mbps@fps':>10}{'PSNR dB':>9}"
+    header = (
+        f"{'config':<12}{'size':>10}{'fps':>5}{'enc ms':>9}{'p95 ms':>9}{'KB/frame':>10}{'Mbps@fps':>10}{'PSNR dB':>9}"
+    )
     lines = [header, "-" * len(header)]
     for r in results:
         psnr = "  inf" if r.psnr_db == float("inf") else f"{r.psnr_db:6.2f}"
         lines.append(
-            f"{r.label:<12}{f'{r.width}x{r.height}':>10}{r.encode_ms_mean:>9.2f}{r.encode_ms_p95:>9.2f}"
+            f"{r.label:<12}{f'{r.width}x{r.height}':>10}{r.fps:>5}{r.encode_ms_mean:>9.2f}{r.encode_ms_p95:>9.2f}"
             f"{r.bytes_per_frame / 1024:>10.1f}{r.bitrate_at_fps_bps / 1e6:>10.2f}{psnr:>9}"
         )
     return "\n".join(lines)
@@ -180,50 +254,74 @@ def _parse_size(text: str) -> tuple[int, int]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Benchmark the image and CPU H.264 encoders")
+    parser = argparse.ArgumentParser(description="Benchmark the image, CPU H.264, and GPU NVENC encoders")
     parser.add_argument("--frames", type=int, default=120)
-    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--fps", default="30", help="comma-separated frame rates, e.g. 15,30,60")
     parser.add_argument("--pattern", default="gradient")
     parser.add_argument("--sizes", default="640x480,1280x720")
     parser.add_argument("--jpeg-quality", default="50,80")
     parser.add_argument("--h264-bitrate", default="2M,8M")
+    parser.add_argument("--nvenc-bitrate", default=None, help="defaults to --h264-bitrate")
     parser.add_argument("--no-h264", action="store_true")
+    parser.add_argument("--no-nvenc", action="store_true", help="skip the GPU NVENC encoder")
     args = parser.parse_args(argv)
 
+    from .encoders.nvenc import NVENC_MIN_WIDTH, nvenc_available
     from .encoders.pyav_h264 import libx264_available
+
+    fps_values = [int(f) for f in args.fps.split(",")]
+    use_h264 = not args.no_h264 and libx264_available()
+    use_nvenc = not args.no_nvenc and nvenc_available()
+    nvenc_bitrates = (args.nvenc_bitrate or args.h264_bitrate).split(",")
 
     results: list[BenchmarkResult] = []
     for size in args.sizes.split(","):
         w, h = _parse_size(size)
-        for q in args.jpeg_quality.split(","):
-            results.append(
-                benchmark_image(
-                    mode="jpeg",
-                    quality=int(q),
-                    frames=args.frames,
-                    width=w,
-                    height=h,
-                    fps=args.fps,
-                    pattern=args.pattern,
-                )
-            )
-        results.append(
-            benchmark_image(mode="png", frames=args.frames, width=w, height=h, fps=args.fps, pattern=args.pattern)
-        )
-        if not args.no_h264 and libx264_available():
-            for br in args.h264_bitrate.split(","):
+        for fps in fps_values:
+            for q in args.jpeg_quality.split(","):
                 results.append(
-                    benchmark_h264(
-                        bitrate=_parse_bitrate(br),
+                    benchmark_image(
+                        mode="jpeg",
+                        quality=int(q),
                         frames=args.frames,
                         width=w,
                         height=h,
-                        fps=args.fps,
+                        fps=fps,
                         pattern=args.pattern,
                     )
                 )
+            results.append(
+                benchmark_image(mode="png", frames=args.frames, width=w, height=h, fps=fps, pattern=args.pattern)
+            )
+            if use_h264:
+                for br in args.h264_bitrate.split(","):
+                    results.append(
+                        benchmark_h264(
+                            bitrate=_parse_bitrate(br),
+                            frames=args.frames,
+                            width=w,
+                            height=h,
+                            fps=fps,
+                            pattern=args.pattern,
+                        )
+                    )
+            if use_nvenc and w >= NVENC_MIN_WIDTH:
+                for br in nvenc_bitrates:
+                    results.append(
+                        benchmark_nvenc(
+                            bitrate=_parse_bitrate(br),
+                            frames=args.frames,
+                            width=w,
+                            height=h,
+                            fps=fps,
+                            pattern=args.pattern,
+                        )
+                    )
 
-    print(f"pattern={args.pattern} frames={args.frames} fps={args.fps}\n")
+    note = ""
+    if not args.no_nvenc and not nvenc_available():
+        note = "  (NVENC unavailable on this host — GPU rows skipped)"
+    print(f"pattern={args.pattern} frames={args.frames} fps={args.fps}{note}\n")
     print(format_table(results))
 
 

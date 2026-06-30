@@ -33,6 +33,15 @@ Documentation = "https://github.com/habemus-papadum/pdum_rfb"
 h264 = [
     "av>=17.1.0",
 ]
+# Hardware H.264 via NVIDIA NVENC. The Python requirement is the same PyAV wheel
+# as [h264] (its bundled ffmpeg ships the h264_nvenc encoder); the actual GPU
+# requirement is a host NVIDIA driver + an NVENC-capable card, which pip cannot
+# install. NVIDIA's own PyNvVideoCodec is intentionally NOT used: it publishes no
+# cp314 wheel and no sdist, so it cannot install on this project's Python 3.14+.
+# Availability is verified at runtime by pdum.rfb.encoders.nvenc.nvenc_available().
+nvenc = [
+    "av>=17.1.0",
+]
 
 
 [build-system]

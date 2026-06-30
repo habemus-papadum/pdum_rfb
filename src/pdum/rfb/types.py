@@ -74,9 +74,43 @@ class EncodedPayload:
     metadata: dict[str, Any] | None = None
 
 
+@dataclass(slots=True)
+class InputEvent:
+    """A normalized user-input event delivered to the application.
+
+    Produced by :class:`~pdum.rfb.display.Display` as it fans connected clients'
+    input into a single stream the application drains with
+    :meth:`~pdum.rfb.display.Display.poll_events`.
+
+    Parameters
+    ----------
+    client_id:
+        Opaque per-connection identifier, so several viewers on one display can be
+        told apart (e.g. for multi-user coordination).
+    principal:
+        Whatever the ``authenticate`` hook returned for this connection (an
+        application-defined identity), or ``None`` when auth is disabled.
+    event:
+        The raw normalized event dict (``{"type": "pointer_move", "x": ..., ...}``).
+    received_us:
+        Monotonic microseconds (relative to the display's start) when the event
+        was received.
+    """
+
+    client_id: str
+    principal: Any | None
+    event: EventDict
+    received_us: int
+
+
 @runtime_checkable
 class FrameSource(Protocol):
-    """Produces raw frames and consumes user-input events."""
+    """Produces raw frames and consumes user-input events.
+
+    Internal SPI: the session pulls frames through this shape. Applications no
+    longer implement it directly — they push frames via
+    :class:`~pdum.rfb.display.Display`.
+    """
 
     async def next_frame(self) -> RawFrame:
         """Return the next frame to encode (may block / pace to a target fps)."""

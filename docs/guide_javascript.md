@@ -4,14 +4,14 @@ The browser client is a single framework-agnostic class, `RemoteFramebufferView`
 All decoding runs in a **Web Worker** that owns the WebSocket, the decoder, and a
 transferred `OffscreenCanvas`, so the main thread stays free for your UI.
 
-> The client lives in `widgets/` and publishes as `pdum-rfb-widgets`. During
+> The client lives in `widgets/` and publishes as `@habemus-papadum/rfb-widgets`. During
 > development, import from the source (`../src/index`); when consumed as a package,
-> import from `pdum-rfb-widgets`.
+> import from `@habemus-papadum/rfb-widgets`.
 
 ## Quick start
 
 ```ts
-import { RemoteFramebufferView } from "pdum-rfb-widgets";
+import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
 
 const view = new RemoteFramebufferView(document.getElementById("stage")!, {
   url: "ws://localhost:8765",
@@ -38,6 +38,7 @@ interface RfbViewOptions {
   maxBackingDimension?: number;      // cap backing pixels (decoder/GPU limits)
   imageOnly?: boolean;               // force the image transport (skip H.264)
   maxInflight?: number;              // client-side decode backpressure ceiling
+  token?: string;                    // auth credential sent in `hello` (e.g. a Google ID token)
   onState?: (s: ConnectionState) => void;
   onStats?: (s: Stats) => void;
   onError?: (e: Error) => void;
@@ -47,6 +48,15 @@ interface RfbViewOptions {
 `ConnectionState` is `connecting | open | negotiated | closed | error`. `Stats`
 reports `framesDisplayed`, `framesDropped`, `lastDisplayedSeq`, `decodeQueueSize`,
 and `transport` (`image | webcodecs | none`).
+
+### Authentication
+
+Pass `token` (e.g. a Google OAuth ID token your page already obtained) and it is
+sent in the `hello` message; the server's `authenticate` hook verifies it before
+streaming and closes the socket with code `4401` if it's rejected (see the
+[Python guide](guide_python.md#authentication)). Resolve the token before
+constructing the view; for short-lived tokens you currently reconnect with a fresh
+one (there is no built-in refresh/reconnect yet).
 
 Methods/getters: `view.state`, `view.stats`, `view.lastCaptureSeq`,
 `view.capture("imagedata" | "blob")` (a debug/test hook that reads back the
@@ -61,7 +71,7 @@ cleanup.
 
 ```tsx
 import { useEffect, useRef } from "react";
-import { RemoteFramebufferView } from "pdum-rfb-widgets";
+import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
 
 export function Framebuffer({ url }: { url: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -78,7 +88,7 @@ export function Framebuffer({ url }: { url: string }) {
 ```vue
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from "vue";
-import { RemoteFramebufferView } from "pdum-rfb-widgets";
+import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
 
 const el = ref<HTMLElement>();
 let view: RemoteFramebufferView | undefined;
@@ -94,7 +104,7 @@ onBeforeUnmount(() => view?.dispose());
 ```svelte
 <script>
   import { onMount } from "svelte";
-  import { RemoteFramebufferView } from "pdum-rfb-widgets";
+  import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
   let el;
   onMount(() => {
     const view = new RemoteFramebufferView(el, { url: "ws://localhost:8765" });
@@ -135,19 +145,25 @@ By default the worker is **inlined** into the published bundle (Vite
 with zero worker configuration. The cost is that it constructs the worker from a
 `blob:` URL, which requires the CSP directive `worker-src blob:`.
 
-For strict-CSP sites that disallow `blob:` workers, supply your own worker built as
-a real, cacheable asset:
+For strict-CSP sites that disallow `blob:` workers, supply your own `workerFactory`
+that constructs the worker from a real, cacheable asset:
 
 ```ts
 new RemoteFramebufferView(el, {
   url,
   workerFactory: () =>
-    new Worker(new URL("pdum-rfb-widgets/worker", import.meta.url), { type: "module" }),
+    new Worker(new URL("./my-rfb-worker.ts", import.meta.url), { type: "module" }),
 });
 ```
 
 (The `new URL(..., import.meta.url)` form is statically detected by Vite,
 webpack 5, Rollup, esbuild, and Parcel.)
+
+> The published package currently ships **only** the self-contained inlined bundle
+> (`dist/index.js`); it does not yet expose a standalone `worker` entry point. To
+> build a non-`blob:` worker today, copy `src/worker/entry.ts` from this repo into
+> your app and point `workerFactory` at it. A packaged worker subpath export is on
+> the [roadmap](roadmap.md).
 
 ## Advanced: protocol & helpers
 

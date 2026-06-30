@@ -46,6 +46,10 @@ def libx264_available() -> bool:
 class PyAvH264Encoder:
     """Encode CPU ``rgb24`` frames to H.264 Annex B access units."""
 
+    #: Recorded in each payload's ``metadata["encoder"]`` so the wire/headers
+    #: identify which backend produced the bitstream. Subclasses override it.
+    encoder_label = "pyav-libx264"
+
     def __init__(
         self,
         *,
@@ -55,8 +59,6 @@ class PyAvH264Encoder:
         bitrate: int = 12_000_000,
         codec_string: str | None = None,
     ) -> None:
-        import av
-
         self.width = width
         self.height = height
         self.fps = fps
@@ -64,22 +66,28 @@ class PyAvH264Encoder:
         self.codec_string = codec_string or DEFAULT_H264_CODEC
         self.frame_index = 0
         self._duration_us = int(1_000_000 / fps)
+        self.ctx = self._make_context()
 
-        self.ctx = av.CodecContext.create("libx264", "w")
-        self.ctx.width = width
-        self.ctx.height = height
-        self.ctx.pix_fmt = "yuv420p"
-        self.ctx.time_base = Fraction(1, fps)
-        self.ctx.framerate = Fraction(fps, 1)
-        self.ctx.bit_rate = bitrate
+    def _make_context(self):
+        """Build the libx264 :class:`av.CodecContext` (overridden by NVENC)."""
+        import av
+
+        ctx = av.CodecContext.create("libx264", "w")
+        ctx.width = self.width
+        ctx.height = self.height
+        ctx.pix_fmt = "yuv420p"
+        ctx.time_base = Fraction(1, self.fps)
+        ctx.framerate = Fraction(self.fps, 1)
+        ctx.bit_rate = self.bitrate
         # Low latency: ultrafast, zerolatency, no B-frames, periodic in-band IDR.
-        self.ctx.options = {
+        ctx.options = {
             "preset": "ultrafast",
             "tune": "zerolatency",
             "profile": "baseline",
             "forced-idr": "1",
-            "x264-params": (f"keyint={fps}:min-keyint={fps}:scenecut=0:bframes=0:annexb=1:repeat-headers=1"),
+            "x264-params": (f"keyint={self.fps}:min-keyint={self.fps}:scenecut=0:bframes=0:annexb=1:repeat-headers=1"),
         }
+        return ctx
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         import av
@@ -129,7 +137,7 @@ class PyAvH264Encoder:
             codec=self.codec_string,
             keyframe=bool(packet.is_keyframe),
             duration_us=self._duration_us,
-            metadata={"bitstream": "annexb", "encoder": "pyav-libx264"},
+            metadata={"bitstream": "annexb", "encoder": self.encoder_label},
         )
 
 

@@ -5,16 +5,17 @@ This script automates the release process:
 1. Verifies git repo is clean
 2. Validates version has -alpha suffix
 3. Calculates release version (strips -alpha)
-4. Runs validation (lint, tests, docs build)
-5. Updates version files (pyproject.toml, __init__.py)
+4. Runs validation (lint, Python tests, widget tests, docs build)
+5. Updates version files (pyproject.toml, __init__.py, widgets/package.json)
 6. Updates uv.lock with new version
 7. Creates release commit and tag
 8. Pushes tag to origin
 9. Publishes to PyPI
-10. Creates GitHub release (triggers docs deployment)
-11. Bumps to next development version with -alpha
-12. Updates uv.lock with new dev version
-13. Commits and pushes development version
+10. Builds and publishes the widgets to npm
+11. Creates GitHub release (triggers docs deployment)
+12. Bumps to next development version with -alpha
+13. Updates uv.lock with new dev version
+14. Commits and pushes development version
 """
 
 import argparse
@@ -40,6 +41,8 @@ console = Console()
 REPO_ROOT = Path(__file__).parent.parent  # Go up from scripts/ to repo root
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 INIT_PY = REPO_ROOT / "src" / "pdum" / "rfb" / "__init__.py"
+WIDGETS_DIR = REPO_ROOT / "widgets"
+PACKAGE_JSON = WIDGETS_DIR / "package.json"
 
 class StepCategory(Enum):
     """Categories of release steps."""
@@ -181,10 +184,14 @@ def read_current_version() -> None:
     init_version = read_version_from_file(INIT_PY, r'(__version__ = ")([^"]+)(")')
     console.print(f"  [cyan]__init__.py:[/cyan] {init_version}")
 
-    if pyproject_version != init_version:
+    package_json_version = read_package_json_version(PACKAGE_JSON)
+    console.print(f"  [cyan]widgets/package.json:[/cyan] {package_json_version}")
+
+    if not (pyproject_version == init_version == package_json_version):
         console.print("[red]✗ ERROR:[/red] Version mismatch!")
         console.print(f"  [yellow]pyproject.toml:[/yellow] {pyproject_version}")
         console.print(f"  [yellow]__init__.py:[/yellow] {init_version}")
+        console.print(f"  [yellow]widgets/package.json:[/yellow] {package_json_version}")
         sys.exit(1)
 
     ctx.current_version = pyproject_version
@@ -236,6 +243,17 @@ def build_docs() -> None:
     run_command(["uv", "run", "mkdocs", "build"], "Building mkdocs site")
 
 
+def run_widget_tests() -> None:
+    """Type-check and run the widget (TypeScript) test suite."""
+    console.rule("[bold blue]Running Widget Tests")
+    run_command(
+        ["pnpm", "--dir", "widgets", "install", "--frozen-lockfile"],
+        "Installing widget dependencies",
+    )
+    run_command(["pnpm", "--dir", "widgets", "typecheck"], "Type-checking widgets")
+    run_command(["pnpm", "--dir", "widgets", "test"], "Running Vitest suite")
+
+
 
 
 def update_version_files() -> None:
@@ -247,6 +265,7 @@ def update_version_files() -> None:
 
     write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.release_version)
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.release_version)
+    write_package_json_version(PACKAGE_JSON, ctx.release_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] in all files"
     )
@@ -268,6 +287,7 @@ def create_release_commit() -> None:
             "add",
             str(PYPROJECT_TOML),
             str(INIT_PY),
+            str(PACKAGE_JSON),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -301,6 +321,25 @@ def publish_to_pypi() -> None:
     console.rule("[bold blue]Publishing to PyPI")
 
     run_command(["./scripts/publish.sh"], "Running publish.sh to build and publish to PyPI")
+
+
+def publish_to_npm() -> None:
+    """Build the widget bundle and publish it to npm.
+
+    Builds first so the published `dist/` always reflects the release version —
+    `pnpm publish` does not run the `build` script automatically.
+    """
+    console.rule("[bold blue]Publishing Widgets to npm")
+
+    run_command(
+        ["pnpm", "--dir", "widgets", "install", "--frozen-lockfile"],
+        "Installing widget dependencies",
+    )
+    run_command(["pnpm", "--dir", "widgets", "build"], "Building widget bundle")
+    run_command(
+        ["pnpm", "--dir", "widgets", "publish", "--no-git-checks"],
+        "Publishing @habemus-papadum/rfb-widgets to npm",
+    )
 
 
 def create_github_release() -> None:
@@ -366,6 +405,7 @@ def update_to_dev_version() -> None:
 
     write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
     write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.next_dev_version)
+    write_package_json_version(PACKAGE_JSON, ctx.next_dev_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] in all files"
     )
@@ -387,6 +427,7 @@ def create_dev_commit() -> None:
             "add",
             str(PYPROJECT_TOML),
             str(INIT_PY),
+            str(PACKAGE_JSON),
             "uv.lock",
         ],
         "Staging version files and lockfile",
@@ -462,6 +503,14 @@ STEPS: list[Step] = [
         notes="Usually fast (< 30s)",
     ),
     Step(
+        id="run_widget_tests",
+        name="Run Widget Tests",
+        description="Type-check and run the widget (Vitest) test suite",
+        category=StepCategory.VALIDATION,
+        action=run_widget_tests,
+        notes="Requires pnpm",
+    ),
+    Step(
         id="build_docs",
         name="Build Documentation",
         description="Build mkdocs site",
@@ -512,6 +561,14 @@ STEPS: list[Step] = [
         description="Build and publish package to PyPI",
         category=StepCategory.RELEASE,
         action=publish_to_pypi,
+    ),
+    Step(
+        id="publish_npm",
+        name="Publish to npm",
+        description="Build the widget bundle and publish @habemus-papadum/rfb-widgets to npm",
+        category=StepCategory.RELEASE,
+        action=publish_to_npm,
+        notes="Requires pnpm + npm auth",
     ),
     Step(
         id="github_release",
@@ -593,6 +650,7 @@ def show_acknowledgment_guard(bump_level: str) -> bool:
         "  • Run all selected validation checks\n"
         "  • Create and push a release commit and tag\n"
         "  • Publish the package to PyPI\n"
+        "  • Publish the widgets to npm\n"
         "  • Create a GitHub release (triggering docs deployment)\n"
         "  • Bump to the next development version\n\n"
         "[bold yellow]This is a SERIOUS operation that affects production![/bold yellow]",
@@ -688,6 +746,7 @@ def main() -> None:
         f"Released: [cyan]{ctx.release_version}[/cyan]\n"
         f"Tagged and pushed: [cyan]v{ctx.release_version}[/cyan]\n"
         f"Published to PyPI: [cyan]{ctx.release_version}[/cyan]\n"
+        f"Published to npm: [cyan]@habemus-papadum/rfb-widgets@{ctx.release_version}[/cyan]\n"
         f"Created GitHub release: [cyan]v{ctx.release_version}[/cyan]\n"
         f"Next development version: [cyan]{ctx.next_dev_version}[/cyan]\n\n"
         "[dim]The GitHub release will trigger documentation deployment to GitHub Pages.[/dim]",

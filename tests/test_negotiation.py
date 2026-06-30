@@ -2,6 +2,7 @@
 
 import pytest
 
+from pdum.rfb.encoders import available_video_encoders
 from pdum.rfb.protocol import (
     CAP_H264_ANNEXB,
     CAP_JPEG,
@@ -42,3 +43,10 @@ def test_prefer_video_false_keeps_image():
 def test_unknown_capabilities_raise():
     with pytest.raises(UnsupportedClient):
         select_transport(["video/whatever"], has_h264=True)
+
+
+def test_nvenc_encoder_is_registered():
+    # The NVENC backend is always registered (buildable only with a GPU), so the
+    # server's video_encoder="nvenc" selection always resolves to a factory.
+    assert "nvenc" in available_video_encoders()
+    assert "pyav" in available_video_encoders()

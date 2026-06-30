@@ -61,7 +61,7 @@ uv run python -m pdum.rfb.server --pattern bouncing_box
 ## JavaScript: display frames
 
 ```ts
-import { RemoteFramebufferView } from "pdum-rfb-widgets";
+import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
 
 const view = new RemoteFramebufferView(document.getElementById("stage")!, {
   url: "ws://localhost:8765",
@@ -71,8 +71,9 @@ const view = new RemoteFramebufferView(document.getElementById("stage")!, {
 ```
 
 The worker is bundled inline, so this works with any bundler (or none). For
-strict-CSP sites that disallow `blob:` workers, pass your own
-`workerFactory: () => new Worker(new URL("pdum-rfb-widgets/worker", import.meta.url), { type: "module" })`.
+strict-CSP sites that disallow `blob:` workers, pass your own `workerFactory` that
+builds the worker from a real asset (the published package ships only the inlined
+bundle today — copy `src/worker/entry.ts` to provide your own worker module).
 
 ## Headless testing
 

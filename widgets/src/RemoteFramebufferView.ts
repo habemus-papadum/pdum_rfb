@@ -23,6 +23,8 @@ export interface RfbViewOptions {
   /** Force the image transport (advertise image-only capabilities). */
   imageOnly?: boolean;
   maxInflight?: number;
+  /** Auth credential (e.g. a Google OAuth ID token) sent to the server in `hello`. */
+  token?: string;
   onState?: (state: ConnectionState) => void;
   onStats?: (stats: Stats) => void;
   onError?: (err: Error) => void;
@@ -84,6 +86,7 @@ export class RemoteFramebufferView {
       options: {
         maxInflight: options.maxInflight,
         imageOnly: options.imageOnly,
+        token: options.token,
       },
     };
     this.worker.postMessage(init, [offscreen]);

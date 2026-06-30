@@ -10,6 +10,8 @@ export interface WorkerInitOptions {
   slowDownQueue?: number;
   keyframeOnDropQueue?: number;
   imageOnly?: boolean;
+  /** Auth credential forwarded in the `hello` message. */
+  token?: string;
 }
 
 export type MainToWorker =

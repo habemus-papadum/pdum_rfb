@@ -28,6 +28,13 @@ Pairs with the new `OnDemandFrameSource`. Small, high-impact polish.
 
 ## 3. Logical-channel transport abstraction _(addendum §2)_
 
+The **seam exists**: `transport.py` defines a `Channel` protocol and a
+`WebSocketTransport`, and `RfbSession` is constructed with it (it only needs `send`
++ async iteration). A pluggable `authenticate` hook (`auth.py`) is already fed a
+transport-neutral `AuthContext`. Remaining: a Starlette/ASGI `WebSocket` adapter
+(so the stream can be mounted same-origin and reuse an OAuth cookie) and the
+multi-lane split below.
+
 Introduce a `Transport` / `Channel` interface (one socket today, WebTransport
 later) so video, control, events, and telemetry are separate logical lanes. The
 session already only needs `send` + async iteration, so this is mostly additive:
@@ -44,16 +51,26 @@ Architecturally important; unblocks WebTransport without touching encoders/sourc
 
 The core is framework-agnostic by design; add thin, optional wrappers:
 
-- a `useRemoteFramebuffer` React hook (`pdum-rfb-widgets/react`);
+- a `useRemoteFramebuffer` React hook (`@habemus-papadum/rfb-widgets/react`);
 - a Jupyter/marimo widget (anywidget) — the repo already reserves `widgets/` and
   has notebook conventions. Makes the library usable from a notebook in one line.
 
-## 5. NVIDIA NVENC backend
+## 5. NVIDIA NVENC backend ✅ _(host-memory path done)_
 
-Implement `encoders/nvenc_pynv.py` (PyNvVideoCodec) for the host-memory path, then
-the CUDA-buffer path, registering via `register_video_encoder("nvenc", ...)`. The
-registry + `has_nvenc` negotiation flag already leave the seam. Requires a
-Linux/NVIDIA box (out of scope on this Mac), so develop/CI it separately.
+- **Encoder** — `encoders/nvenc.py` (`NvencH264Encoder`): hardware H.264 via
+  **PyAV's `h264_nvenc`** (its bundled ffmpeg is built with NVENC), emitting the
+  same low-latency Annex B as the libx264 path. Registered as `"nvenc"`; `serve()`
+  auto-detects via `nvenc_available()` (OS + `h264_nvenc` + a real GPU open, cached
+  with retry) and prefers it, with `--no-nvenc` / `has_nvenc=False` to opt out.
+- **Why PyAV, not PyNvVideoCodec** — NVIDIA's `PyNvVideoCodec` publishes no
+  `cp314` wheel and no sdist, so it cannot install on Python 3.14+. PyAV's NVENC
+  needs no extra Python package (only the host NVIDIA driver), so it is the
+  pragmatic host-memory backend.
+
+Remaining: the zero-copy **CUDA-buffer path** (feed `cuda`-memory `RawFrame`s
+straight to NVENC, skipping the CPU `yuv420p` reformat) for CUDA/OpenGL sources;
+NVENC AV1 (`av1_nvenc`) and HEVC; and CI on a Linux/NVIDIA runner (the encoder is
+GPU-gated, so its tests skip without a device).
 
 ## 6. Rendering & codec upgrades
 
@@ -65,6 +82,6 @@ Linux/NVIDIA box (out of scope on this Mac), so develop/CI it separately.
 
 ## 7. Packaging & release
 
-Publish `pdum-rfb-widgets` to npm and ship a versioned `dist/`; confirm the
+Publish `@habemus-papadum/rfb-widgets` to npm and ship a versioned `dist/`; confirm the
 `habemus-papadum-rfb[h264]` extra resolves on Linux CI (it already does on
 macOS-arm64 with a `cp314` wheel). Add the widget e2e to the release gate.

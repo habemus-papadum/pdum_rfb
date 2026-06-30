@@ -183,17 +183,29 @@ even under a device pixel ratio or a `maxBackingDimension` cap.
 
 ## Module map
 
+> **Push model.** The public API is `serve(width, height) -> Display`; you
+> `display.publish(ndarray)` from your own loop and drain input with
+> `display.poll_events()`. `serve()` runs the WebSocket server as a background task.
+> Each connection gets its own `RfbSession`, fed by an internal per-connection
+> `_ClientFeed` (the `FrameSource` the session pulls). The pull `FrameSource`
+> classes in `sources.py` are internal-only now. `RfbSession` is unchanged — it sees
+> a `Channel` (`transport.py`) and a feed, both satisfying its thin seams.
+
 ```text
 src/pdum/rfb/
-  types.py          RawFrame, EncodedPayload, FrameSource/EncoderBackend protocols (dep-free)
+  types.py          RawFrame, EncodedPayload, InputEvent, FrameSource/EncoderBackend protocols (dep-free)
   protocol.py       envelope, header builders, control parsing, select_transport
   session.py        RfbSession: loops, backpressure, keyframe policy
-  sources.py        BaseFrameSource, RenderCallbackSource, OnDemandFrameSource
-  server.py         serve(), RfbServer (HTTP side channel), `python -m` CLI
+  display.py        Display (publish/poll_events/aclose) + internal _ClientFeed
+  auth.py           AuthContext / Authenticator / Principal (pluggable, no JWT dep)
+  transport.py      Channel protocol + WebSocketTransport (ASGI/WebTransport seam)
+  sources.py        BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (internal)
+  server.py         serve()->Display, _ConnectionServer (HTTP side channel), `python -m` CLI
   encoders/
-    base.py         registry + build_encoder  (NVENC extension seam)
+    base.py         registry + build_encoder  (registers pyav + nvenc)
     image.py        ImageEncoder (Pillow)
     pyav_h264.py    PyAvH264Encoder + libx264_available / self_test
+    nvenc.py        NvencH264Encoder (GPU h264_nvenc) + nvenc_available
   testing.py        SyntheticFrameSource, fakes, NAL/decode helpers, fixture gen
 
 widgets/src/

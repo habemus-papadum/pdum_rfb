@@ -38,9 +38,20 @@ def _pyav_factory(**kwargs) -> EncoderBackend:
     return PyAvH264Encoder(**kwargs)
 
 
+def _nvenc_factory(**kwargs) -> EncoderBackend:
+    # Imported lazily so PyAV is only required when an H.264 encoder is built.
+    from .nvenc import NvencH264Encoder
+
+    return NvencH264Encoder(**kwargs)
+
+
 # The CPU H.264 backend is always *registered*; whether it can be *built* still
 # depends on PyAV being importable (handled by select_transport via has_h264).
 register_video_encoder("pyav", _pyav_factory)
+# The NVENC backend is always *registered* too; whether it can be *built* depends
+# on an NVENC-capable GPU + driver (handled by select_transport via has_nvenc,
+# which the server derives from pdum.rfb.encoders.nvenc.nvenc_available()).
+register_video_encoder("nvenc", _nvenc_factory)
 
 
 def build_encoder(

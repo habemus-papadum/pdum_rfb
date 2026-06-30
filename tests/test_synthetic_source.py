@@ -5,7 +5,7 @@ import asyncio
 import numpy as np
 import pytest
 
-from pdum.rfb import OnDemandFrameSource
+from pdum.rfb.sources import OnDemandFrameSource
 from pdum.rfb.testing import SyntheticFrameSource, expected_quadrant_color, render_test_pattern
 
 

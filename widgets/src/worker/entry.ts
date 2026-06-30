@@ -88,6 +88,7 @@ async function startConnection(url: string): Promise<void> {
       type: "hello",
       supported: caps.supported,
       device_pixel_ratio: caps.devicePixelRatio,
+      token: initOptions.token, // undefined is dropped by JSON.stringify
     } satisfies HelloMsg);
   };
 

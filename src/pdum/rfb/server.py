@@ -1,15 +1,20 @@
-"""WebSocket server + CLI for the remote framebuffer.
+"""WebSocket server + demo CLI for the push-model remote framebuffer.
 
-``serve()`` runs a ``websockets`` server that negotiates a transport per client
-and drives an :class:`~pdum.rfb.session.RfbSession`. The same port also answers a
-small HTTP side channel used by the headless e2e harness:
+:func:`serve` starts a ``websockets`` server **in the background** and returns a
+live :class:`~pdum.rfb.display.Display`. The application owns its loop and pushes
+frames with :meth:`Display.publish`; each connecting browser is negotiated a
+transport and driven by its own :class:`~pdum.rfb.session.RfbSession`, all fed from
+the display's latest frame.
+
+The same port answers a small HTTP side channel used by the headless e2e harness:
 
 * ``GET /health`` -> ``ok`` (readiness probe for Playwright's ``webServer``)
 * ``GET /recorded-events`` -> JSON list of every input event received
 * ``GET /recorded-events/reset`` -> clears the list (per-test isolation)
+* ``GET /metrics`` -> JSON array, one object per active session
 
-``python -m pdum.rfb.server`` streams a deterministic :class:`SyntheticFrameSource`
-so a browser (or Playwright) can connect with no extra setup.
+``python -m pdum.rfb.server`` is a self-contained demo: it owns a publish loop
+streaming a deterministic pattern so a browser (or Playwright) can connect.
 """
 
 from __future__ import annotations
@@ -19,16 +24,16 @@ import asyncio
 import json
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from uuid import uuid4
 
 from .adaptive import AdaptiveQualityController
+from .auth import AuthContext, Authenticator
+from .display import Display, _ClientFeed
 from .encoders.base import build_encoder
-from .protocol import config_message, parse_control, select_transport
+from .protocol import UnsupportedClient, config_message, parse_control, select_transport
 from .session import RfbSession
-from .types import EventDict, FrameSource
-
-#: Builds a fresh :class:`FrameSource` for each client connection.
-SourceFactory = Callable[[], FrameSource]
+from .transport import WebSocketTransport
 
 
 def _h264_importable() -> bool:
@@ -37,74 +42,90 @@ def _h264_importable() -> bool:
     return importlib.util.find_spec("av") is not None
 
 
-class _RecordingSource:
-    """Wrap a source so every handled event is mirrored to a sink."""
+def _nvenc_usable() -> bool:
+    """True if a hardware NVENC H.264 encoder is available on this host."""
+    try:
+        from .encoders.nvenc import nvenc_available
 
-    def __init__(self, inner: FrameSource, sink: Callable[[EventDict], None]) -> None:
-        self._inner = inner
-        self._sink = sink
-
-    async def next_frame(self):
-        return await self._inner.next_frame()
-
-    async def handle_event(self, event: EventDict) -> None:
-        self._sink(event)
-        await self._inner.handle_event(event)
-
-    @property
-    def current_size(self) -> tuple[int, int]:
-        return getattr(self._inner, "current_size", (0, 0))
+        return nvenc_available()
+    except Exception:  # pragma: no cover - defensive (e.g. av not installed)
+        return False
 
 
-class RfbServer:
-    """Holds shared state (recorded events) across client connections."""
+async def _close_feed_on_disconnect(connection: Any, feed: _ClientFeed) -> None:
+    """Stop ``feed`` when the socket closes, so a parked encode loop unparks.
+
+    Without this, a client that disconnects while its session is idle (parked in
+    ``next_frame`` waiting for the next publish) would never wake, and the
+    session's ``TaskGroup`` would not complete.
+    """
+    try:
+        await connection.wait_closed()
+    finally:
+        feed.close()
+
+
+class _ConnectionServer:
+    """Per-``Display`` connection handler: negotiate, authenticate, run sessions."""
 
     def __init__(
         self,
-        source_factory: SourceFactory,
+        display: Display,
         *,
         has_h264: bool | None = None,
+        has_nvenc: bool | None = None,
         fps: int = 30,
         bitrate: int = 12_000_000,
         max_inflight: int = 2,
         adaptive: bool = False,
-        event_log: str | Path | None = None,
-        record_events: bool = False,
+        authenticate: Authenticator | None = None,
     ) -> None:
-        self.source_factory = source_factory
+        self.display = display
         self.has_h264 = _h264_importable() if has_h264 is None else has_h264
+        # Prefer the GPU encoder when available. Auto-detect unless forced, and
+        # never enable it when H.264 is disabled altogether (e.g. --force-image).
+        if has_nvenc is None:
+            self.has_nvenc = _nvenc_usable() if self.has_h264 else False
+        else:
+            self.has_nvenc = has_nvenc and self.has_h264
+        self.video_encoder = "nvenc" if self.has_nvenc else "pyav"
         self.fps = fps
         self.bitrate = bitrate
         self.max_inflight = max_inflight
         self.adaptive = adaptive
-        self.event_log = Path(event_log) if event_log else None
-        self.record_events = record_events or self.event_log is not None
-        self.recorded: list[EventDict] = []
-        self.sessions: set[RfbSession] = set()
-
-    def _record(self, event: EventDict) -> None:
-        if not self.record_events:
-            return
-        self.recorded.append(event)
-        if self.event_log is not None:
-            with self.event_log.open("a") as fh:
-                fh.write(json.dumps(event) + "\n")
+        self.authenticate = authenticate
 
     async def handler(self, connection: Any) -> None:
         import websockets
 
         try:
-            hello_text = await connection.recv()
-            hello = parse_control(hello_text)
-            supported = hello.get("supported", [])
-            selection = select_transport(supported, has_h264=self.has_h264)
+            hello = parse_control(await connection.recv())
 
-            base_source = self.source_factory()
-            source = _RecordingSource(base_source, self._record) if self.record_events else base_source
-            width, height = getattr(source, "current_size", (640, 480))
+            principal = await self._authenticate(connection, hello)
+            if principal is _REJECTED:
+                await connection.close(4401, "unauthorized")
+                return
+
+            supported = hello.get("supported", [])
+            try:
+                selection = select_transport(supported, has_h264=self.has_h264, has_nvenc=self.has_nvenc)
+            except UnsupportedClient:
+                await connection.close(1003, "no supported transport")
+                return
+
+            client_id = uuid4().hex
+            feed = self.display._make_feed(client_id, principal)
+            width, height = self.display.width, self.display.height
 
             def factory(w: int, h: int, bitrate: int):
-                return build_encoder(selection, width=w, height=h, fps=self.fps, bitrate=bitrate)
+                return build_encoder(
+                    selection,
+                    width=w,
+                    height=h,
+                    fps=self.fps,
+                    bitrate=bitrate,
+                    video_encoder=self.video_encoder,
+                )
 
             encoder = factory(width, height, self.bitrate)
             transport = "webcodecs" if selection.transport == "h264" else "image"
@@ -123,105 +144,169 @@ class RfbServer:
                 else None
             )
             session = RfbSession(
-                source,
+                feed,
                 encoder,
-                connection,
+                WebSocketTransport(connection),
                 encoder_factory=factory,
                 max_inflight=self.max_inflight,
                 bitrate=self.bitrate,
                 fps=self.fps,
                 adaptive=controller,
             )
-            self.sessions.add(session)
+            self.display._register_session(session)
+            closer = asyncio.create_task(_close_feed_on_disconnect(connection, feed))
             try:
                 await session.run()
             finally:
-                self.sessions.discard(session)
+                closer.cancel()
+                self.display._remove(client_id, feed, session)
         except websockets.ConnectionClosed:
             pass
 
+    async def _authenticate(self, connection: Any, hello: dict) -> Any:
+        """Return the principal, ``None`` (anonymous), or ``_REJECTED``."""
+        if self.authenticate is None:
+            return None
+        req = getattr(connection, "request", None)
+        ctx = AuthContext(
+            token=hello.get("token"),
+            headers=getattr(req, "headers", None),
+            path=getattr(req, "path", None),
+            remote=getattr(connection, "remote_address", None),
+            hello=hello,
+        )
+        try:
+            principal = await self.authenticate(ctx)
+        except Exception:
+            return _REJECTED
+        return _REJECTED if principal is None else principal
+
     def process_request(self, connection: Any, request: Any):
         """Answer the HTTP side-channel routes; return None to proceed with WS."""
-        raw_path = request.path
-        path = raw_path.split("?", 1)[0]
+        path = request.path.split("?", 1)[0]
         if path == "/health":
             return connection.respond(HTTPStatus.OK, "ok\n")
         if path == "/recorded-events/reset":
-            self.recorded.clear()
+            self.display.recorded.clear()
             return connection.respond(HTTPStatus.OK, "[]")
         if path == "/recorded-events":
-            return connection.respond(HTTPStatus.OK, json.dumps(self.recorded))
+            return connection.respond(HTTPStatus.OK, json.dumps(self.display.recorded))
         if path == "/metrics":
-            snapshots = [s.metrics_snapshot() for s in self.sessions]
+            snapshots = [s.metrics_snapshot() for s in self.display._sessions]
             return connection.respond(HTTPStatus.OK, json.dumps(snapshots))
         return None
 
 
+#: Sentinel distinguishing "authentication failed" from an anonymous ``None``.
+_REJECTED = object()
+
+
 async def serve(
-    source_factory: SourceFactory,
+    width: int,
+    height: int,
     *,
     host: str = "127.0.0.1",
     port: int = 8765,
-    has_h264: bool | None = None,
     fps: int = 30,
     bitrate: int = 12_000_000,
     max_inflight: int = 2,
+    has_h264: bool | None = None,
+    has_nvenc: bool | None = None,
     adaptive: bool = False,
-    event_log: str | Path | None = None,
+    authenticate: Authenticator | None = None,
+    origins: list[str | None] | None = None,
     record_events: bool = False,
-):
-    """Start the RFB WebSocket server (async context manager).
+    event_log: str | Path | None = None,
+    event_queue_size: int = 4096,
+) -> Display:
+    """Start the RFB WebSocket server in the background and return a :class:`Display`.
 
-    Yields the underlying ``websockets`` server object. Use ``serve_forever`` or
-    ``await server.wait_closed()`` to keep it running.
+    You own your loop: ``display = await serve(w, h, port=...)`` then call
+    ``display.publish(frame)`` whenever you like, and ``await display.aclose()`` to
+    shut down.
+
+    Parameters
+    ----------
+    width, height:
+        Initial framebuffer size (a connecting client is configured to the
+        display's current size; publish a different shape to resize).
+    has_h264, has_nvenc:
+        ``None`` auto-detects; ``False`` forces the CPU/image fallback. ``has_nvenc``
+        selects the GPU encoder when an NVENC-capable device is present.
+    authenticate:
+        Optional async hook (see :mod:`pdum.rfb.auth`); rejected connections are
+        closed with code ``4401`` before any frame is sent.
+    origins:
+        Allowed ``Origin`` values (CSWSH defense) passed to ``websockets``.
     """
     import websockets.asyncio.server
 
-    rfb = RfbServer(
-        source_factory,
+    display = Display(
+        width,
+        height,
+        fps=fps,
+        record_events=record_events,
+        event_log=event_log,
+        event_queue_size=event_queue_size,
+    )
+    conn = _ConnectionServer(
+        display,
         has_h264=has_h264,
+        has_nvenc=has_nvenc,
         fps=fps,
         bitrate=bitrate,
         max_inflight=max_inflight,
         adaptive=adaptive,
-        event_log=event_log,
-        record_events=record_events,
+        authenticate=authenticate,
     )
-    return websockets.asyncio.server.serve(rfb.handler, host, port, process_request=rfb.process_request, max_size=None)
-
-
-def _build_cli_source_factory(args: argparse.Namespace) -> SourceFactory:
-    from .testing import SyntheticFrameSource
-
-    def factory() -> FrameSource:
-        return SyntheticFrameSource(
-            pattern=args.pattern,
-            width=args.width,
-            height=args.height,
-            fps=args.fps,
-            max_frames=args.max_frames,
-            pace=True,
-        )
-
-    return factory
+    kwargs: dict[str, Any] = dict(process_request=conn.process_request, max_size=None)
+    if origins is not None:
+        kwargs["origins"] = origins
+    cm = websockets.asyncio.server.serve(conn.handler, host, port, **kwargs)
+    display._server = await cm.__aenter__()
+    display._server_cm = cm
+    return display
 
 
 async def _amain(args: argparse.Namespace) -> None:
-    source_factory = _build_cli_source_factory(args)
-    server_cm = await serve(
-        source_factory,
+    from .testing import render_pattern
+
+    w = args.width - (args.width % 2)
+    h = args.height - (args.height % 2)
+    display = await serve(
+        w,
+        h,
         host=args.host,
         port=args.port,
-        has_h264=False if args.force_image else None,
         fps=args.fps,
         bitrate=args.bitrate,
+        has_h264=False if args.force_image else None,
+        has_nvenc=False if args.no_nvenc else None,
         adaptive=args.adaptive,
-        event_log=args.event_log,
         record_events=args.record_events,
+        event_log=args.event_log,
     )
-    async with server_cm as server:
-        print(f"RFB server on ws://{args.host}:{args.port}  (pattern={args.pattern})")
-        await server.serve_forever()
+
+    if args.force_image:
+        encoder = "image"
+    elif not args.no_nvenc and _nvenc_usable():
+        encoder = "h264/nvenc (GPU)"
+    elif _h264_importable():
+        encoder = "h264/libx264 (CPU)"
+    else:
+        encoder = "image"
+    print(f"RFB server on ws://{args.host}:{args.port}  (pattern={args.pattern}, encoder={encoder})")
+
+    seq = 0
+    try:
+        while args.max_frames is None or seq < args.max_frames:
+            for _ev in display.poll_events():
+                pass  # the demo ignores input; --record-events captures it via the Display log
+            display.publish(render_pattern(args.pattern, seq, w, h))
+            seq += 1
+            await asyncio.sleep(1 / args.fps)
+    finally:
+        await display.aclose()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -239,6 +324,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--test-pattern", dest="pattern", action="store_const", const="test_card")
     parser.add_argument("--force-image", action="store_true", help="ignore H.264 even if available")
+    parser.add_argument("--no-nvenc", action="store_true", help="disable the GPU NVENC encoder (use CPU libx264)")
     parser.add_argument("--adaptive", action="store_true", help="enable adaptive bitrate/backpressure")
     parser.add_argument("--record-events", action="store_true")
     parser.add_argument("--event-log", default=None)

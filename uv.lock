@@ -520,6 +520,9 @@ dependencies = [
 h264 = [
     { name = "av" },
 ]
+nvenc = [
+    { name = "av" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -544,11 +547,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "av", marker = "extra == 'h264'", specifier = ">=17.1.0" },
+    { name = "av", marker = "extra == 'nvenc'", specifier = ">=17.1.0" },
     { name = "numpy", specifier = ">=2.5.0" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "websockets", specifier = ">=16.0" },
 ]
-provides-extras = ["h264"]
+provides-extras = ["h264", "nvenc"]
 
 [package.metadata.requires-dev]
 dev = [

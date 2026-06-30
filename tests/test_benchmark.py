@@ -4,7 +4,8 @@ import math
 
 import pytest
 
-from pdum.rfb.benchmark import benchmark_h264, benchmark_image, format_table
+from pdum.rfb.benchmark import benchmark_h264, benchmark_image, benchmark_nvenc, format_table
+from pdum.rfb.encoders.nvenc import nvenc_available
 from pdum.rfb.encoders.pyav_h264 import libx264_available
 
 
@@ -26,6 +27,15 @@ def test_png_is_lossless():
 def test_h264_benchmark_decodes_back_and_scores_quality():
     r = benchmark_h264(bitrate=4_000_000, frames=12, width=128, height=96, fps=30)
     assert r.encoder == "h264"
+    assert r.encode_ms_mean > 0
+    assert r.bytes_per_frame > 0
+    assert r.psnr_db > 20  # decoded frames resemble the source
+
+
+@pytest.mark.skipif(not nvenc_available(), reason="NVENC-capable GPU not available")
+def test_nvenc_benchmark_decodes_back_and_scores_quality():
+    r = benchmark_nvenc(bitrate=4_000_000, frames=12, width=256, height=192, fps=30)
+    assert r.encoder == "nvenc"
     assert r.encode_ms_mean > 0
     assert r.bytes_per_frame > 0
     assert r.psnr_db > 20  # decoded frames resemble the source
