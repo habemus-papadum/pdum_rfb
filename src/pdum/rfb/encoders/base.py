@@ -45,6 +45,13 @@ def _nvenc_factory(**kwargs) -> EncoderBackend:
     return NvencH264Encoder(**kwargs)
 
 
+def _nvenc_cuda_factory(**kwargs) -> EncoderBackend:
+    # Lazy: needs PyAV >= 18 + CuPy + an NVENC GPU (gated by cuda_zerocopy_available).
+    from .nvenc_cuda import CudaNvencEncoder
+
+    return CudaNvencEncoder(**kwargs)
+
+
 # The CPU H.264 backend is always *registered*; whether it can be *built* still
 # depends on PyAV being importable (handled by select_transport via has_h264).
 register_video_encoder("pyav", _pyav_factory)
@@ -52,6 +59,10 @@ register_video_encoder("pyav", _pyav_factory)
 # on an NVENC-capable GPU + driver (handled by select_transport via has_nvenc,
 # which the server derives from pdum.rfb.encoders.nvenc.nvenc_available()).
 register_video_encoder("nvenc", _nvenc_factory)
+# Zero-copy CUDA→NVENC backend. Built only when the publisher pushes CUDA frames
+# and the path is usable (PyAV >= 18 + CuPy + GPU); see
+# pdum.rfb.gpu.cuda_zerocopy_available and serve(gpu=...).
+register_video_encoder("nvenc_cuda", _nvenc_cuda_factory)
 
 
 def build_encoder(

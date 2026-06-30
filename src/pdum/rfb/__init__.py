@@ -18,10 +18,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from . import gpu
 from .adaptive import AdaptiveQualityController, QualityTarget
 from .auth import AuthContext, Authenticator, Principal
 from .display import Display
 from .encoders import ImageEncoder, available_video_encoders, build_encoder, register_video_encoder
+from .gpu import cuda_frame, cuda_zerocopy_available, enable_cuda_context_sharing
 from .metrics import SessionMetrics
 from .protocol import (
     BackendSelection,
@@ -43,6 +45,7 @@ __all__ = [
     "Authenticator",
     "BackendSelection",
     "Channel",
+    "CudaNvencEncoder",  # lazy
     "Display",
     "EncodedPayload",
     "EncoderBackend",
@@ -59,6 +62,11 @@ __all__ = [
     "WebSocketTransport",
     "available_video_encoders",
     "build_encoder",
+    "cuda_frame",
+    "cuda_nvenc_available",  # lazy
+    "cuda_zerocopy_available",
+    "enable_cuda_context_sharing",
+    "gpu",
     "h264_available",  # lazy
     "nvenc_available",  # lazy
     "pack_binary_message",
@@ -70,6 +78,7 @@ __all__ = [
 
 if TYPE_CHECKING:  # pragma: no cover
     from .encoders.nvenc import NvencH264Encoder, nvenc_available
+    from .encoders.nvenc_cuda import CudaNvencEncoder, cuda_nvenc_available
     from .encoders.pyav_h264 import PyAvH264Encoder, h264_available
     from .server import serve
 
@@ -89,6 +98,10 @@ def __getattr__(name: str):
         from .encoders import nvenc
 
         return getattr(nvenc, name)
+    if name in ("CudaNvencEncoder", "cuda_nvenc_available"):
+        from .encoders import nvenc_cuda
+
+        return getattr(nvenc_cuda, name)
     if name == "serve":
         from . import server
 

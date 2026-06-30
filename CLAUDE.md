@@ -89,11 +89,14 @@ src/pdum/rfb/
   transport.py    Channel protocol + WebSocketTransport (seam for a future ASGI/WebTransport adapter)
   sources.py      BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (INTERNAL now, not exported)
   server.py       serve()->Display, _ConnectionServer (+ HTTP side channel), `python -m pdum.rfb.server` CLI
+  gpu.py          zero-copy GPU helpers: rgb_to_nv12 kernel, cuda_frame, enable_cuda_context_sharing,
+                  cuda_zerocopy_available, HostFrameAdapter (lazy-imports CuPy; see docs/gpu_zerocopy.md)
   encoders/
-    base.py       registry + build_encoder  (registers pyav + nvenc factories)
+    base.py       registry + build_encoder  (registers pyav + nvenc + nvenc_cuda factories)
     image.py      ImageEncoder (Pillow)
     pyav_h264.py  PyAvH264Encoder + libx264_available / self_test
-    nvenc.py      NvencH264Encoder (GPU H.264 via PyAV h264_nvenc) + nvenc_available
+    nvenc.py      NvencH264Encoder (GPU H.264 via PyAV h264_nvenc, host input) + nvenc_available
+    nvenc_cuda.py CudaNvencEncoder (zero-copy CUDA NV12 -> h264_nvenc via from_dlpack) + cuda_nvenc_available
   metrics.py      SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
   adaptive.py     AdaptiveQualityController (opt-in via serve(adaptive=True))
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
@@ -169,11 +172,17 @@ cross-language contract — keep the Python and TS sides in sync.
   `select_transport`. The GPU **NVENC** backend (`encoders/nvenc.py`) already uses
   this seam: it rides on PyAV's bundled `h264_nvenc` (no extra Python dep beyond
   `av`; NVIDIA's `PyNvVideoCodec` is unusable on 3.14 — no wheel/sdist), is gated
-  by `nvenc_available()` (OS + GPU probe), and `serve()` auto-prefers it. A future
-  zero-copy CUDA-buffer encoder slots in the same way (roadmap §5).
-- **Frames:** push `ndarray`s (or `RawFrame`s) to `Display.publish()`. The internal
-  `_ClientFeed` (in `display.py`) is the per-connection `FrameSource` the session
-  pulls; `BaseFrameSource`/`SyntheticFrameSource` remain for internal/test use.
+  by `nvenc_available()` (OS + GPU probe), and `serve()` auto-prefers it. The
+  **zero-copy CUDA** backend (`encoders/nvenc_cuda.py`, registered `"nvenc_cuda"`)
+  slots in the same way: opt in with `serve(gpu=True)` + `publish()` a CuPy/DLPack
+  frame; gated by `gpu.cuda_zerocopy_available()` (needs **PyAV ≥ 18** — the
+  encode-side `hw_frames_ctx` wiring; a pure-Python monkey-patch is impossible on
+  17.x). See `docs/gpu_zerocopy.md`.
+- **Frames:** push `ndarray`s, **CuPy/DLPack CUDA tensors**, or `RawFrame`s to
+  `Display.publish()` (a CUDA tensor becomes a `memory="cuda"` frame; the type
+  already modelled this). The internal `_ClientFeed` (in `display.py`) is the
+  per-connection `FrameSource` the session pulls; `BaseFrameSource`/
+  `SyntheticFrameSource` remain for internal/test use.
 - **Auth:** `serve(authenticate=async fn)` — `fn(AuthContext) -> principal | None`.
   v1 reads the token from `hello`; `AuthContext` also carries headers/cookies/path so
   a future same-site-cookie/ASGI path feeds the same hook. No JWT dep in the library.
@@ -207,6 +216,9 @@ settles", logical-channel transport abstraction, React hook + Jupyter/marimo
   metrics, adaptive, testing helpers).
 - `docs/guide_javascript.md` — browser client guide (`RemoteFramebufferView`,
   options, framework integration, CSP/worker packaging).
+- `docs/gpu_zerocopy.md` — zero-copy CUDA→NVENC (CuPy/DLPack NV12 → `h264_nvenc`):
+  `serve(gpu=True)`, the helpers, NV12, the PyAV-18 requirement + why no pure-Python
+  monkey-patch, the from-source recipe, the NVENC-SDK alternative, benchmarks.
 - `docs/internals.md` — data flow, wire protocol, session loop, H.264 path, worker,
   module map, testing architecture, extension points.
 - `docs/roadmap.md` — what's next.

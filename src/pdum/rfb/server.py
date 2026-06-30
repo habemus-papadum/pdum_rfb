@@ -79,6 +79,7 @@ class _ConnectionServer:
         max_inflight: int = 2,
         adaptive: bool = False,
         authenticate: Authenticator | None = None,
+        gpu: bool = False,
     ) -> None:
         self.display = display
         self.has_h264 = _h264_importable() if has_h264 is None else has_h264
@@ -88,7 +89,26 @@ class _ConnectionServer:
             self.has_nvenc = _nvenc_usable() if self.has_h264 else False
         else:
             self.has_nvenc = has_nvenc and self.has_h264
-        self.video_encoder = "nvenc" if self.has_nvenc else "pyav"
+        # Zero-copy CUDA path is opt-in (gpu=True) and validated up front: the
+        # publisher pushes CUDA frames and every viewer's H.264 encoder reads them
+        # directly. Requires the full stack (PyAV >= 18 + CuPy + NVENC GPU).
+        self.gpu = bool(gpu)
+        if self.gpu:
+            if not self.has_h264:
+                raise RuntimeError("gpu=True requires H.264 (got has_h264=False)")
+            from .gpu import cuda_zerocopy_available
+
+            if not cuda_zerocopy_available():
+                raise RuntimeError(
+                    "gpu=True but the zero-copy CUDA→NVENC path is unavailable. "
+                    "Needs CuPy + an NVENC GPU + PyAV >= 18 (call "
+                    "pdum.rfb.gpu.enable_cuda_context_sharing() before any CuPy use). "
+                    "See pdum.rfb.gpu.cuda_zerocopy_available() and docs/gpu_zerocopy.md."
+                )
+            self.has_nvenc = True
+            self.video_encoder = "nvenc_cuda"
+        else:
+            self.video_encoder = "nvenc" if self.has_nvenc else "pyav"
         self.fps = fps
         self.bitrate = bitrate
         self.max_inflight = max_inflight
@@ -118,7 +138,7 @@ class _ConnectionServer:
             width, height = self.display.width, self.display.height
 
             def factory(w: int, h: int, bitrate: int):
-                return build_encoder(
+                encoder = build_encoder(
                     selection,
                     width=w,
                     height=h,
@@ -126,6 +146,13 @@ class _ConnectionServer:
                     bitrate=bitrate,
                     video_encoder=self.video_encoder,
                 )
+                # In GPU mode the publisher pushes CUDA frames; an image-transport
+                # viewer's host encoder is wrapped so those frames are downloaded.
+                if self.gpu and selection.transport == "image":
+                    from .gpu import HostFrameAdapter
+
+                    encoder = HostFrameAdapter(encoder)
+                return encoder
 
             encoder = factory(width, height, self.bitrate)
             transport = "webcodecs" if selection.transport == "h264" else "image"
@@ -212,6 +239,7 @@ async def serve(
     max_inflight: int = 2,
     has_h264: bool | None = None,
     has_nvenc: bool | None = None,
+    gpu: bool = False,
     adaptive: bool = False,
     authenticate: Authenticator | None = None,
     origins: list[str | None] | None = None,
@@ -233,6 +261,12 @@ async def serve(
     has_h264, has_nvenc:
         ``None`` auto-detects; ``False`` forces the CPU/image fallback. ``has_nvenc``
         selects the GPU encoder when an NVENC-capable device is present.
+    gpu:
+        Opt in to the **zero-copy CUDA→NVENC** path: the publisher pushes CUDA
+        frames (CuPy/DLPack NV12 or rgb) and each viewer's H.264 encoder reads them
+        directly, no host copy. Validated at startup; raises if the stack
+        (PyAV >= 18 + CuPy + NVENC GPU) is unavailable. Call
+        :func:`pdum.rfb.gpu.enable_cuda_context_sharing` before any CuPy use.
     authenticate:
         Optional async hook (see :mod:`pdum.rfb.auth`); rejected connections are
         closed with code ``4401`` before any frame is sent.
@@ -258,6 +292,7 @@ async def serve(
         max_inflight=max_inflight,
         adaptive=adaptive,
         authenticate=authenticate,
+        gpu=gpu,
     )
     kwargs: dict[str, Any] = dict(process_request=conn.process_request, max_size=None)
     if origins is not None:
@@ -282,12 +317,23 @@ async def _amain(args: argparse.Namespace) -> None:
         bitrate=args.bitrate,
         has_h264=False if args.force_image else None,
         has_nvenc=False if args.no_nvenc else None,
+        gpu=args.gpu,
         adaptive=args.adaptive,
         record_events=args.record_events,
         event_log=args.event_log,
     )
 
-    if args.force_image:
+    # In --gpu mode the demo uploads each pattern frame to the GPU so the
+    # zero-copy CUDA→NVENC path is actually exercised end-to-end.
+    to_device = None
+    if args.gpu:
+        import cupy as cp
+
+        to_device = cp.asarray
+
+    if args.gpu:
+        encoder = "h264/nvenc-cuda (GPU zero-copy)"
+    elif args.force_image:
         encoder = "image"
     elif not args.no_nvenc and _nvenc_usable():
         encoder = "h264/nvenc (GPU)"
@@ -302,7 +348,8 @@ async def _amain(args: argparse.Namespace) -> None:
         while args.max_frames is None or seq < args.max_frames:
             for _ev in display.poll_events():
                 pass  # the demo ignores input; --record-events captures it via the Display log
-            display.publish(render_pattern(args.pattern, seq, w, h))
+            frame = render_pattern(args.pattern, seq, w, h)
+            display.publish(to_device(frame) if to_device is not None else frame)
             seq += 1
             await asyncio.sleep(1 / args.fps)
     finally:
@@ -325,6 +372,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--test-pattern", dest="pattern", action="store_const", const="test_card")
     parser.add_argument("--force-image", action="store_true", help="ignore H.264 even if available")
     parser.add_argument("--no-nvenc", action="store_true", help="disable the GPU NVENC encoder (use CPU libx264)")
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="zero-copy CUDA→NVENC: upload pattern frames to the GPU and encode them directly (needs CuPy + PyAV>=18)",
+    )
     parser.add_argument("--adaptive", action="store_true", help="enable adaptive bitrate/backpressure")
     parser.add_argument("--record-events", action="store_true")
     parser.add_argument("--event-log", default=None)

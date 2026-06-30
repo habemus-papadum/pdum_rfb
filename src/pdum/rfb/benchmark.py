@@ -225,6 +225,83 @@ def benchmark_nvenc(
     )
 
 
+def benchmark_nvenc_cuda(
+    *,
+    bitrate: int = 8_000_000,
+    frames: int = 60,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
+    pattern: str = "gradient",
+) -> BenchmarkResult:
+    """Zero-copy CUDA→NVENC: frames pre-uploaded to the GPU, encoded with no host copy.
+
+    Mirrors :func:`benchmark_nvenc` but the per-frame timing covers the on-GPU
+    RGB→NV12 conversion + the zero-copy encode (the realistic "everything on GPU"
+    cost), so the row is directly comparable to the host ``nvenc`` row (whose cost
+    includes the CPU ``rgb→yuv`` reformat + the PCIe upload).
+    """
+    from time import sleep
+
+    import cupy as cp
+
+    from .encoders.nvenc_cuda import CudaNvencEncoder
+    from .gpu import cuda_frame, enable_cuda_context_sharing
+    from .testing import decode_annexb
+
+    enable_cuda_context_sharing()
+    src = _source_frames(pattern, frames, width, height)
+    device_frames = [cuda_frame(cp.asarray(arr), seq=seq) for seq, arr in enumerate(src)]
+    cp.cuda.runtime.deviceSynchronize()
+
+    def make_encoder():
+        last: Exception | None = None
+        for _ in range(4):  # consumer GPUs transiently EINVAL on session churn
+            try:
+                return CudaNvencEncoder(width=width, height=height, fps=fps, bitrate=bitrate)
+            except ValueError:
+                raise
+            except Exception as exc:  # pragma: no cover - hardware/driver dependent
+                last = exc
+                sleep(0.25)
+        raise RuntimeError(f"CUDA NVENC encoder failed to open after retries: {last}")
+
+    enc = make_encoder()
+    times: list[float] = []
+    total_bytes = 0
+    chunks: list[bytes] = []
+    for seq, frame in enumerate(device_frames):
+        cp.cuda.runtime.deviceSynchronize()
+        t0 = perf_counter()
+        payloads = enc.encode(frame, force_keyframe=(seq == 0))
+        cp.cuda.runtime.deviceSynchronize()
+        times.append((perf_counter() - t0) * 1000)
+        for p in payloads:
+            total_bytes += len(p.payload)
+            chunks.append(p.payload)
+    for p in enc.flush():
+        total_bytes += len(p.payload)
+        chunks.append(p.payload)
+    enc.close()
+
+    decoded = decode_annexb(b"".join(chunks))
+    psnrs = [_psnr(src[i], f.to_ndarray(format="rgb24")) for i, f in enumerate(decoded[:frames])]
+    bytes_per_frame = total_bytes / frames
+    return BenchmarkResult(
+        label=f"nvenc-cuda {bitrate // 1_000_000}M",
+        encoder="nvenc-cuda",
+        width=width,
+        height=height,
+        frames=frames,
+        fps=fps,
+        encode_ms_mean=float(np.mean(times)),
+        encode_ms_p95=_p95(times),
+        bytes_per_frame=bytes_per_frame,
+        bitrate_at_fps_bps=bytes_per_frame * fps * 8,
+        psnr_db=float(np.mean(psnrs)) if psnrs else float("nan"),
+    )
+
+
 def format_table(results: list[BenchmarkResult]) -> str:
     header = (
         f"{'config':<12}{'size':>10}{'fps':>5}{'enc ms':>9}{'p95 ms':>9}{'KB/frame':>10}{'Mbps@fps':>10}{'PSNR dB':>9}"
@@ -253,6 +330,15 @@ def _parse_size(text: str) -> tuple[int, int]:
     return int(w), int(h)
 
 
+def _cuda_zerocopy_available() -> bool:
+    try:
+        from .gpu import cuda_zerocopy_available
+
+        return cuda_zerocopy_available()
+    except Exception:  # pragma: no cover - defensive (cupy/av not installed)
+        return False
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Benchmark the image, CPU H.264, and GPU NVENC encoders")
     parser.add_argument("--frames", type=int, default=120)
@@ -264,6 +350,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--nvenc-bitrate", default=None, help="defaults to --h264-bitrate")
     parser.add_argument("--no-h264", action="store_true")
     parser.add_argument("--no-nvenc", action="store_true", help="skip the GPU NVENC encoder")
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="also benchmark the zero-copy CUDA→NVENC path (needs CuPy + PyAV>=18); see docs/gpu_zerocopy.md",
+    )
     args = parser.parse_args(argv)
 
     from .encoders.nvenc import NVENC_MIN_WIDTH, nvenc_available
@@ -272,6 +363,7 @@ def main(argv: list[str] | None = None) -> None:
     fps_values = [int(f) for f in args.fps.split(",")]
     use_h264 = not args.no_h264 and libx264_available()
     use_nvenc = not args.no_nvenc and nvenc_available()
+    use_gpu = args.gpu and _cuda_zerocopy_available()
     nvenc_bitrates = (args.nvenc_bitrate or args.h264_bitrate).split(",")
 
     results: list[BenchmarkResult] = []
@@ -317,10 +409,24 @@ def main(argv: list[str] | None = None) -> None:
                             pattern=args.pattern,
                         )
                     )
+            if use_gpu and w >= NVENC_MIN_WIDTH:
+                for br in nvenc_bitrates:
+                    results.append(
+                        benchmark_nvenc_cuda(
+                            bitrate=_parse_bitrate(br),
+                            frames=args.frames,
+                            width=w,
+                            height=h,
+                            fps=fps,
+                            pattern=args.pattern,
+                        )
+                    )
 
     note = ""
     if not args.no_nvenc and not nvenc_available():
         note = "  (NVENC unavailable on this host — GPU rows skipped)"
+    elif args.gpu and not use_gpu:
+        note = "  (zero-copy CUDA path unavailable — needs CuPy + PyAV>=18; nvenc-cuda rows skipped)"
     print(f"pattern={args.pattern} frames={args.frames} fps={args.fps}{note}\n")
     print(format_table(results))
 

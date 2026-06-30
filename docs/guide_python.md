@@ -237,6 +237,26 @@ entirely; the startup line prints which encoder was selected. Availability is
 verified at runtime by `nvenc_available()` (caches its result and retries the GPU
 probe, since consumer cards cap concurrent NVENC sessions).
 
+### Zero-copy GPU encoding (CUDA → NVENC)
+
+If you render **on the GPU**, you can skip the host round-trip entirely: a
+CuPy/DLPack NV12 (or RGB) device buffer is fed straight to `h264_nvenc` with no copy.
+Call `rfb.enable_cuda_context_sharing()` before any CuPy use, then `serve(gpu=True)`
+and `publish()` a CuPy array:
+
+```python
+import cupy as cp, pdum.rfb as rfb
+rfb.enable_cuda_context_sharing()            # before any CuPy CUDA op
+display = await rfb.serve(1920, 1080, gpu=True)
+display.publish(render_on_gpu())             # a CuPy (H, W, 3) uint8 array
+```
+
+This is ~2.4–4.3× lower per-frame latency than the host path and frees the CPU.
+It **requires PyAV ≥ 18** (gated by `rfb.cuda_zerocopy_available()`); on PyAV 17.x a
+pure-Python workaround is impossible, so you build PyAV from source. Full details,
+the conversion helpers, and the build recipe are in
+[the GPU zero-copy guide](gpu_zerocopy.md).
+
 ### Registering a custom encoder
 
 The video-encoder registry is the extension seam (this is where an NVENC backend

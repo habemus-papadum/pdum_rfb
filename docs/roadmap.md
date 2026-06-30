@@ -55,7 +55,7 @@ The core is framework-agnostic by design; add thin, optional wrappers:
 - a Jupyter/marimo widget (anywidget) — the repo already reserves `widgets/` and
   has notebook conventions. Makes the library usable from a notebook in one line.
 
-## 5. NVIDIA NVENC backend ✅ _(host-memory path done)_
+## 5. NVIDIA NVENC backend ✅ _(host-memory + zero-copy CUDA paths done)_
 
 - **Encoder** — `encoders/nvenc.py` (`NvencH264Encoder`): hardware H.264 via
   **PyAV's `h264_nvenc`** (its bundled ffmpeg is built with NVENC), emitting the
@@ -67,10 +67,19 @@ The core is framework-agnostic by design; add thin, optional wrappers:
   needs no extra Python package (only the host NVIDIA driver), so it is the
   pragmatic host-memory backend.
 
-Remaining: the zero-copy **CUDA-buffer path** (feed `cuda`-memory `RawFrame`s
-straight to NVENC, skipping the CPU `yuv420p` reformat) for CUDA/OpenGL sources;
-NVENC AV1 (`av1_nvenc`) and HEVC; and CI on a Linux/NVIDIA runner (the encoder is
-GPU-gated, so its tests skip without a device).
+- **Zero-copy CUDA path** ✅ — `encoders/nvenc_cuda.py` (`CudaNvencEncoder`,
+  registered `"nvenc_cuda"`) + `gpu.py`: a CuPy/DLPack NV12 (or RGB) device buffer
+  is fed straight to `h264_nvenc` via `from_dlpack` with **no host copy**. Opt in
+  with `serve(gpu=True)` and `publish()` a CuPy tensor; ~2.4–4.3× lower per-frame
+  latency than the host path (1080p 2.5 ms vs 7.3 ms). **Needs PyAV ≥ 18** (the
+  encode-side `hw_frames_ctx` wiring lands in 18.0 — gated by
+  `gpu.cuda_zerocopy_available()`); a pure-Python monkey-patch is impossible on
+  17.x, so `< 18` builds PyAV from source. See `docs/gpu_zerocopy.md` and
+  `python -m pdum.rfb.benchmark --gpu`.
+
+Remaining: NVENC AV1 (`av1_nvenc`) and HEVC; a zero-copy OpenGL/CUDA-interop source;
+and CI on a Linux/NVIDIA runner (the encoders are GPU-gated, so their tests skip
+without a device).
 
 ## 6. Rendering & codec upgrades
 

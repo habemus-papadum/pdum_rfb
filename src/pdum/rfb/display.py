@@ -41,6 +41,19 @@ if TYPE_CHECKING:  # pragma: no cover
     from .session import RfbSession
 
 
+def _is_cuda_tensor(obj: Any) -> bool:
+    """True for a CUDA-resident tensor (CuPy / Numba / CUDA DLPack)."""
+    if hasattr(obj, "__cuda_array_interface__"):
+        return True
+    dldev = getattr(obj, "__dlpack_device__", None)
+    if dldev is not None:
+        try:
+            return dldev()[0] in (2, 13)  # DLDeviceType: kDLCUDA, kDLCUDAManaged
+        except Exception:  # pragma: no cover - defensive
+            return False
+    return False
+
+
 class Display:
     """A single shared framebuffer that one or more browsers attach to.
 
@@ -101,28 +114,44 @@ class Display:
 
     # --- publishing --------------------------------------------------------
 
-    def publish(self, frame: np.ndarray | RawFrame) -> None:
+    def publish(self, frame: np.ndarray | RawFrame | Any) -> None:
         """Make ``frame`` the latest frame and wake every connected viewer.
 
-        Synchronous and non-blocking. ``frame`` is a contiguous ``uint8`` array
-        (``(H, W, 3)`` ``rgb24`` or ``(H, W, 4)`` ``rgba8``) or a ready
-        :class:`~pdum.rfb.types.RawFrame`. Latest-frame-wins: a viewer that is
-        behind simply skips intermediate frames.
+        Synchronous and non-blocking. ``frame`` may be:
+
+        * a contiguous host ``uint8`` array — ``(H, W, 3)`` ``rgb24`` or
+          ``(H, W, 4)`` ``rgba8``;
+        * a **CUDA tensor** exposing ``__cuda_array_interface__`` (e.g. CuPy) of
+          shape ``(H, W, 3|4)`` — published as a zero-copy ``cuda`` frame (for
+          NV12, or other frameworks, build a ``RawFrame`` via
+          :func:`pdum.rfb.gpu.cuda_frame`);
+        * a ready :class:`~pdum.rfb.types.RawFrame` (any ``memory``).
+
+        Latest-frame-wins: a viewer that is behind simply skips intermediate
+        frames. Publish a *fresh* buffer each call — viewers share the reference
+        and may read it asynchronously.
         """
         if self._closed:
             raise RuntimeError("publish() called on a closed Display")
 
         if isinstance(frame, RawFrame):
-            data, width, height, pixel_format = frame.data, frame.width, frame.height, frame.pixel_format
+            data, width, height = frame.data, frame.width, frame.height
+            pixel_format, memory = frame.pixel_format, frame.memory
+        elif isinstance(frame, np.ndarray):
+            if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+                raise ValueError(f"unsupported frame shape {frame.shape!r}; expected (H, W, 3) or (H, W, 4)")
+            height, width = int(frame.shape[0]), int(frame.shape[1])
+            pixel_format = "rgb24" if frame.shape[2] == 3 else "rgba8"
+            data, memory = frame, "cpu"
+        elif _is_cuda_tensor(frame):
+            shape = getattr(frame, "shape", None)
+            if shape is None or len(shape) != 3 or shape[2] not in (3, 4):
+                raise ValueError("CUDA publish expects an (H, W, 3|4) tensor; use pdum.rfb.gpu.cuda_frame() for NV12")
+            height, width = int(shape[0]), int(shape[1])
+            pixel_format = "rgb24" if shape[2] == 3 else "rgba8"
+            data, memory = frame, "cuda"
         else:
-            arr = frame
-            if not isinstance(arr, np.ndarray):
-                raise TypeError("publish() expects a numpy.ndarray or RawFrame")
-            if arr.ndim != 3 or arr.shape[2] not in (3, 4):
-                raise ValueError(f"unsupported frame shape {arr.shape!r}; expected (H, W, 3) or (H, W, 4)")
-            height, width = int(arr.shape[0]), int(arr.shape[1])
-            pixel_format = "rgb24" if arr.shape[2] == 3 else "rgba8"
-            data = arr
+            raise TypeError("publish() expects a numpy.ndarray, a CUDA tensor, or a RawFrame")
 
         timestamp_us = int((self._clock() - self._start) * 1_000_000)
         # seq is a placeholder; each feed stamps its own per-client sequence.
@@ -131,8 +160,8 @@ class Display:
             width=width,
             height=height,
             timestamp_us=timestamp_us,
-            pixel_format=pixel_format,
-            memory="cpu",
+            pixel_format=pixel_format,  # type: ignore[arg-type]
+            memory=memory,  # type: ignore[arg-type]
             data=data,
         )
         self.width, self.height = width, height

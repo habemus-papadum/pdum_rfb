@@ -42,6 +42,32 @@ h264 = [
 nvenc = [
     "av>=17.1.0",
 ]
+# Zero-copy CUDA->NVENC: a CuPy/DLPack GPU buffer is fed straight to h264_nvenc with
+# no host copy (~2.4-4.3x lower latency; see docs/gpu_zerocopy.md). Two requirements:
+#   1. CuPy matching your CUDA toolkit -> pick the extra below (these install today);
+#   2. PyAV >= 18 (the encode-side hw_frames_ctx wiring). PyAV 18 is NOT on PyPI yet,
+#      so install it via scripts/install-gpu.sh (source build, commit-pinned) or a
+#      prebuilt self-contained wheel (scripts/build-cuda-av-wheel.sh -> GitHub release).
+#      WHEN PyAV 18.0 SHIPS ON PyPI: add "av>=18" to each extra below and GPU support
+#      becomes a one-step `pip install habemus-papadum-rfb[gpu-cuda13]`.
+gpu-cuda13 = [
+    "cupy-cuda13x>=14",  # CUDA 13.x  (add "av>=18" when released)
+]
+gpu-cuda12 = [
+    "cupy-cuda12x>=13",  # CUDA 12.x  (add "av>=18" when released)
+]
+# Alternative GPU H.264/HEVC backend via NVIDIA's Video Codec SDK encoder instead
+# of PyAV/ffmpeg (encode-only spike in vendor/nvenc-encode-spike; see
+# docs/nvenc_sdk_evaluation.md). It needs NO PyAV at all and builds on Python 3.14
+# (upstream PyNvVideoCodec does neither). The SDK wheel `pdum-rfb-nvenc-sdk` is not
+# on PyPI (PyPI forbids the direct-reference URL it would need); install it from
+# this repo's GitHub Releases:
+#   uv pip install habemus-papadum-rfb[gpu-nvenc-sdk]
+#   uv pip install <release-url>/pdum_rfb_nvenc_sdk-<...>.whl   # the SDK wheel itself
+# This extra pulls only the pip-installable half (CuPy); use cupy-cuda12x for CUDA 12.
+gpu-nvenc-sdk = [
+    "cupy-cuda13x>=14",  # + pdum-rfb-nvenc-sdk wheel from GitHub Releases (see comment)
+]
 
 
 [build-system]
@@ -69,6 +95,7 @@ dev = [
     "watchdog>=3.0.0",
     "av>=17.1.0",
     "pytest-asyncio>=1.4.0",
+    "cupy-cuda13x>=14",
 ]
 
 [tool.ruff]
