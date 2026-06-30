@@ -16,13 +16,15 @@ work order**. We proceed one item at a time, committing at each milestone:
 
 1. ~~**§2** — "still after interaction settles"~~ ✅ **done** (`serve(still_after=)`;
    see [Still after settle](still_after_settle.md))
-2. **§8** — multiple streams per server (named displays) — **▶ next**
-3. **§3** — ASGI / Starlette adapter (WebTransport stays deferred)
+2. ~~**§8** — multiple streams per server (named displays)~~ ✅ **done**
+   (`serve_server()` / `display.server.add_stream(...)`; see
+   [Multiple streams](multiple_streams.md))
+3. **§3** — ASGI / Starlette adapter (WebTransport stays deferred) — **▶ next**
 4. **§1** — adaptive / metrics remaining polish
 
 **Skipped** (by request): **§4** framework & notebook adapters. **Tabled** (revisit
 later): **§5** remaining (AV1 / HEVC / zero-copy interop) and **§6** (rendering &
-codec upgrades). **Done:** §2, §7.
+codec upgrades). **Done:** §2, §7, §8.
 
 ## 1. Measure & adapt the software encoder ✅ _(core done)_ · **▶ step 4 — remaining polish**
 
@@ -138,28 +140,30 @@ CI (`ci.yml`). See [Repository & Development](development.md#releasing-the-pipel
 Remaining polish: a packaged non-`blob:` worker subpath export for the widgets (for
 strict-CSP sites), and broader GPU-wheel coverage (aarch64, more manylinux tags).
 
-## 8. Multiple streams per server (named displays) — **▶ step 2 (next)** _(benefit: high · difficulty: moderate)_
+## 8. Multiple streams per server (named displays) ✅ _(done)_ _(benefit: high · difficulty: moderate)_
 
-Today `serve(w, h)` hosts **one** `Display` (one framebuffer). Host several from one
-port — different cameras/viewports of a simulation, a dashboard of independent plots,
-or a per-user view — each an independent `Display` clients attach to by URL path,
-discoverable via a REST listing. Distinct from multi-client (many viewers of *one*
-stream, already done) and from WebTransport (§3): this works over plain WebSocket.
+Host several framebuffers from one port — different cameras/viewports of a
+simulation, a dashboard of independent plots, or a per-user view — each an
+independent `Display` clients attach to by URL path, discoverable via a REST
+listing. Distinct from multi-client (many viewers of *one* stream) and from
+WebTransport (§3): this works over plain WebSocket. As shipped:
 
-The groundwork is already there — `Display` is self-contained (latest frame,
-per-client feeds/sessions, its own event queue). The additions are additive and
-touch neither `RfbSession`, encoders, nor feeds:
-
-- a **`Server`/hub** owning the websockets listener + a `{name: Display}` registry;
-- **path routing**: `ws://host/<name>` selects the stream; no path → a `"default"`
-  stream, so `serve(w, h)` and `RemoteFramebufferView({url})` are unchanged;
-- move the per-connection encoder config (`has_h264`/`has_nvenc`/`gpu`/`bitrate`/
-  `adaptive`/`authenticate`) **onto each stream**, so streams can differ (one GPU,
-  one image; per-stream auth);
+- a **`Server`/hub** (`serve_server()`) owns the websockets listener + a
+  `{name: _StreamHost}` registry, each `_StreamHost` being a `Display` plus its
+  encoder config;
+- **path routing**: `ws://host/<name>` selects the stream; no path → the `"default"`
+  stream, so `serve(w, h)` and `RemoteFramebufferView({url})` are unchanged; an
+  unknown stream closes with application code `4404`;
+- the per-connection encoder config (`has_h264`/`has_nvenc`/`gpu`/`bitrate`/
+  `adaptive`/`still_after`/`authenticate`) lives **on each stream**, so streams can
+  differ (one GPU, one image; per-stream auth);
 - **REST**: `GET /streams` → `[{name, width, height, fps, clients}]`,
-  `GET /streams/<name>/metrics`; `AuthContext` gains `stream` for per-stream authz.
+  `GET /streams/<name>/metrics`; `AuthContext.stream` carries the stream name for
+  per-stream authz;
+- the one-liner holds: `serve(w, h)` returns the default stream with
+  `display.server` reachable to `add_stream(...)`; `serve_server()` builds a hub with
+  no default.
 
-Keep the one-liner: `serve(w, h)` returns the default stream (with `display.server`
-reachable to `add_stream(...)`), or a new `serve_server()` builds a hub with no
-default. (Per-*client* viewport rendering from a single shared scene is a harder,
-app-coupled variant — `_ClientFeed.viewport` is already recorded toward it.)
+See [Multiple streams](multiple_streams.md). (Per-*client* viewport rendering from a
+single shared scene is a harder, app-coupled variant — `_ClientFeed.viewport` is
+already recorded toward it.)

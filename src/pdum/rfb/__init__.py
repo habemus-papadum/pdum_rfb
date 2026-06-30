@@ -57,6 +57,7 @@ __all__ = [
     "QualityTarget",
     "RawFrame",
     "RfbSession",
+    "Server",
     "SessionMetrics",
     "UnsupportedClient",
     "WebSocketTransport",
@@ -73,6 +74,7 @@ __all__ = [
     "register_video_encoder",
     "select_transport",
     "serve",
+    "serve_server",
     "unpack_binary_message",
 ]
 
@@ -80,7 +82,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .encoders.h264_cpu import H264CpuEncoder, h264_available
     from .encoders.nvenc_cpu import NvencCpuEncoder, nvenc_cpu_available
     from .encoders.nvenc_gpu_pyav import NvencGpuPyavEncoder, nvenc_gpu_pyav_available
-    from .server import serve
+    from .server import Server, serve, serve_server
 
 
 def __getattr__(name: str):
@@ -102,8 +104,8 @@ def __getattr__(name: str):
         from .encoders import nvenc_gpu_pyav
 
         return getattr(nvenc_gpu_pyav, name)
-    if name == "serve":
+    if name in ("serve", "serve_server", "Server"):
         from . import server
 
-        return server.serve
+        return getattr(server, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

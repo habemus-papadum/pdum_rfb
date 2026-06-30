@@ -111,6 +111,8 @@ class Display:
         # Set by serve() so aclose() can stop the listener it started.
         self._server: Any = None
         self._server_cm: Any = None
+        # Set by Server.add_stream() so display.server.add_stream(...) works.
+        self._owner_server: Any = None
 
     # --- publishing --------------------------------------------------------
 
@@ -201,20 +203,38 @@ class Display:
             return None
         return next(iter(self._server.sockets)).getsockname()[1]
 
+    @property
+    def server(self) -> Any:
+        """The owning :class:`~pdum.rfb.server.Server` hub, if this is a stream of one.
+
+        Lets the convenience ``display = await serve(...)`` path reach the hub to add
+        more streams: ``display.server.add_stream("camera_b", 640, 480)``. ``None``
+        for a bare ``Display`` constructed directly.
+        """
+        return self._owner_server
+
     # --- lifecycle ---------------------------------------------------------
 
-    async def aclose(self) -> None:
-        """Stop the server, disconnect viewers, and release encoder resources."""
+    def _close_local(self) -> None:
+        """Disconnect viewers and wake waiters, *without* stopping any listener.
+
+        The per-stream half of teardown: a hub (:class:`~pdum.rfb.server.Server`)
+        calls this on each stream while it stops the shared listener once.
+        """
         if self._closed:
             return
         self._closed = True
         for feed in list(self._feeds):
             feed.close()
         self._events_signal.set()
+
+    async def aclose(self) -> None:
+        """Stop the server, disconnect viewers, and release encoder resources."""
+        self._close_local()
         if self._server_cm is not None:
-            await self._server_cm.__aexit__(None, None, None)
-            self._server_cm = None
+            cm, self._server_cm = self._server_cm, None
             self._server = None
+            await cm.__aexit__(None, None, None)
 
     # --- internal (used by the connection server) --------------------------
 

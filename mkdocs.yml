@@ -18,6 +18,7 @@ nav:
   - Internals: internals.md
   - Features:
       - Still after settle: still_after_settle.md
+      - Multiple streams: multiple_streams.md
   - Repository & Development: development.md
   - Performance: performance.md
   - GPU / hardware encode:

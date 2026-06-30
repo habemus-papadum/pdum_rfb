@@ -52,6 +52,10 @@ def _nvenc_usable() -> bool:
         return False
 
 
+#: The stream a client reaches with no URL path (``ws://host`` / ``ws://host/``).
+DEFAULT_STREAM = "default"
+
+
 async def _close_feed_on_disconnect(connection: Any, feed: _ClientFeed) -> None:
     """Stop ``feed`` when the socket closes, so a parked encode loop unparks.
 
@@ -65,12 +69,20 @@ async def _close_feed_on_disconnect(connection: Any, feed: _ClientFeed) -> None:
         feed.close()
 
 
-class _ConnectionServer:
-    """Per-``Display`` connection handler: negotiate, authenticate, run sessions."""
+class _StreamHost:
+    """One named stream: a :class:`Display` plus its per-connection encode config.
+
+    Negotiates a transport, authenticates, and drives one
+    :class:`~pdum.rfb.session.RfbSession` per connecting viewer. A :class:`Server`
+    owns the shared listener and routes each connection to the right ``_StreamHost``
+    by URL path; with a single ``"default"`` stream this is exactly the old
+    one-display ``serve()`` behaviour.
+    """
 
     def __init__(
         self,
         display: Display,
+        name: str = DEFAULT_STREAM,
         *,
         has_h264: bool | None = None,
         has_nvenc: bool | None = None,
@@ -83,6 +95,7 @@ class _ConnectionServer:
         gpu: bool = False,
     ) -> None:
         self.display = display
+        self.name = name
         self.has_h264 = _h264_importable() if has_h264 is None else has_h264
         # Prefer the GPU encoder when available. Auto-detect unless forced, and
         # never enable it when H.264 is disabled altogether (e.g. --force-image).
@@ -215,6 +228,7 @@ class _ConnectionServer:
             path=getattr(req, "path", None),
             remote=getattr(connection, "remote_address", None),
             hello=hello,
+            stream=self.name,
         )
         try:
             principal = await self.authenticate(ctx)
@@ -222,24 +236,210 @@ class _ConnectionServer:
             return _REJECTED
         return _REJECTED if principal is None else principal
 
-    def process_request(self, connection: Any, request: Any):
-        """Answer the HTTP side-channel routes; return None to proceed with WS."""
-        path = request.path.split("?", 1)[0]
-        if path == "/health":
-            return connection.respond(HTTPStatus.OK, "ok\n")
-        if path == "/recorded-events/reset":
-            self.display.recorded.clear()
-            return connection.respond(HTTPStatus.OK, "[]")
-        if path == "/recorded-events":
-            return connection.respond(HTTPStatus.OK, json.dumps(self.display.recorded))
-        if path == "/metrics":
-            snapshots = [s.metrics_snapshot() for s in self.display._sessions]
-            return connection.respond(HTTPStatus.OK, json.dumps(snapshots))
-        return None
+    def info(self) -> dict:
+        """A one-line summary for the ``GET /streams`` listing."""
+        return {
+            "name": self.name,
+            "width": self.display.width,
+            "height": self.display.height,
+            "fps": self.display.fps,
+            "clients": self.display.client_count,
+        }
+
+    def metrics(self) -> list[dict]:
+        """Per-session metric snapshots for this stream (``GET /streams/<name>/metrics``)."""
+        return [s.metrics_snapshot() for s in self.display._sessions]
 
 
 #: Sentinel distinguishing "authentication failed" from an anonymous ``None``.
 _REJECTED = object()
+
+
+class Server:
+    """A hub: one WebSocket listener fronting several named streams.
+
+    Each stream is an independent :class:`~pdum.rfb.display.Display` with its own
+    encoder config; a browser selects one by **URL path** (``ws://host/<stream>``),
+    and a connection with no path lands on the ``"default"`` stream. Streams are
+    discoverable over HTTP at ``GET /streams``.
+
+    Build one with :func:`serve_server`, or use :func:`serve` for the common
+    single-default-stream case (it returns the default ``Display`` and keeps
+    ``display.server`` pointing back here so you can ``add_stream`` more).
+
+    This composes with everything else — multi-client fan-out, per-client
+    backpressure, the encoders, auth, "still after settle" — none of which changes;
+    a stream is just a ``Display`` plus its config, and routing is purely additive.
+    """
+
+    def __init__(
+        self,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        origins: list[str | None] | None = None,
+    ) -> None:
+        self.host = host
+        self._port = port  # requested; the bound port may differ when port=0
+        self.origins = origins
+        self._streams: dict[str, _StreamHost] = {}
+        self._listener: Any = None
+        self._listener_cm: Any = None
+        self._closed = False
+
+    # --- streams -----------------------------------------------------------
+
+    def add_stream(
+        self,
+        name: str,
+        width: int,
+        height: int,
+        *,
+        fps: int = 30,
+        bitrate: int = 12_000_000,
+        max_inflight: int = 2,
+        has_h264: bool | None = None,
+        has_nvenc: bool | None = None,
+        gpu: bool = False,
+        adaptive: bool = False,
+        still_after: float | None = None,
+        authenticate: Authenticator | None = None,
+        record_events: bool = False,
+        event_log: str | Path | None = None,
+        event_queue_size: int = 4096,
+    ) -> Display:
+        """Register a new named stream and return its :class:`Display`.
+
+        Streams are independent: each carries its own encoder config (one GPU, one
+        image; per-stream bitrate; per-stream ``authenticate``). Safe to call before
+        or after :meth:`start` — clients reach it at ``ws://host/<name>`` either way.
+        Raises if ``name`` is already taken.
+        """
+        if name in self._streams:
+            raise ValueError(f"stream {name!r} already exists")
+        display = Display(
+            width,
+            height,
+            fps=fps,
+            record_events=record_events,
+            event_log=event_log,
+            event_queue_size=event_queue_size,
+        )
+        host = _StreamHost(
+            display,
+            name,
+            has_h264=has_h264,
+            has_nvenc=has_nvenc,
+            fps=fps,
+            bitrate=bitrate,
+            max_inflight=max_inflight,
+            adaptive=adaptive,
+            still_after=still_after,
+            authenticate=authenticate,
+            gpu=gpu,
+        )
+        self._streams[name] = host
+        display._owner_server = self
+        display._server = self._listener  # None until start(); back-filled there
+        return display
+
+    def stream(self, name: str = DEFAULT_STREAM) -> Display:
+        """Return the :class:`Display` for stream ``name`` (``KeyError`` if absent)."""
+        return self._streams[name].display
+
+    @property
+    def streams(self) -> list[str]:
+        """The names of the registered streams."""
+        return list(self._streams)
+
+    @property
+    def port(self) -> int | None:
+        """The bound TCP port (the actual one when started with ``port=0``)."""
+        if self._listener is not None:
+            return next(iter(self._listener.sockets)).getsockname()[1]
+        return self._port
+
+    # --- lifecycle ---------------------------------------------------------
+
+    async def start(self) -> Server:
+        """Start the shared listener in the background; returns ``self``."""
+        import websockets.asyncio.server
+
+        kwargs: dict[str, Any] = dict(process_request=self.process_request, max_size=None)
+        if self.origins is not None:
+            kwargs["origins"] = self.origins
+        cm = websockets.asyncio.server.serve(self._route, self.host, self._port, **kwargs)
+        self._listener = await cm.__aenter__()
+        self._listener_cm = cm
+        for host in self._streams.values():
+            host.display._server = self._listener
+        return self
+
+    async def aclose(self) -> None:
+        """Stop the listener and disconnect every viewer of every stream."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._listener_cm is not None:
+            cm, self._listener_cm = self._listener_cm, None
+            self._listener = None
+            await cm.__aexit__(None, None, None)
+        for host in self._streams.values():
+            host.display._close_local()
+
+    async def __aenter__(self) -> Server:
+        return await self.start()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
+
+    # --- routing -----------------------------------------------------------
+
+    @staticmethod
+    def _stream_name(path: str) -> str:
+        """Map a request path to a stream name (first path segment; ``"default"``)."""
+        seg = path.split("?", 1)[0].strip("/").split("/", 1)[0]
+        return seg or DEFAULT_STREAM
+
+    async def _route(self, connection: Any) -> None:
+        """Dispatch one connection to its stream by URL path (close 4404 if unknown)."""
+        req = getattr(connection, "request", None)
+        name = self._stream_name(getattr(req, "path", "") or "")
+        host = self._streams.get(name)
+        if host is None:
+            await connection.close(4404, f"unknown stream {name!r}")
+            return
+        await host.handler(connection)
+
+    def process_request(self, connection: Any, request: Any):
+        """Answer the HTTP side-channel routes; return None to proceed with WS.
+
+        Global: ``GET /health``, ``GET /streams``, ``GET /streams/<name>/metrics``.
+        For backward compatibility the single-stream routes (``/metrics``,
+        ``/recorded-events``, ``/recorded-events/reset``) act on the ``"default"``
+        stream when one exists.
+        """
+        path = request.path.split("?", 1)[0]
+        if path == "/health":
+            return connection.respond(HTTPStatus.OK, "ok\n")
+        if path == "/streams":
+            return connection.respond(HTTPStatus.OK, json.dumps([h.info() for h in self._streams.values()]))
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "streams" and parts[2] == "metrics":
+            host = self._streams.get(parts[1])
+            if host is None:
+                return connection.respond(HTTPStatus.NOT_FOUND, "[]")
+            return connection.respond(HTTPStatus.OK, json.dumps(host.metrics()))
+        default = self._streams.get(DEFAULT_STREAM)
+        if default is not None:
+            if path == "/metrics":
+                return connection.respond(HTTPStatus.OK, json.dumps(default.metrics()))
+            if path == "/recorded-events":
+                return connection.respond(HTTPStatus.OK, json.dumps(default.display.recorded))
+            if path == "/recorded-events/reset":
+                default.display.recorded.clear()
+                return connection.respond(HTTPStatus.OK, "[]")
+        return None
 
 
 async def serve(
@@ -295,36 +495,77 @@ async def serve(
         closed with code ``4401`` before any frame is sent.
     origins:
         Allowed ``Origin`` values (CSWSH defense) passed to ``websockets``.
-    """
-    import websockets.asyncio.server
 
-    display = Display(
+    Notes
+    -----
+    This hosts a single ``"default"`` stream. Reach the hub behind it via
+    ``display.server`` to host **several** streams from the one port
+    (``display.server.add_stream("camera_b", 640, 480)``), or start with
+    :func:`serve_server` for a hub with no default stream. See
+    ``docs/multiple_streams.md``.
+    """
+    server = Server(host=host, port=port, origins=origins)
+    display = server.add_stream(
+        DEFAULT_STREAM,
         width,
         height,
         fps=fps,
+        bitrate=bitrate,
+        max_inflight=max_inflight,
+        has_h264=has_h264,
+        has_nvenc=has_nvenc,
+        gpu=gpu,
+        adaptive=adaptive,
+        still_after=still_after,
+        authenticate=authenticate,
         record_events=record_events,
         event_log=event_log,
         event_queue_size=event_queue_size,
     )
-    conn = _ConnectionServer(
-        display,
-        has_h264=has_h264,
-        has_nvenc=has_nvenc,
-        fps=fps,
-        bitrate=bitrate,
-        max_inflight=max_inflight,
-        adaptive=adaptive,
-        still_after=still_after,
-        authenticate=authenticate,
-        gpu=gpu,
-    )
-    kwargs: dict[str, Any] = dict(process_request=conn.process_request, max_size=None)
-    if origins is not None:
-        kwargs["origins"] = origins
-    cm = websockets.asyncio.server.serve(conn.handler, host, port, **kwargs)
-    display._server = await cm.__aenter__()
-    display._server_cm = cm
+    await server.start()
+    # The one-liner contract: closing the returned Display tears down the whole hub.
+    display._server_cm = server
     return display
+
+
+async def serve_server(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    origins: list[str | None] | None = None,
+    streams: list[dict[str, Any]] | None = None,
+) -> Server:
+    """Start a **multi-stream hub** and return the :class:`Server`.
+
+    Unlike :func:`serve` (one default stream, returns its ``Display``), this returns
+    the hub itself with no default stream. Add streams with
+    ``server.add_stream(name, w, h, **config)`` — each returns its own ``Display`` to
+    publish into — and clients attach by URL path (``ws://host/<name>``). A client
+    with no path is rejected until a ``"default"`` stream exists.
+
+    Parameters
+    ----------
+    host, port, origins:
+        As for :func:`serve` — they configure the one shared listener.
+    streams:
+        Optional list of ``add_stream`` keyword dicts to register **before** the
+        listener starts (atomic setup), e.g.
+        ``[{"name": "rgb", "width": 1280, "height": 720, "gpu": True}]``. You can
+        also add streams afterwards.
+
+    Examples
+    --------
+    >>> server = await serve_server(port=8765)
+    >>> cam = server.add_stream("camera", 1280, 720)
+    >>> depth = server.add_stream("depth", 640, 480, has_h264=False)
+    >>> cam.publish(render_camera()); depth.publish(render_depth())
+    >>> await server.aclose()
+    """
+    server = Server(host=host, port=port, origins=origins)
+    for spec in streams or []:
+        server.add_stream(**spec)
+    await server.start()
+    return server
 
 
 async def _amain(args: argparse.Namespace) -> None:

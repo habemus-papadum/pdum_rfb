@@ -213,7 +213,8 @@ src/pdum/rfb/
   adaptive.py       AdaptiveQualityController (opt-in via serve(adaptive=True))
   benchmark.py      `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
   cli.py            `pdum-rfb` CLI: doctor (probe encode paths) + benchmark
-  server.py         serve()->Display, _ConnectionServer (HTTP side channel), `python -m` CLI
+  server.py         serve()->Display, serve_server()->Server hub (named streams,
+                    URL-path routing, /streams REST), _StreamHost, `python -m` CLI
   encoders/
     base.py         registry + build_encoder (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum)
     image.py        ImageEncoder (Pillow)

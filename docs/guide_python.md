@@ -188,8 +188,26 @@ the [JavaScript guide](guide_javascript.md)).
 
 Several browsers can connect to one `Display` and watch the same stream; each gets
 its own encoder and a keyframe on attach, and `display.client_count` reports how
-many are connected. Run several independent displays by calling `serve()` more than
-once (e.g. on different ports / from a web app that mints per-display URLs).
+many are connected.
+
+### Multiple streams (named displays)
+
+To host **several** framebuffers — different cameras/viewports, a dashboard of
+plots, per-user views — from **one port**, use a hub. Each stream is an independent
+`Display` a browser attaches to by URL path (`ws://host/<name>`):
+
+```python
+server = await rfb.serve_server(port=8765)
+cam   = server.add_stream("camera", 1280, 720)
+depth = server.add_stream("depth", 640, 480, has_h264=False)
+# publish into cam / depth independently; GET /streams lists them
+await server.aclose()
+```
+
+`serve(w, h)` is just the single-`"default"`-stream case and still returns a
+`Display`; reach the hub behind it via `display.server` to add more. See
+[Multiple streams](multiple_streams.md) for routing, the REST listing, and
+per-stream auth.
 
 ### The built-in CLI
 

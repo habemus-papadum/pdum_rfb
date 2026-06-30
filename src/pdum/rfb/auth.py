@@ -63,6 +63,11 @@ class AuthContext:
         ``(host, port)`` of the peer, when available.
     hello:
         The full decoded ``hello`` dict, for transports that carry auth in-band.
+    stream:
+        Name of the stream (named :class:`~pdum.rfb.display.Display`) this client is
+        connecting to, for per-stream authorization. ``"default"`` for the
+        single-stream ``serve()`` path; the URL-path segment for a hub
+        (``ws://host/<stream>``). See :func:`pdum.rfb.serve_server`.
     """
 
     token: str | None = None
@@ -71,6 +76,7 @@ class AuthContext:
     query: Mapping[str, str] | None = None
     remote: tuple[str, int] | None = None
     hello: dict | None = None
+    stream: str | None = None
 
 
 #: Async hook: given an :class:`AuthContext`, return a :data:`Principal` to accept
