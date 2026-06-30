@@ -198,6 +198,12 @@ reported in `set_viewport` (logical `width`/`height` + physical `pwidth`/`pheigh
 > `_ClientFeed` (the `FrameSource` the session pulls). The pull `FrameSource`
 > classes in `sources.py` are internal-only now. `RfbSession` is unchanged — it sees
 > a `Channel` (`transport.py`) and a feed, both satisfying its thin seams.
+>
+> Two additive layers sit on top of that core without changing it: a **hub**
+> (`serve_server()` → `Server`) fronts several named `Display`s on one port, routed
+> by URL path; and an opt-in **ASGI** front-end (`asgi.py`) drives the same
+> per-connection lifecycle (`_StreamHost._serve_connection`) over a Starlette
+> WebSocket. Both reuse the identical session/encoder/backpressure path.
 
 ```text
 src/pdum/rfb/

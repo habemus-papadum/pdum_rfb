@@ -86,9 +86,11 @@ src/pdum/rfb/
   session.py      RfbSession: recv_loop/encode_loop, backpressure, keyframe policy (UNCHANGED by push)
   display.py      Display (publish/poll_events/events/aclose) + internal _ClientFeed (per connection)
   auth.py         AuthContext, Authenticator, Principal — pluggable auth hook (no JWT dep)
-  transport.py    Channel protocol + WebSocketTransport (seam for a future ASGI/WebTransport adapter)
+  transport.py    Channel protocol + WebSocketTransport (the transport seam; ASGI rides it via asgi.py)
   sources.py      BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (INTERNAL now, not exported)
-  server.py       serve()->Display, _ConnectionServer (+ HTTP side channel), `python -m pdum.rfb.server` CLI
+  asgi.py         opt-in [asgi] Starlette front-end: rfb_endpoint / rfb_hub_endpoint + _AsgiConn
+  server.py       serve()->Display, serve_server()->Server hub (named streams, URL-path routing,
+                  /streams REST), _StreamHost (transport-neutral _serve_connection), _WsConn, CLI
   gpu.py          zero-copy GPU helpers: rgb_to_nv12 kernel, cuda_frame, enable_cuda_context_sharing,
                   cuda_zerocopy_available, HostFrameAdapter (lazy-imports CuPy; see docs/gpu_zerocopy.md)
   encoders/
@@ -132,9 +134,12 @@ build) and is only built when its `gpu-nvenc-sdk` extra is requested — default
 One WebSocket carries two message kinds:
 - **Control (JSON text):** client→server `hello` (may carry an auth `token`), `ack`,
   `request_keyframe`, `set_viewport`, `event`; server→client `config`, plus optional
-  `set_quality`/`stats`. Auth: `serve(authenticate=...)` is called after `hello`,
-  before `config`; rejected connections close with code `4401`. In a shared display,
-  `set_viewport`/`resize` is **informational** — the publisher owns resolution.
+  `set_quality` (adaptive targets: bitrate/fps) and `stats` (server-truth metrics,
+  opt-in via `serve(stats_interval=)`; the client folds both into its `Stats`). Auth:
+  `serve(authenticate=...)` is called after `hello`, before `config`; rejected
+  connections close with code `4401`. With a stream hub, a connection to an unknown
+  URL-path stream closes with `4404`. In a shared display, `set_viewport`/`resize` is
+  **informational** — the publisher owns resolution.
 - **Payloads (binary):** one self-describing envelope per image/AU —
   `uint32le header_len | utf8 JSON header | raw bytes`. Atomic by design (no
   header/payload pairing race). The Python packer (`pack_binary_message`) and the
@@ -210,16 +215,25 @@ cross-language contract — keep the Python and TS sides in sync.
   v1 reads the token from `hello`; `AuthContext` also carries headers/cookies/path so
   a future same-site-cookie/ASGI path feeds the same hook. No JWT dep in the library.
 - **Transport:** `transport.py`'s `Channel` protocol + `WebSocketTransport` is the
-  seam (roadmap §3); a Starlette/ASGI or WebTransport adapter drops in without
-  touching `RfbSession` (which only needs `await send(...)` + async iteration).
+  seam; the **ASGI** front-end (`asgi.py`, opt-in `[asgi]`) already rides it — the
+  per-connection lifecycle is transport-neutral (`_StreamHost._serve_connection`), so
+  both the `websockets` listener (`_WsConn`) and a Starlette WebSocket (`_AsgiConn`)
+  share it. A WebTransport adapter would drop in the same way (still deferred).
+- **Streams:** `serve_server()` → a `Server` hub fronts several named `Display`s on
+  one port (URL-path routing, `GET /streams`); `serve()` is the single-`"default"`-
+  stream case and exposes the hub via `display.server`. See `docs/multiple_streams.md`.
 
 ## Project status & roadmap
 
-Image and CPU-H.264 paths work end-to-end and are verified headlessly. Done:
-per-session metrics + `GET /metrics`, offline benchmark with real PSNR, opt-in
-adaptive quality. Next (see `docs/roadmap.md`): "lossless still after interaction
-settles", logical-channel transport abstraction, React hook + Jupyter/marimo
-(anywidget) adapters, NVENC backend (needs Linux/NVIDIA), AV1, and npm packaging.
+Image, CPU-H.264, and GPU NVENC paths work end-to-end and are verified headlessly.
+The four planned roadmap items are **done** (see `docs/roadmap.md`): **§2** "still
+after interaction settles" (`serve(still_after=)`, `docs/still_after_settle.md`),
+**§8** multiple streams (`serve_server()`, `docs/multiple_streams.md`), **§3** the
+opt-in **ASGI/Starlette** front-end (`docs/asgi.md`), and **§1** adaptive/metrics
+polish (fps lever + opt-in server→client `stats` push surfaced in the client
+`Stats`). Done earlier: per-session metrics + `GET /metrics`, offline PSNR benchmark,
+adaptive quality, the NVENC backends. **Skipped by request:** framework/notebook
+adapters (§4). Tabled: AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 
 ## Hard rules (from AGENTS.md — do not violate)
 
