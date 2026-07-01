@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import logging
 
 from ..protocol import DEFAULT_H264_CODEC
 from ..types import EncodedPayload, RawFrame
@@ -253,7 +254,20 @@ def nvenc_gpu_pdum_available() -> bool:
         total += sum(len(p.payload) for p in enc.flush())
         enc.close()
         return total > 0
-    except Exception:
+    except Exception as exc:
+        # cupy + pdum.nvenc import fine (guarded above), yet the encode probe failed: the
+        # package is *installed but unusable*. The usual cause is a stale native build — the
+        # compiled .so drifted from packages/nvenc/src/cpp after a C++ edit without a version
+        # bump, so a later `uv sync` reinstalled the cached wheel over a fresh one (e.g. the
+        # wrapper passes a constructor arg the old .so doesn't accept -> TypeError). Log it so
+        # a silently greyed-out backend in `pdum-rfb demo` / doctor / serve() auto-select
+        # becomes an actionable hint instead of the misleading "package not installed".
+        logging.getLogger(__name__).warning(
+            "pdum.nvenc is installed but its NVENC probe failed (%s: %s) — likely a stale "
+            "native build; rebuild with scripts/rebuild-nvenc.sh",
+            type(exc).__name__,
+            exc,
+        )
         return False
 
 

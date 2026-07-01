@@ -248,3 +248,30 @@ def test_pipeline_depth_zero_is_synchronous_default():
     payloads = enc.encode(_cuda_frame(0), force_keyframe=True)
     enc.close()
     assert len(payloads) == 1 and payloads[0].seq == 0 and payloads[0].keyframe
+
+
+def test_probe_warns_when_installed_but_broken(monkeypatch, caplog):
+    """A stale/broken native build must be *observable*, not a silent grey-out.
+
+    Regression for a `pdum-rfb demo` confusion: the SDK backend vanished from the web UI
+    while ``doctor`` still showed it available. Root cause was a stale ``pdum.nvenc`` .so —
+    the wrapper passed a constructor arg the old binding didn't accept, so the encode probe
+    raised ``TypeError``, which ``nvenc_gpu_pdum_available()`` swallowed to ``False`` with a
+    misleading "package not installed" reason. It now logs an actionable warning instead."""
+    import logging
+
+    import pdum.rfb.encoders.nvenc_gpu_pdum as m
+
+    def boom(*args, **kwargs):
+        raise TypeError("incompatible constructor arguments (simulated stale .so)")
+
+    m.nvenc_gpu_pdum_available.cache_clear()
+    monkeypatch.setattr(m, "NvencGpuPdumEncoder", boom)
+    try:
+        with caplog.at_level(logging.WARNING, logger="pdum.rfb.encoders.nvenc_gpu_pdum"):
+            assert m.nvenc_gpu_pdum_available() is False
+        assert any("stale native build" in r.message for r in caplog.records), (
+            "installed-but-broken probe failure must warn with a rebuild hint"
+        )
+    finally:
+        m.nvenc_gpu_pdum_available.cache_clear()  # re-probe for real in later tests
