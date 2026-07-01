@@ -42,11 +42,11 @@ nav:
           - VideoToolbox encoder (macOS): proposals/completed/mlx_metal_videotoolbox_encoder_design.md
           - Encoder sync & seq attribution: proposals/completed/encoder_sync_and_seq_attribution.md
           - NVENC SDK evaluation: proposals/completed/nvenc_sdk_evaluation.md
+          - Pipelined encode — NVENC: proposals/completed/pipelined_encode_nvenc_impl.md
           - rendercanvas backend: proposals/completed/rendercanvas_backend.md
       - In progress (not yet built):
           - Sizing, DPR & color: proposals/active/sizing_dpr_color.md
           - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
-          - Pipelined encode — NVENC impl guide: proposals/active/pipelined_encode_nvenc_impl.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs

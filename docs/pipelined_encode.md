@@ -150,8 +150,8 @@ token channel exists to add it later if a throughput case appears; it has not be
 - [`encoder_sync_and_seq_attribution.md`](proposals/completed/encoder_sync_and_seq_attribution.md) — the design
   note this feature implements (why 1-in-1-out is load-bearing, the two correlation concerns,
   the token-recovery plan).
-- [`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md) — implementation guide
-  for the NVENC side (Linux/CUDA agent).
+- [`pipelined_encode_nvenc_impl.md`](proposals/completed/pipelined_encode_nvenc_impl.md) — as-built
+  implementation notes for the NVENC side.
 - [`internals.md`](internals.md#pipelined-encode-token-based-seq-attribution) — how the
   pipelined path threads through the binding, wrapper, and session.
 - [`mlx_metal_videotoolbox_encoder_design.md`](proposals/completed/mlx_metal_videotoolbox_encoder_design.md) — the
