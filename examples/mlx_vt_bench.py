@@ -26,6 +26,7 @@ import statistics
 import time
 
 import mlx.core as mx
+import numpy as np
 
 # Reuse the two custom Metal kernels from the streaming example (no duplication).
 from mlx_vt_stream import render_rgba, rgba_to_nv12
@@ -76,6 +77,37 @@ def bench_one(width: int, height: int, fps: int, frames: int, warmup: int) -> di
     }
 
 
+def encoder_only_fps(width: int, height: int, fps: int, frames: int, warmup: int, pipelined: bool) -> tuple[float, int]:
+    """Sustained encoder-only fps (no MLX): the SAME prebuilt NV12 loop, differing only in
+    encode() (synchronous) vs submit() (pipelined). Apples-to-apples isolation of the encoder
+    path. Also reports the max observed pipeline depth (submitted - emitted). On VideoToolbox
+    depth stays ~0 (low-latency RC is synchronous) and the two fps match — the point of the
+    comparison: pipelining is a no-op on VT (it pays off on NVENC)."""
+    from pdum.vtenc import VtEncoder
+
+    bitrate = max(4_000_000, width * height * fps // 20)
+    enc = VtEncoder(width, height, fps=fps, gop=fps, bitrate=bitrate)
+    nv12 = np.zeros((height + height // 2, width), np.uint8)
+    nv12[height:] = 128
+    emitted, max_depth, t0 = 0, 0, None
+    for i in range(warmup + frames):
+        if i == warmup:
+            t0 = time.perf_counter()
+        nv12[:height] = (i * 7) % 200 + 16
+        if pipelined:
+            emitted += len(enc.submit(nv12, seq=i, force_idr=(i == 0)))
+        else:
+            enc.encode(nv12, force_idr=(i == 0))
+            emitted += 1
+        if i >= warmup:
+            max_depth = max(max_depth, (i + 1) - emitted)
+    wall = time.perf_counter() - t0
+    if pipelined:
+        enc.flush_pipeline()
+    enc.close()
+    return frames / wall, max_depth
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--frames", type=int, default=60)
@@ -83,6 +115,11 @@ def main() -> None:
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--width", type=int, default=None)
     ap.add_argument("--height", type=int, default=None)
+    ap.add_argument(
+        "--compare-pipeline",
+        action="store_true",
+        help="also measure the pipelined submit() path and compare throughput vs sync encode()",
+    )
     args = ap.parse_args()
 
     sizes = [(args.width, args.height)] if args.width and args.height else DEFAULT_SIZES
@@ -102,6 +139,15 @@ def main() -> None:
             f"{r['copy_pct']:>6.2f}% {r['fps']:>7.1f}"
         )
     print("\n(ms per stage. copy% = copy / encode(). All on unified memory — no PCIe transfer.)")
+
+    if args.compare_pipeline:
+        print("\nEncoder-only throughput, sync encode() vs pipelined submit() (same NV12 input, no MLX):")
+        print(f"{'size':>10} {'sync fps':>10} {'pipe fps':>10} {'speedup':>9} {'max depth':>10}")
+        for w, h in sizes:
+            sync_fps, _ = encoder_only_fps(w, h, args.fps, args.frames, args.warmup, pipelined=False)
+            pipe_fps, depth = encoder_only_fps(w, h, args.fps, args.frames, args.warmup, pipelined=True)
+            print(f"{f'{w}x{h}':>10} {sync_fps:>10.1f} {pipe_fps:>10.1f} {pipe_fps / sync_fps:>8.2f}x {depth:>10}")
+        print("(VideoToolbox low-latency RC is synchronous → depth ~0, ~1.0x. The knob pays off on NVENC.)")
 
 
 if __name__ == "__main__":

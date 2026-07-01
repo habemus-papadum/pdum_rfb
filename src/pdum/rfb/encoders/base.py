@@ -31,10 +31,14 @@ def available_video_encoders() -> list[str]:
     return sorted(_VIDEO_ENCODERS)
 
 
+# ``pipeline_depth`` is threaded to every video factory by build_encoder, but only the
+# backends that implement the token-based pipelined path consume it; the rest drop it (a
+# pipeline_depth > 0 request is a no-op there, run synchronously). See docs/pipelined_encode.md.
 def _h264_cpu_factory(**kwargs) -> EncoderBackend:
     # Imported lazily so PyAV is only required when an H.264 encoder is built.
     from .h264_cpu import H264CpuEncoder
 
+    kwargs.pop("pipeline_depth", None)  # libx264 path is synchronous 1-in-1-out
     return H264CpuEncoder(**kwargs)
 
 
@@ -42,6 +46,7 @@ def _nvenc_cpu_factory(**kwargs) -> EncoderBackend:
     # Imported lazily so PyAV is only required when an H.264 encoder is built.
     from .nvenc_cpu import NvencCpuEncoder
 
+    kwargs.pop("pipeline_depth", None)  # PyAV h264_nvenc path is synchronous 1-in-1-out
     return NvencCpuEncoder(**kwargs)
 
 
@@ -49,20 +54,26 @@ def _nvenc_gpu_pyav_factory(**kwargs) -> EncoderBackend:
     # Lazy: needs PyAV >= 18 + CuPy + an NVENC GPU (gated by cuda_zerocopy_available).
     from .nvenc_gpu_pyav import NvencGpuPyavEncoder
 
+    kwargs.pop("pipeline_depth", None)  # PyAV path is synchronous 1-in-1-out
     return NvencGpuPyavEncoder(**kwargs)
 
 
 def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
     # Lazy: PyAV-free GPU path via habemus-papadum-nvenc (CuPy + an NVENC GPU);
     # gated by pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
+    # NOTE (pipelining): this is the backend where pipeline_depth pays off (NVENC
+    # extra_output_delay). Until the pipelined path lands in NvencGpuPdumEncoder (see
+    # docs/pipelined_encode_nvenc_impl.md), drop the kwarg so depth > 0 runs synchronously.
     from .nvenc_gpu_pdum import NvencGpuPdumEncoder
 
+    kwargs.pop("pipeline_depth", None)
     return NvencGpuPdumEncoder(**kwargs)
 
 
 def _vtenc_factory(**kwargs) -> EncoderBackend:
     # Lazy: macOS hardware H.264 via Apple VideoToolbox (habemus-papadum-vtenc / pdum.vtenc);
-    # gated by pdum.rfb.encoders.vtenc.vtenc_available.
+    # gated by pdum.rfb.encoders.vtenc.vtenc_available. Consumes pipeline_depth (correct but
+    # not faster on VT — see docs/pipelined_encode.md).
     from .vtenc import VideoToolboxEncoder
 
     return VideoToolboxEncoder(**kwargs)
@@ -96,6 +107,7 @@ def build_encoder(
     fps: int = 30,
     bitrate: int = 12_000_000,
     video_encoder: str = "h264_cpu",
+    pipeline_depth: int = 0,
 ) -> EncoderBackend:
     """Build the encoder backend described by ``selection``.
 
@@ -107,6 +119,11 @@ def build_encoder(
         Encoder configuration (ignored by the image encoder except where noted).
     video_encoder:
         Which registered video encoder to use for the H.264 transport.
+    pipeline_depth:
+        Encoder pipeline depth. ``0`` (default) is synchronous 1-in-1-out (lowest latency,
+        seq attribution trivially correct). ``> 0`` opts into the token-based pipelined path
+        on backends that implement it (NVENC; on VideoToolbox it is correct but not faster).
+        See :doc:`pipelined_encode`.
     """
     if selection.transport == "image":
         return ImageEncoder(mode=selection.image_mode or "jpeg")
@@ -124,6 +141,7 @@ def build_encoder(
             fps=fps,
             bitrate=bitrate,
             codec_string=selection.codec,
+            pipeline_depth=pipeline_depth,
         )
 
     raise ValueError(f"unsupported transport: {selection.transport!r}")

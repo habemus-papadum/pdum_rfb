@@ -22,11 +22,14 @@ nav:
       - Multiple streams: multiple_streams.md
       - ASGI / Starlette adapter: asgi.md
       - Metrics & adaptive quality: metrics_adaptive.md
+      - Pipelined encode: pipelined_encode.md
   - Repository & Development: development.md
   - Performance: performance.md
   - GPU / hardware encode:
       - Zero-copy CUDA→NVENC (PyAV): gpu_zerocopy.md
       - NVENC SDK evaluation: nvenc_sdk_evaluation.md
+      - VideoToolbox encoder (macOS): mlx_metal_videotoolbox_encoder_design.md
+      - Pipelined encode — NVENC impl guide: pipelined_encode_nvenc_impl.md
   - Integrations:
       - rendercanvas backend (feasibility): rendercanvas_backend.md
       - Zero-copy wgpu→NVENC package: wgpu_nvenc_zerocopy.md
@@ -36,6 +39,7 @@ nav:
       - Architecture overview: remote_framebuffer.md
       - Implementation Guide: remote_framebuffer_implementation_guide.md
       - Addendum: remote_framebuffer_addendum.md
+      - Encoder sync & seq attribution: encoder_sync_and_seq_attribution.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs

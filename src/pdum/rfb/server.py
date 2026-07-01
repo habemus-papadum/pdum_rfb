@@ -132,6 +132,7 @@ class _StreamHost:
         stats_interval: float | None = None,
         authenticate: Authenticator | None = None,
         gpu: bool = False,
+        encode_pipeline_depth: int = 0,
     ) -> None:
         self.display = display
         self.name = name
@@ -180,6 +181,10 @@ class _StreamHost:
         self.still_after = still_after
         self.stats_interval = stats_interval
         self.authenticate = authenticate
+        # Encoder pipeline depth (0 = synchronous 1-in-1-out, the default). > 0 opts into the
+        # token-based pipelined path on backends that implement it (NVENC). See
+        # docs/pipelined_encode.md.
+        self.encode_pipeline_depth = max(0, int(encode_pipeline_depth))
         # Live-switchable backend state (driven by the demo TUI). image_mode applies when
         # the active transport is "image"; _force_transport pins new connections to the
         # chosen transport (None = capability auto-negotiation, the default).
@@ -269,7 +274,13 @@ class _StreamHost:
 
         def factory(w: int, h: int, bitrate: int, fps: int):
             encoder = build_encoder(
-                selection, width=w, height=h, fps=fps, bitrate=bitrate, video_encoder=self.video_encoder
+                selection,
+                width=w,
+                height=h,
+                fps=fps,
+                bitrate=bitrate,
+                video_encoder=self.video_encoder,
+                pipeline_depth=self.encode_pipeline_depth,
             )
             # In GPU mode the publisher pushes CUDA frames; an image-transport viewer's
             # host encoder is wrapped so those frames are downloaded first.
@@ -412,6 +423,7 @@ class Server:
         record_events: bool = False,
         event_log: str | Path | None = None,
         event_queue_size: int = 4096,
+        encode_pipeline_depth: int = 0,
     ) -> Display:
         """Register a new named stream and return its :class:`Display`.
 
@@ -443,6 +455,7 @@ class Server:
             stats_interval=stats_interval,
             authenticate=authenticate,
             gpu=gpu,
+            encode_pipeline_depth=encode_pipeline_depth,
         )
         self._streams[name] = host
         display._owner_server = self
@@ -568,6 +581,7 @@ async def serve(
     record_events: bool = False,
     event_log: str | Path | None = None,
     event_queue_size: int = 4096,
+    encode_pipeline_depth: int = 0,
 ) -> Display:
     """Start the RFB WebSocket server in the background and return a :class:`Display`.
 
@@ -611,6 +625,12 @@ async def serve(
         closed with code ``4401`` before any frame is sent.
     origins:
         Allowed ``Origin`` values (CSWSH defense) passed to ``websockets``.
+    encode_pipeline_depth:
+        Encoder pipeline depth. ``0`` (default) is synchronous 1-in-1-out — lowest
+        latency, optimal for the interactive latest-frame-wins model. ``> 0`` opts into
+        the token-based **pipelined** encode path on backends that implement it (NVENC,
+        for throughput at high fps / many streams). On VideoToolbox it is correct but not
+        faster (low-latency RC is synchronous). See ``docs/pipelined_encode.md``.
 
     Notes
     -----
@@ -638,6 +658,7 @@ async def serve(
         record_events=record_events,
         event_log=event_log,
         event_queue_size=event_queue_size,
+        encode_pipeline_depth=encode_pipeline_depth,
     )
     await server.start()
     # The one-liner contract: closing the returned Display tears down the whole hub.

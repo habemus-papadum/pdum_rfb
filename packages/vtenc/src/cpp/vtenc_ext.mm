@@ -51,11 +51,21 @@ inline double ms_since(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
 
+// One encoded access unit, tagged with the seq carried through the encoder as the
+// per-frame sourceFrameRefCon. In synchronous (1-in-1-out) mode the seq is unused (each
+// encode() returns its own frame's AU by construction); in pipelined mode it is how the
+// caller recovers which published frame an AU belongs to when output lags input.
+struct AU {
+    int64_t seq;
+    bool keyframe;
+    std::vector<uint8_t> bytes;  // Annex B (in-band SPS/PPS on keyframes)
+};
+
 // Per-encoder output sink. The VideoToolbox output callback runs on a VT-owned queue
 // with no GIL, so it touches only this C++ struct (never CPython).
 struct Sink {
     std::mutex mu;
-    std::vector<uint8_t> pending;  // Annex B bytes for the frame(s) drained so far
+    std::vector<AU> queue;  // completed AUs (in output order) awaiting drain
     int sps_profile = -1, sps_constraint = -1, sps_level = -1;
     OSStatus last_status = noErr;
 };
@@ -73,7 +83,7 @@ bool sample_is_keyframe(CMSampleBufferRef sb) {
     return (notSync == nullptr) || (CFBooleanGetValue(notSync) == false);
 }
 
-void output_cb(void *refcon, void * /*src*/, OSStatus status, VTEncodeInfoFlags flags,
+void output_cb(void *refcon, void *src, OSStatus status, VTEncodeInfoFlags flags,
                CMSampleBufferRef sb) {
     Sink *sink = static_cast<Sink *>(refcon);
     std::lock_guard<std::mutex> lk(sink->mu);
@@ -85,8 +95,14 @@ void output_cb(void *refcon, void * /*src*/, OSStatus status, VTEncodeInfoFlags 
 
     CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sb);
     int nalHeaderLen = 4;
+    const bool key = sample_is_keyframe(sb);
 
-    if (sample_is_keyframe(sb)) {
+    // Build one access unit; tag it with the seq carried as sourceFrameRefCon.
+    AU au;
+    au.seq = (int64_t)(intptr_t)src;
+    au.keyframe = key;
+
+    if (key) {
         // SPS/PPS live only in the format description; prepend them on every keyframe.
         size_t count = 0;
         CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, 0, nullptr, nullptr, &count,
@@ -97,7 +113,7 @@ void output_cb(void *refcon, void * /*src*/, OSStatus status, VTEncodeInfoFlags 
             if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, i, &ps, &psSize, nullptr,
                                                                    nullptr) == noErr &&
                 ps && psSize > 0) {
-                append_nal(sink->pending, ps, psSize);
+                append_nal(au.bytes, ps, psSize);
                 if ((ps[0] & 0x1F) == 7 && psSize >= 4) {  // SPS: capture profile/level
                     sink->sps_profile = ps[1];
                     sink->sps_constraint = ps[2];
@@ -120,9 +136,10 @@ void output_cb(void *refcon, void * /*src*/, OSStatus status, VTEncodeInfoFlags 
         for (int b = 0; b < nalHeaderLen; b++) nalLen = (nalLen << 8) | data[off + b];
         off += nalHeaderLen;
         if (nalLen == 0 || off + nalLen > total) break;
-        append_nal(sink->pending, data.data() + off, nalLen);
+        append_nal(au.bytes, data.data() + off, nalLen);
         off += nalLen;
     }
+    sink->queue.push_back(std::move(au));
 }
 
 CFDictionaryRef make_cf_dict(const void **keys, const void **vals, CFIndex n) {
@@ -134,6 +151,19 @@ void set_session_num(VTCompressionSessionRef s, CFStringRef key, int32_t v) {
     CFNumberRef n = CFNumberCreate(nullptr, kCFNumberSInt32Type, &v);
     VTSessionSetProperty(s, key, n);
     CFRelease(n);
+}
+
+// Validate a contiguous (H + H//2, W) uint8 NV12 buffer-protocol object; returns the
+// pinned buffer_info (the caller keeps it alive so the pointer stays valid).
+py::buffer_info validate_nv12(py::buffer &frame, int w, int h) {
+    py::buffer_info info = frame.request();
+    if (info.itemsize != 1 || info.format != py::format_descriptor<uint8_t>::format())
+        throw std::invalid_argument("NV12 frame must be uint8");
+    if (info.ndim != 2 || info.shape[0] != h + h / 2 || info.shape[1] != w)
+        throw std::invalid_argument("NV12 frame must have shape (H + H//2, W) matching the encoder");
+    if (info.strides[1] != 1 || info.strides[0] != w)
+        throw std::invalid_argument("NV12 frame must be C-contiguous");
+    return info;
 }
 
 }  // namespace
@@ -198,80 +228,71 @@ public:
 
     ~VtEncoder() { close(); }
 
+    // Synchronous 1-in-1-out: encode one frame and return its H.264 Annex B access unit.
+    // Blocks (CompleteFrames) until this frame's callback has fired. The low-latency default
+    // that keeps seq attribution trivially correct (one AU out per frame in, in order).
     py::bytes encode(py::buffer frame, bool force_idr) {
         if (!m_session) throw std::runtime_error("encoder is closed");
-
-        py::buffer_info info = frame.request();
-        if (info.itemsize != 1 || info.format != py::format_descriptor<uint8_t>::format())
-            throw std::invalid_argument("NV12 frame must be uint8");
-        if (info.ndim != 2 || info.shape[0] != m_height + m_height / 2 || info.shape[1] != m_width)
-            throw std::invalid_argument("NV12 frame must have shape (H + H//2, W) matching the encoder");
-        if (info.strides[1] != 1 || info.strides[0] != m_width)
-            throw std::invalid_argument("NV12 frame must be C-contiguous");
+        py::buffer_info info = validate_nv12(frame, m_width, m_height);
         const uint8_t *src = static_cast<const uint8_t *>(info.ptr);
 
-        py::bytes out;
+        std::vector<AU> ready;
         {
             // Heavy lifting with the GIL released; `info`/`frame` keep the source pinned.
             py::gil_scoped_release rel;
-
-            CVPixelBufferRef pb = nullptr;
-            if (m_pool) CVPixelBufferPoolCreatePixelBuffer(nullptr, m_pool, &pb);
-            if (!pb) {
-                int32_t f = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
-                CVPixelBufferCreate(nullptr, m_width, m_height, f, nullptr, &pb);
-            }
-            if (!pb) throw std::runtime_error("could not obtain a CVPixelBuffer");
-
-            // --- input path: copy host NV12 into the encoder-owned CVPixelBuffer ---
-            auto t_copy = std::chrono::steady_clock::now();
-            CVPixelBufferLockBaseAddress(pb, 0);
-            uint8_t *yDst = (uint8_t *)CVPixelBufferGetBaseAddressOfPlane(pb, 0);
-            size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
-            for (int y = 0; y < m_height; y++)
-                std::memcpy(yDst + (size_t)y * yStride, src + (size_t)y * m_width, m_width);
-            uint8_t *uvDst = (uint8_t *)CVPixelBufferGetBaseAddressOfPlane(pb, 1);
-            size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
-            const uint8_t *uvSrc = src + (size_t)m_width * m_height;
-            for (int y = 0; y < m_height / 2; y++)
-                std::memcpy(uvDst + (size_t)y * uvStride, uvSrc + (size_t)y * m_width, m_width);
-            CVPixelBufferUnlockBaseAddress(pb, 0);
-            m_last_copy_ms = ms_since(t_copy);
-
-            CFDictionaryRef frameProps = nullptr;
-            if (force_idr) {
-                const void *k[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
-                const void *v[] = {kCFBooleanTrue};
-                frameProps = make_cf_dict(k, v, 1);
-            }
-            CMTime pts = CMTimeMake(m_frame_num++, m_fps);
-            CMTime dur = CMTimeMake(1, m_fps);
-            VTEncodeInfoFlags flags = 0;
-            auto t_enc = std::chrono::steady_clock::now();
-            OSStatus st =
-                VTCompressionSessionEncodeFrame(m_session, pb, pts, dur, frameProps, nullptr, &flags);
-            if (frameProps) CFRelease(frameProps);
-            CVPixelBufferRelease(pb);  // VT retained it internally; release our +1
-            if (st != noErr) throw std::runtime_error("EncodeFrame failed: " + std::to_string(st));
-
-            // Synchronous 1-in-1-out: block until this frame's callback has fired.
+            auto t_enc = fill_and_submit(src, force_idr, /*refcon=*/nullptr);
             VTCompressionSessionCompleteFrames(m_session, kCMTimeInvalid);
             m_last_encode_ms = ms_since(t_enc);
-            out = drain_locked();
+            ready = take_ready();
         }
-        return out;
+        return concat_aus(ready);  // GIL re-held: build py::bytes
     }
 
+    // Pipelined: submit one frame WITHOUT waiting for it, tagging it with `seq` (carried as
+    // the per-frame sourceFrameRefCon). Returns the AUs that are ready *now* — 0..N, each a
+    // (seq, annexb, keyframe) tuple whose seq is the *recovered* token of the frame it
+    // actually encodes, regardless of pipeline depth. This lets the HW encoder keep several
+    // frames in flight (throughput) while the caller recovers seq attribution from the tag
+    // instead of call ordering. Still no B-frames, so output order == input order.
+    std::vector<std::tuple<int64_t, py::bytes, bool>> submit(py::buffer frame, int64_t seq,
+                                                             bool force_idr) {
+        if (!m_session) throw std::runtime_error("encoder is closed");
+        py::buffer_info info = validate_nv12(frame, m_width, m_height);
+        const uint8_t *src = static_cast<const uint8_t *>(info.ptr);
+
+        std::vector<AU> ready;
+        {
+            py::gil_scoped_release rel;
+            auto t_enc = fill_and_submit(src, force_idr, (void *)(intptr_t)seq);
+            m_last_encode_ms = ms_since(t_enc);  // submit only (no CompleteFrames wait)
+            ready = take_ready();
+        }
+        return aus_to_list(ready);
+    }
+
+    // Synchronous flush: drain any buffered output as one concatenated Annex B blob.
     py::bytes flush() {
         if (!m_session) return py::bytes();
+        std::vector<AU> ready;
         {
             py::gil_scoped_release rel;
             VTCompressionSessionCompleteFrames(m_session, kCMTimeInvalid);
+            ready = take_ready();
         }
-        std::lock_guard<std::mutex> lk(m_sink.mu);
-        py::bytes out((const char *)m_sink.pending.data(), m_sink.pending.size());
-        m_sink.pending.clear();
-        return out;
+        return concat_aus(ready);
+    }
+
+    // Pipelined flush: complete the encoder's in-flight tail and return the remaining
+    // seq-tagged AUs (call once at end-of-stream to recover the last `pipeline_depth` frames).
+    std::vector<std::tuple<int64_t, py::bytes, bool>> flush_pipeline() {
+        if (!m_session) return {};
+        std::vector<AU> ready;
+        {
+            py::gil_scoped_release rel;
+            VTCompressionSessionCompleteFrames(m_session, kCMTimeInvalid);
+            ready = take_ready();
+        }
+        return aus_to_list(ready);
     }
 
     void close() {
@@ -306,13 +327,79 @@ public:
     }
 
 private:
-    py::bytes drain_locked() {
-        // Caller holds the GIL released; we take only the C++ mutex.
+    // Fill an encoder-owned CVPixelBuffer from host NV12 and submit it (does NOT wait for
+    // completion). Caller must hold the GIL released. Records the copy timing and returns
+    // the encode-start time so the caller can finalize last_encode_ms per its wait policy.
+    std::chrono::steady_clock::time_point fill_and_submit(const uint8_t *src, bool force_idr,
+                                                          void *refcon) {
+        CVPixelBufferRef pb = nullptr;
+        if (m_pool) CVPixelBufferPoolCreatePixelBuffer(nullptr, m_pool, &pb);
+        if (!pb) {
+            int32_t f = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+            CVPixelBufferCreate(nullptr, m_width, m_height, f, nullptr, &pb);
+        }
+        if (!pb) throw std::runtime_error("could not obtain a CVPixelBuffer");
+
+        // --- input path: copy host NV12 into the encoder-owned CVPixelBuffer ---
+        auto t_copy = std::chrono::steady_clock::now();
+        CVPixelBufferLockBaseAddress(pb, 0);
+        uint8_t *yDst = (uint8_t *)CVPixelBufferGetBaseAddressOfPlane(pb, 0);
+        size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
+        for (int y = 0; y < m_height; y++)
+            std::memcpy(yDst + (size_t)y * yStride, src + (size_t)y * m_width, m_width);
+        uint8_t *uvDst = (uint8_t *)CVPixelBufferGetBaseAddressOfPlane(pb, 1);
+        size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
+        const uint8_t *uvSrc = src + (size_t)m_width * m_height;
+        for (int y = 0; y < m_height / 2; y++)
+            std::memcpy(uvDst + (size_t)y * uvStride, uvSrc + (size_t)y * m_width, m_width);
+        CVPixelBufferUnlockBaseAddress(pb, 0);
+        m_last_copy_ms = ms_since(t_copy);
+
+        CFDictionaryRef frameProps = nullptr;
+        if (force_idr) {
+            const void *k[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
+            const void *v[] = {kCFBooleanTrue};
+            frameProps = make_cf_dict(k, v, 1);
+        }
+        CMTime pts = CMTimeMake(m_frame_num++, m_fps);
+        CMTime dur = CMTimeMake(1, m_fps);
+        VTEncodeInfoFlags flags = 0;
+        auto t_enc = std::chrono::steady_clock::now();
+        OSStatus st =
+            VTCompressionSessionEncodeFrame(m_session, pb, pts, dur, frameProps, refcon, &flags);
+        if (frameProps) CFRelease(frameProps);
+        CVPixelBufferRelease(pb);  // VT retained it internally; release our +1
+        if (st != noErr) throw std::runtime_error("EncodeFrame failed: " + std::to_string(st));
+        return t_enc;
+    }
+
+    // Move all completed AUs out of the sink. Takes only the C++ mutex (no CPython), so it
+    // is safe to call with the GIL released.
+    std::vector<AU> take_ready() {
         std::lock_guard<std::mutex> lk(m_sink.mu);
-        py::gil_scoped_acquire gil;  // building py::bytes needs the GIL
-        py::bytes out((const char *)m_sink.pending.data(), m_sink.pending.size());
-        m_sink.pending.clear();
+        std::vector<AU> ready;
+        ready.swap(m_sink.queue);
+        return ready;
+    }
+
+    // Build a Python list[(seq, bytes, keyframe)] from AUs. GIL must be held (py::bytes).
+    static std::vector<std::tuple<int64_t, py::bytes, bool>> aus_to_list(const std::vector<AU> &aus) {
+        std::vector<std::tuple<int64_t, py::bytes, bool>> out;
+        out.reserve(aus.size());
+        for (const auto &au : aus)
+            out.emplace_back(au.seq, py::bytes((const char *)au.bytes.data(), au.bytes.size()),
+                             au.keyframe);
         return out;
+    }
+
+    // Concatenate AU bytes into one Annex B blob (synchronous path). GIL must be held.
+    static py::bytes concat_aus(const std::vector<AU> &aus) {
+        size_t total = 0;
+        for (const auto &au : aus) total += au.bytes.size();
+        std::string buf;
+        buf.reserve(total);
+        for (const auto &au : aus) buf.append((const char *)au.bytes.data(), au.bytes.size());
+        return py::bytes(buf);
     }
 
     int m_width, m_height, m_fps;
@@ -351,9 +438,19 @@ PYBIND11_MODULE(_vtenc, m) {
              "Create an NV12 -> H.264 Annex B VideoToolbox encoder (fixed resolution, even "
              "dimensions). Low-latency, no frame reordering, in-band SPS/PPS on every IDR.")
         .def("encode", &VtEncoder::encode, py::arg("frame"), py::arg("force_idr") = false,
-             "Encode one host-visible NV12 frame (buffer-protocol object of shape (H*3//2, W) "
-             "uint8, contiguous). Returns this frame's H.264 Annex B access unit (bytes).")
+             "Synchronous 1-in-1-out: encode one host-visible NV12 frame (buffer-protocol "
+             "object of shape (H*3//2, W) uint8, contiguous) and block until done. Returns this "
+             "frame's H.264 Annex B access unit (bytes). The low-latency default.")
+        .def("submit", &VtEncoder::submit, py::arg("frame"), py::arg("seq"),
+             py::arg("force_idr") = false,
+             "Pipelined: submit one NV12 frame tagged with `seq` WITHOUT waiting, and return "
+             "the access units ready now as a list of (seq, annexb_bytes, keyframe) tuples. Each "
+             "tuple's seq is the recovered tag of the frame it actually encodes (0..N tuples; "
+             "output order == input order). Pair with flush_pipeline() at end-of-stream.")
         .def("flush", &VtEncoder::flush, "Drain any buffered output; returns Annex B bytes.")
+        .def("flush_pipeline", &VtEncoder::flush_pipeline,
+             "Complete the in-flight tail and return remaining (seq, annexb_bytes, keyframe) "
+             "tuples; the pipelined counterpart of flush().")
         .def("close", &VtEncoder::close)
         .def_property_readonly("width", &VtEncoder::width)
         .def_property_readonly("height", &VtEncoder::height)

@@ -130,6 +130,7 @@ display = await serve(
     origins=None,              # allowed Origin values (CSWSH defense)
     record_events=False,       # also expose received events at GET /recorded-events
     event_log=None,            # path to append received events as JSONL
+    encode_pipeline_depth=0,   # 0 = synchronous (default); >0 = pipelined encode (NVENC)
 )
 # ... publish in your own loop ...
 await display.aclose()         # stops the server, disconnects viewers, frees encoders
@@ -151,6 +152,15 @@ published for `still_after` seconds — re-send each viewer a high-quality still
 resting frame (a **lossless PNG** on the image path, a clean **IDR** on the video
 path). Opt-in, zero cost while interacting, no client changes. See
 [Still after settle](still_after_settle.md) for the full write-up.
+
+### Pipelined encode
+
+`serve(encode_pipeline_depth=k)` is an opt-in throughput knob. The default (`0`) is
+synchronous 1-in-1-out — lowest latency, the right choice for interactive use. `> 0`
+lets a pipelining hardware encoder keep several frames in flight (token-based seq
+attribution keeps stats correct), trading ≈`k/fps` of added latency for throughput. It
+helps the **NVENC** backend; on **VideoToolbox** it is measured to be correct but not
+faster (low-latency RC is synchronous). See [Pipelined encode](pipelined_encode.md).
 
 ### Authentication
 

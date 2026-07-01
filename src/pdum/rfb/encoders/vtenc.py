@@ -73,6 +73,7 @@ class VideoToolboxEncoder:
         fps: int = 30,
         bitrate: int = 12_000_000,
         codec_string: str | None = None,
+        pipeline_depth: int = 0,
     ) -> None:
         if width % 2 or height % 2:
             raise ValueError(f"NV12 requires even dimensions; got {width}x{height}")
@@ -84,6 +85,13 @@ class VideoToolboxEncoder:
         self.fps = fps
         self.bitrate = bitrate
         self.codec_string = codec_string or DEFAULT_H264_CODEC
+        # pipeline_depth > 0 selects the token-based pipelined path (submit()/flush_pipeline);
+        # 0 is the synchronous 1-in-1-out default. NOTE: on VideoToolbox specifically this is
+        # *correct but not faster* — low-latency RC is synchronous (measured no throughput win,
+        # see docs/pipelined_encode.md). The knob exists for the NVENC backend where it pays
+        # off; VT exercises the same recovered-seq path for correctness/parity.
+        self.pipeline_depth = max(0, int(pipeline_depth))
+        self._pending_ts: dict[int, int] = {}  # seq -> timestamp_us for in-flight frames
         self._duration_us = int(1_000_000 / fps)
         self._nv12 = np.empty((height + height // 2, width), np.uint8)
         self._enc = VtEncoder(width, height, codec="h264", fps=fps, gop=fps, bitrate=bitrate)
@@ -101,6 +109,8 @@ class VideoToolboxEncoder:
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         packed = self._packed_nv12(frame)
+        if self.pipeline_depth > 0:
+            return self._encode_pipelined(packed, frame.seq, frame.timestamp_us, force_keyframe)
         data = self._enc.encode(packed, force_idr=force_keyframe)
         if not data:
             return []
@@ -109,7 +119,19 @@ class VideoToolboxEncoder:
         keyframe = force_keyframe or _contains_idr(data)
         return [self._payload(frame.seq, frame.timestamp_us, data, keyframe)]
 
+    def _encode_pipelined(self, packed, seq: int, timestamp_us: int, force_keyframe: bool) -> list[EncodedPayload]:
+        """Submit one frame without waiting; return whatever AUs are ready, each labeled with
+        its *recovered* seq (the frame it actually encoded), not this call's seq. See
+        docs/pipelined_encode.md and docs/encoder_sync_and_seq_attribution.md."""
+        self._pending_ts[seq] = timestamp_us
+        aus = self._enc.submit(packed, seq, force_idr=force_keyframe)
+        self.codec_string = self._enc.codec_string or self.codec_string
+        return [self._payload(s, self._pending_ts.pop(s, timestamp_us), data, key) for s, data, key in aus]
+
     def flush(self) -> list[EncodedPayload]:
+        if self.pipeline_depth > 0:
+            aus = self._enc.flush_pipeline()
+            return [self._payload(s, self._pending_ts.pop(s, 0), data, key) for s, data, key in aus]
         data = self._enc.flush()
         if not data:
             return []

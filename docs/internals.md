@@ -147,6 +147,42 @@ FIFO of queued `seq`s attributes each displayed frame for the `displayed:true`
 ACK. (Enabling B-frames would break that assumption — it is documented in the
 code.)
 
+## Pipelined encode (token-based seq attribution)
+
+By default the encoders are **synchronous 1-in-1-out**: `encode(frame_N)` returns
+frame N's AU, stamped `seq=N`. `serve(encode_pipeline_depth=k>0)` opts into a
+**pipelined** path on backends that implement it (see
+[`pipelined_encode.md`](pipelined_encode.md)). The design point is that the
+**session does not change** — it already iterates `payloads` and books each
+`payload.seq` (`_encode_step` lines ~242–243, `send_payload`). All the pipelining
+lives below the `EncoderBackend` seam:
+
+- **Binding** (`packages/vtenc`'s `VtEncoder`): alongside the synchronous
+  `encode()→bytes`, a `submit(frame, seq, force_idr)` issues
+  `VTCompressionSessionEncodeFrame` **without** `CompleteFrames`, carrying `seq` as
+  the per-frame `sourceFrameRefCon`. The output callback recovers it and pushes a
+  seq-tagged access unit onto a queue; `submit()` drains whatever is ready and
+  returns a list of `(recovered_seq, annexb, keyframe)` tuples (0..N). `flush_pipeline()`
+  completes the in-flight tail. (NVENC's parallel is `inputTimeStamp` +
+  `extra_output_delay`; see [`pipelined_encode_nvenc_impl.md`](pipelined_encode_nvenc_impl.md).)
+- **Wrapper** (`encoders/vtenc.py` `VideoToolboxEncoder`): with `pipeline_depth>0`,
+  `encode()` calls `submit()` and stamps each payload with the **recovered** seq (not
+  the call's `frame.seq`), looking the original `timestamp_us` up from a small
+  `{seq: timestamp_us}` in-flight map. `pipeline_depth=0` keeps the synchronous path
+  byte-identical.
+- **Plumbing**: `build_encoder(..., pipeline_depth=)` forwards it to the video
+  factory; only backends that implement the pipelined path consume it (the rest drop
+  it → a depth>0 request runs synchronously, not an error). `serve()`/`add_stream()`
+  thread `encode_pipeline_depth` to the per-stream `_StreamHost`, whose factory passes
+  it on.
+
+This keeps the **no-B-frames** invariant (output order == input order); only the
+*delay* between input and output grows. The drop/keyframe policy is unchanged — frames
+are still dropped *before* submit, so the encoder pipeline only ever holds a valid
+reference chain. Backpressure's `max_inflight` bounds the *wire* (sent-but-unacked),
+independent of the encoder's in-flight depth. On VideoToolbox this path is correct but
+not faster (low-latency RC is synchronous); it exists for the NVENC backend.
+
 ## The worker
 
 One **unified** worker handles both transports (selected per message by header

@@ -127,3 +127,16 @@ async def test_auth_rejects_without_valid_token():
                 raise AssertionError("event with principal never arrived")
     finally:
         await display.aclose()
+
+
+async def test_encode_pipeline_depth_threads_to_stream_host():
+    """serve(encode_pipeline_depth=) reaches the per-stream host (backend-agnostic plumbing
+    for the pipelined encode path; the actual win is the NVENC backend)."""
+    from pdum.rfb.server import DEFAULT_STREAM
+
+    display = await serve(32, 24, port=0, has_h264=False, encode_pipeline_depth=3)
+    try:
+        host = display.server._streams[DEFAULT_STREAM]
+        assert host.encode_pipeline_depth == 3
+    finally:
+        await display.aclose()

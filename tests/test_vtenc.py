@@ -154,3 +154,66 @@ def test_color_roundtrip_solid_frame():
     mean = out.reshape(-1, 3).mean(axis=0)
     # H.264 + BT.601 round-trip is lossy; allow a generous tolerance.
     assert np.allclose(mean, (40, 160, 210), atol=24), mean
+
+
+# --- pipelined (token-based seq attribution) path -------------------------------------
+
+
+def test_pipelined_submit_recovers_seq_in_order_no_loss():
+    """submit()/flush_pipeline() return AUs tagged with the *recovered* seq, every frame
+    accounted for exactly once, in input order (no B-frames). See docs/pipelined_encode.md."""
+    from pdum.vtenc import VtEncoder
+
+    n = 24
+    enc = VtEncoder(W, H, fps=30, gop=30, bitrate=6_000_000)
+    seqs, keys, blob = [], [], b""
+    for seq in range(n):
+        for s, data, key in enc.submit(_moving_nv12(seq), seq=seq, force_idr=(seq == 0)):
+            assert isinstance(s, int) and isinstance(data, bytes) and isinstance(key, bool)
+            seqs.append(s)
+            keys.append(key)
+            blob += data
+    for s, data, key in enc.flush_pipeline():
+        seqs.append(s)
+        keys.append(key)
+        blob += data
+    enc.close()
+    assert seqs == list(range(n)), f"recovered seqs must be 0..{n - 1} in order; got {seqs}"
+    assert keys[0] and not any(keys[1:]), "only frame 0 is a keyframe (gop=30 > n)"
+    frames = decode_annexb(blob)
+    assert len(frames) >= n - 1
+    assert all(f.width == W and f.height == H for f in frames)
+
+
+def test_wrapper_pipeline_depth_recovers_seq():
+    """The rfb wrapper in pipelined mode labels each payload with the recovered seq."""
+    from pdum.rfb.encoders.vtenc import VideoToolboxEncoder
+    from pdum.rfb.types import RawFrame
+
+    n = 16
+    enc = VideoToolboxEncoder(width=W, height=H, fps=16, pipeline_depth=2)
+    seqs, blob = [], b""
+    for i in range(n):
+        frame = RawFrame(i, W, H, i * 1000, "nv12", "cpu", _moving_nv12(i))
+        for p in enc.encode(frame, force_keyframe=(i == 0)):
+            seqs.append(p.seq)
+            blob += p.payload
+            assert p.metadata["bitstream"] == "annexb"
+    for p in enc.flush():
+        seqs.append(p.seq)
+        blob += p.payload
+    enc.close()
+    assert seqs == list(range(n)), f"payload seqs must be recovered tokens; got {seqs}"
+    assert len(decode_annexb(blob)) >= n - 1
+
+
+def test_build_encoder_threads_pipeline_depth_to_vtenc():
+    """serve(encode_pipeline_depth=)'s plumbing: build_encoder forwards it to the wrapper."""
+    from pdum.rfb.encoders.base import build_encoder
+    from pdum.rfb.encoders.vtenc import VideoToolboxEncoder
+    from pdum.rfb.protocol import DEFAULT_H264_CODEC, BackendSelection
+
+    selection = BackendSelection(transport="h264", codec=DEFAULT_H264_CODEC)
+    enc = build_encoder(selection, width=W, height=H, fps=30, video_encoder="vtenc", pipeline_depth=3)
+    assert isinstance(enc, VideoToolboxEncoder) and enc.pipeline_depth == 3
+    enc.close()
