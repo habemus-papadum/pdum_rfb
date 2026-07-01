@@ -5,6 +5,7 @@
 
 import { BackpressureController, KeyframeGate } from "../backpressure";
 import { probeCapabilities } from "../capabilities";
+import { makeLogger, type Logger } from "../debug";
 import type {
   AckMsg,
   HelloMsg,
@@ -37,6 +38,7 @@ let pixelRatio = 1;
 // echoed on pointer/wheel events so a publisher can recover logical coordinates.
 let frameDpr = 1;
 let initOptions: WorkerInitOptions = {};
+let dbg: Logger = makeLogger(false, "worker");
 
 let stats: Stats = {
   framesDisplayed: 0,
@@ -55,6 +57,7 @@ function send(msg: HelloMsg | AckMsg | RequestKeyframeMsg | SetViewportMsg | obj
 }
 
 function requestKeyframe(reason: string): void {
+  dbg.log("keyframe", "request:", reason);
   send({ type: "request_keyframe", reason } satisfies RequestKeyframeMsg);
 }
 
@@ -95,6 +98,12 @@ function handleControl(control: { type: string; [k: string]: unknown }): void {
   // render DPR + color space; `set_quality` and `stats` carry adaptive targets /
   // server-truth metrics we fold into Stats so onStats sees authoritative metrics.
   if (control.type === "config") {
+    dbg.log("config", {
+      transport: control.transport,
+      codec: control.codec,
+      pixel_ratio: control.pixel_ratio,
+      color: control.color,
+    });
     if (typeof control.pixel_ratio === "number") frameDpr = control.pixel_ratio;
     if (control.color) renderer?.setColorSpace(canvasColorSpace(control.color));
     post({ type: "state", state: "negotiated" });
@@ -113,23 +122,34 @@ async function handleBinary(buf: ArrayBuffer): Promise<void> {
   const framePixelRatio = (header as { pixel_ratio?: unknown }).pixel_ratio;
   if (typeof framePixelRatio === "number") frameDpr = framePixelRatio;
   if (header.type === "image_frame") {
+    const h = header as ImageFrameHeader;
     stats.transport = "image";
-    await decodeImageFrame(renderer!, header as ImageFrameHeader, payload);
-    onDisplayed((header as ImageFrameHeader).seq, 0);
+    dbg.log("frame", "image", { seq: h.seq, mime: h.mime, bytes: payload.byteLength });
+    try {
+      await decodeImageFrame(renderer!, h, payload);
+    } catch (e) {
+      dbg.error("decode", "image decode failed", e);
+      return;
+    }
+    onDisplayed(h.seq, 0);
   } else if (header.type === "video_chunk") {
+    const h = header as VideoChunkHeader;
     stats.transport = "webcodecs";
-    video!.handleChunk(header as VideoChunkHeader, payload);
+    dbg.log("frame", "video", { seq: h.seq, keyframe: h.keyframe, bytes: payload.byteLength });
+    video!.handleChunk(h, payload);
     const q = video!.decodeQueueSize;
     if (bp!.shouldRequestKeyframe(q)) requestKeyframe("decode queue backlog");
   }
 }
 
 async function startConnection(url: string): Promise<void> {
+  dbg.log("ws", "connecting", url);
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
   post({ type: "state", state: "connecting" });
 
   ws.onopen = async () => {
+    dbg.log("ws", "open");
     post({ type: "state", state: "open" });
     video?.reset();
     const caps = await probeCapabilities({
@@ -137,6 +157,7 @@ async function startConnection(url: string): Promise<void> {
       height: cssHeight || undefined,
       imageOnly: initOptions.imageOnly,
     });
+    dbg.log("hello", { supported: caps.supported, dpr: caps.devicePixelRatio });
     send({
       type: "hello",
       supported: caps.supported,
@@ -168,8 +189,14 @@ async function startConnection(url: string): Promise<void> {
     void handleBinary(ev.data as ArrayBuffer);
   };
 
-  ws.onclose = () => post({ type: "state", state: "closed" });
-  ws.onerror = () => post({ type: "error", error: "websocket error" });
+  ws.onclose = (ev: CloseEvent) => {
+    dbg.log("ws", "closed", { code: ev.code, reason: ev.reason });
+    post({ type: "state", state: "closed" });
+  };
+  ws.onerror = () => {
+    dbg.error("ws", "websocket error");
+    post({ type: "error", error: "websocket error" });
+  };
 }
 
 function handleCapture(id: number, format: "imagedata" | "blob"): void {
@@ -194,6 +221,8 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
   switch (msg.type) {
     case "init": {
       initOptions = msg.options ?? {};
+      dbg = makeLogger(!!initOptions.debug, "worker");
+      dbg.log("init", { backing: [msg.backingWidth, msg.backingHeight], dpr: msg.devicePixelRatio });
       cssWidth = msg.cssWidth;
       cssHeight = msg.cssHeight;
       backingWidth = msg.backingWidth;
@@ -208,8 +237,13 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         slowDownQueue: initOptions.slowDownQueue,
         keyframeOnDropQueue: initOptions.keyframeOnDropQueue,
       });
-      video = new VideoPipeline(renderer, bp, new KeyframeGate(), requestKeyframe, (seq) =>
-        onDisplayed(seq, video!.decodeQueueSize),
+      video = new VideoPipeline(
+        renderer,
+        bp,
+        new KeyframeGate(),
+        requestKeyframe,
+        (seq) => onDisplayed(seq, video!.decodeQueueSize),
+        dbg,
       );
       post({ type: "ready" });
       void startConnection(msg.url);

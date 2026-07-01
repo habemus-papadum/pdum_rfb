@@ -279,11 +279,14 @@ can connect with no extra setup.
 
 ### The interactive demo harness
 
-For a hands-on tour of the whole stack, `pdum-rfb demo` (from the `[demo]` extra) brings
-up a live feed, serves the browser client via Vite, and opens a Textual TUI to switch demo
-scenes and **encode backends live** (image ⇄ libx264 ⇄ VideoToolbox ⇄ NVENC), retune
-bitrate/fps, and watch per-session stats — all on one WebSocket, no reconnect. `pdum-rfb
-demo --smoke` runs the same machinery headlessly as a self-test. See `docs/demo.md`.
+For a hands-on tour of the whole stack, `pdum-rfb demo` (from the `[demo]` extra) serves a
+single self-contained **web app** — run it with `uvx --from 'habemus-papadum-rfb[demo]'
+pdum-rfb demo` and open the printed URL. The browser holds the viewer *and* the controls:
+switch demo scenes and **encode backends live** (image ⇄ libx264 ⇄ VideoToolbox ⇄ NVENC, on
+one socket, no reconnect), retune bitrate/fps, drive the richer parameters, fan out to
+multiple viewers or mint private streams, and watch per-session stats — all over a REST
+control plane the Python side logs. `pdum-rfb demo --smoke` runs the same machinery
+headlessly as a self-test. See [the demo page](demo.md).
 
 ## Sizing, DPR & color
 

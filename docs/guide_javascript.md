@@ -41,6 +41,7 @@ interface RfbViewOptions {
   fit?: "contain" | "cover" | "fill"; // frame-vs-canvas AR handling (default "contain")
   background?: string;               // letterbox fill for "contain" (CSS color; default "#000")
   token?: string;                    // auth credential sent in `hello` (e.g. a Google ID token)
+  debug?: boolean;                   // verbose client-side console logging (default false)
   onState?: (s: ConnectionState) => void;
   onStats?: (s: Stats) => void;
   onError?: (e: Error) => void;
@@ -50,6 +51,14 @@ interface RfbViewOptions {
 **Fit modes.** When the stream's aspect ratio differs from the canvas, `fit` decides:
 `"contain"` (default) letterboxes with `background`, `"cover"` crops, `"fill"` stretches
 each axis (the pre-fit-modes behavior). Change it live with `view.setFit(fit, background?)`.
+
+**Debug logging.** `debug: true` turns on a tagged console play-by-play from the main
+thread and the decode worker — `[rfb:worker] ws / config / keyframe / frame` and
+`[rfb:view] state` — so you can watch the connection negotiate, keyframes get requested,
+and frames decode. Genuine failures (WebSocket error, decoder error, image-decode throw)
+are logged to `console.error` **either way** — silently swallowing them was a footgun — and
+`debug` layers the verbose stream on top. The `pdum-rfb demo` UI exposes this as a toggle
+(also honored from `?debug=1` / `localStorage`).
 The client owns a single frame↔canvas transform (`viewport.ts`), so it maps every
 pointer/wheel event to **framebuffer pixels** through the current fit before sending — the
 publisher receives coordinates that index its frame directly, correct under any fit / DPR

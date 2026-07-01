@@ -508,6 +508,18 @@ class Server:
         """Return the :class:`Display` for stream ``name`` (``KeyError`` if absent)."""
         return self._streams[name].display
 
+    def remove_stream(self, name: str) -> None:
+        """Remove a named stream, disconnecting its viewers — the inverse of :meth:`add_stream`.
+
+        No-op if ``name`` is absent. The stream's :class:`Display` is closed locally
+        (viewers dropped, waiters woken) but the shared listener keeps running for the
+        other streams; a later connection to ``name`` closes with ``4404``. Used by the
+        demo hub to reap idle per-client streams.
+        """
+        host = self._streams.pop(name, None)
+        if host is not None:
+            host.display._close_local()
+
     @property
     def streams(self) -> list[str]:
         """The names of the registered streams."""

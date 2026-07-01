@@ -4,15 +4,25 @@
 into hardware H.264 via extras. This page lists every option, **easiest + fastest
 first**, and the platform limits that apply to the GPU paths.
 
-> **Not sure what your box supports?** Install the CLI and ask:
+> **Not sure what your box supports?** Ask — no install needed, via `uvx`:
 >
 > ```bash
-> pip install 'habemus-papadum-rfb[cli]'
-> pdum-rfb doctor
+> uvx --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor
 > ```
 >
 > `doctor` probes every encode path and tells you which one to prefer (see
-> [Performance](performance.md) for why).
+> [Performance](performance.md) for why). The `[doctor]` extra bundles the
+> cross-platform encoders so a fresh `uvx` run reports both what runs on this platform
+> *and* what is actually importable; platform-specific paths (CuPy / VideoToolbox /
+> NVENC-SDK) are reported as "install X to enable".
+>
+> **Want to try it interactively?** One command, no clone, no Node:
+>
+> ```bash
+> uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo   # serves a localhost web app
+> ```
+>
+> See [the interactive demo](demo.md).
 
 ## TL;DR — pick a path
 

@@ -1,0 +1,386 @@
+/* pdum-rfb demo — warm-editorial styling drawn from ~/src/faicanteen's design tokens.
+   Soft, muted, print-like: a warm off-white surface, three-step ink-grey hierarchy,
+   hairline rules, square corners, serif display (Cormorant Garamond) + sans controls
+   (Libre Franklin), numerals in Georgia. The one dark element is the framebuffer
+   viewport, framed by a hairline. "Tokyo Dreams" (the fai-canteen wordmark face) is
+   intentionally excluded. */
+
+:root {
+  --surface: #faf9f7;
+  --panel: #ffffff;
+  --ink: #2c2c2c;
+  --ink-muted: #6b6560;
+  --muted: #8a8278;
+  --hairline: #c0b9ad;
+  --hairline-soft: #e4ded4;
+  --ink-hover: #1a1a1a;
+  --viewport-bg: #17150f; /* warm near-black */
+  --ok: #4a6b4a;
+  --warn: #9a7b3f;
+  --err: #9a4a3f;
+
+  --font-serif: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-sans: "Libre Franklin", -apple-system, Helvetica, Arial, sans-serif;
+  --font-digits: Georgia, "Times New Roman", serif; /* tabular-ish numerals */
+
+  --space-2xs: 0.35rem;
+  --space-xs: 0.6rem;
+  --space-sm: 0.9rem;
+  --space-md: 1.4rem;
+  --space-lg: 2.2rem;
+
+  --rail-width: 21rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-weight: 300;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+/* --- layout --------------------------------------------------------------- */
+
+.demo {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr var(--rail-width);
+  grid-template-areas: "head head" "view rail";
+  height: 100%;
+  max-height: 100vh;
+}
+
+.demo__head {
+  grid-area: head;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.demo__title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.9rem;
+  letter-spacing: 0.01em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.demo__title small {
+  font-family: var(--font-sans);
+  font-weight: 300;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  margin-left: 0.5rem;
+}
+
+.demo__tagline {
+  color: var(--ink-muted);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-style: italic;
+}
+
+.demo__spacer {
+  flex: 1;
+}
+
+/* --- viewport ------------------------------------------------------------- */
+
+.demo__view {
+  grid-area: view;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--viewport-bg);
+  border: 1px solid var(--hairline);
+  display: flex;
+  overflow: hidden;
+}
+
+.viewport canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* The framework wrappers' batteries chrome (`.rfb-root`) themed to the warm palette. */
+.viewport .rfb-root {
+  width: 100%;
+  height: 100%;
+  --rfb-bg: var(--viewport-bg);
+  --rfb-fg: #f3efe6;
+  --rfb-accent: var(--hairline);
+}
+
+/* --- control rail --------------------------------------------------------- */
+
+.rail {
+  grid-area: rail;
+  border-left: 1px solid var(--hairline);
+  background: var(--panel);
+  overflow-y: auto;
+  padding: var(--space-sm) 0 var(--space-lg);
+}
+
+.group {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.group__title {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  margin: 0 0 var(--space-xs);
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-xs);
+  margin-bottom: var(--space-2xs);
+}
+
+.field > label {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.field--wide {
+  grid-template-columns: 1fr;
+}
+
+/* inline help "?" — unobtrusive, reveals via the native tooltip */
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-family: var(--font-serif);
+  cursor: help;
+  user-select: none;
+}
+
+/* --- inputs (quiet, square, hairline) ------------------------------------- */
+
+select,
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 300;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: 0.3rem 0.4rem;
+  appearance: none;
+}
+
+select:focus,
+input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+select:disabled,
+option:disabled {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+button {
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+button:hover {
+  border-color: var(--ink);
+  color: var(--ink-hover);
+}
+
+button.primary {
+  background: var(--ink);
+  color: var(--surface);
+  border-color: var(--ink);
+}
+
+button.primary:hover {
+  background: var(--ink-hover);
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  margin-top: var(--space-2xs);
+}
+
+/* segmented control (fit / framework toggles) */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+}
+
+.seg button {
+  border: none;
+  border-right: 1px solid var(--hairline);
+  background: var(--surface);
+  padding: 0.28rem 0.55rem;
+  font-size: 0.74rem;
+  color: var(--ink-muted);
+}
+
+.seg button:last-child {
+  border-right: none;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.seg button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* toggle (checkbox as a small square) */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.toggle input {
+  width: 0.9rem;
+  height: 0.9rem;
+  accent-color: var(--ink);
+}
+
+/* --- stats ---------------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.stats dt {
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0;
+  font-family: var(--font-digits);
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* status pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.pill[data-tone="open"]::before {
+  background: var(--ok);
+}
+.pill[data-tone="error"]::before {
+  background: var(--err);
+}
+.pill[data-tone="closed"]::before {
+  background: var(--warn);
+}
+
+.note {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-style: italic;
+  font-family: var(--font-serif);
+  margin-top: var(--space-2xs);
+}
+
+.err-line {
+  color: var(--err);
+  font-size: 0.76rem;
+  margin-top: var(--space-2xs);
+}
+
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+}

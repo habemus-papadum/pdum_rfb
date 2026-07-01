@@ -93,12 +93,26 @@ on older Node. All commands run from `widgets/`:
 ```bash
 pnpm install --frozen-lockfile   # respect the committed lockfile
 pnpm exec playwright install chromium   # one-time: the browser the e2e suite drives
-pnpm dev          # demo at http://localhost:5173 (?ws=...&transport=image|video)
+pnpm dev          # simple 2-process dev demo (see below): http://localhost:5173 (?ws=...&transport=image|video)
 pnpm typecheck    # tsc for the library + worker (separate DOM / WebWorker lib configs)
 pnpm test         # Vitest unit tests
 pnpm build        # dist/index.js (+ .d.ts), worker inlined
 pnpm e2e          # Playwright headless e2e (boots the Python server + demo)
+pnpm build:demo   # build the `pdum-rfb demo` SPA -> src/pdum/rfb/static/demo/ (committed package data)
+pnpm e2e:demo     # Playwright e2e that boots `pdum-rfb demo` and drives the web UI
 ```
+
+### The two demos
+
+* **User-facing:** `pdum-rfb demo` is a single self-contained web app (see
+  [the demo page](demo.md)); end users run it with `uvx` — no clone, no Node. Its SPA
+  lives in `widgets/packages/demo-app/` and is built to committed package data
+  (`pnpm build:demo`); rebuild + commit it whenever that project changes.
+* **Contributor-only:** the simple **two-process** demo — `python -m pdum.rfb.server`
+  (streams a deterministic pattern on a bare WebSocket) plus `pnpm dev` (a minimal Vite
+  client at `:5173`, `?ws=…&transport=image|video`) — is the quickest way to iterate on the
+  core widget or the wire protocol. It also backs the Playwright e2e (`pnpm e2e`). This flow
+  is not suggested to end users.
 
 `scripts/setup.sh` runs both the `pnpm install` and the Playwright Chromium
 download for you (Node.js + pnpm must already be on `PATH` — the script detects

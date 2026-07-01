@@ -2,8 +2,11 @@
 // lifecycle, the keyframe gate, and seq attribution for display ACKs.
 
 import type { BackpressureController, KeyframeGate } from "../backpressure";
+import type { Logger } from "../debug";
 import type { VideoChunkHeader } from "../protocol";
 import type { Renderer } from "./renderer";
+
+const noLog: Logger = { enabled: false, log: () => {}, error: () => {} };
 
 export class VideoPipeline {
   private decoder: VideoDecoder | null = null;
@@ -17,6 +20,7 @@ export class VideoPipeline {
     private gate: KeyframeGate,
     private onRequestKeyframe: (reason: string) => void,
     private onDisplayed: (seq: number) => void,
+    private log: Logger = noLog,
   ) {}
 
   get decodeQueueSize(): number {
@@ -49,11 +53,13 @@ export class VideoPipeline {
         if (seq !== undefined) this.onDisplayed(seq);
       },
       error: (e) => {
+        this.log.error("decode", "VideoDecoder error", e);
         this.gate.reset();
         this.onRequestKeyframe(String(e));
       },
     });
     // Annex B mode: SPS/PPS are in-band on key chunks, so omit `description`.
+    this.log.log("decode", "configure", { codec: header.codec, w: header.width, h: header.height });
     this.decoder.configure({
       codec: header.codec,
       codedWidth: header.width,

@@ -618,7 +618,13 @@ cli = [
 ]
 demo = [
     { name = "rich" },
-    { name = "textual" },
+    { name = "starlette" },
+    { name = "typer" },
+    { name = "uvicorn" },
+]
+doctor = [
+    { name = "av" },
+    { name = "rich" },
     { name = "typer" },
 ]
 gpu-cuda12 = [
@@ -663,8 +669,8 @@ dev = [
     { name = "rich" },
     { name = "ruff" },
     { name = "starlette" },
-    { name = "textual" },
     { name = "typer" },
+    { name = "uvicorn" },
     { name = "watchdog" },
 ]
 gpu-dev = [
@@ -688,19 +694,20 @@ requires-dist = [
     { name = "cupy-cuda13x", marker = "extra == 'gpu-cuda13'", specifier = ">=14" },
     { name = "cupy-cuda13x", marker = "extra == 'gpu-nvenc-sdk'", specifier = ">=14" },
     { name = "habemus-papadum-nvenc", marker = "extra == 'gpu-nvenc-sdk'", editable = "packages/nvenc" },
+    { name = "habemus-papadum-rfb", extras = ["cli"], marker = "extra == 'demo'" },
+    { name = "habemus-papadum-rfb", extras = ["cli", "h264"], marker = "extra == 'doctor'" },
     { name = "habemus-papadum-vtenc", marker = "extra == 'mac-vt'", editable = "packages/vtenc" },
     { name = "numpy", specifier = ">=2.5.0" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "rendercanvas", marker = "extra == 'rendercanvas'", specifier = ">=2.0" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.7" },
-    { name = "rich", marker = "extra == 'demo'", specifier = ">=13.7" },
     { name = "starlette", marker = "extra == 'asgi'", specifier = ">=0.37" },
-    { name = "textual", marker = "extra == 'demo'", specifier = ">=1.0" },
+    { name = "starlette", marker = "extra == 'demo'", specifier = ">=0.37" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12" },
-    { name = "typer", marker = "extra == 'demo'", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'demo'", specifier = ">=0.30" },
     { name = "websockets", specifier = ">=16.0" },
 ]
-provides-extras = ["h264", "nvenc", "gpu-cuda13", "gpu-cuda12", "gpu-nvenc-sdk", "cli", "rendercanvas", "asgi", "mac-vt", "demo", "anywidget"]
+provides-extras = ["h264", "nvenc", "gpu-cuda13", "gpu-cuda12", "gpu-nvenc-sdk", "cli", "doctor", "rendercanvas", "asgi", "mac-vt", "demo", "anywidget"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -721,8 +728,8 @@ dev = [
     { name = "rich", specifier = ">=13.7.1" },
     { name = "ruff", specifier = ">=0.13.3" },
     { name = "starlette", specifier = ">=0.37" },
-    { name = "textual", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", specifier = ">=0.30" },
     { name = "watchdog", specifier = ">=3.0.0" },
 ]
 gpu-dev = [{ name = "cupy-cuda13x", specifier = ">=14" }]
@@ -1364,18 +1371,6 @@ wheels = [
 ]
 
 [[package]]
-name = "linkify-it-py"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "uc-micro-py" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz", hash = "sha256:43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b", size = 29158, upload-time = "2026-03-01T07:48:47.683Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/de/88b3be5c31b22333b3ca2f6ff1de4e863d8fe45aaea7485f591970ec1d3e/linkify_it_py-2.1.0-py3-none-any.whl", hash = "sha256:0d252c1594ecba2ecedc444053db5d3a9b7ec1b0dd929c8f1d74dce89f86c05e", size = 19878, upload-time = "2026-03-01T07:48:46.098Z" },
-]
-
-[[package]]
 name = "markdown"
 version = "3.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1394,11 +1389,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
-]
-
-[package.optional-dependencies]
-linkify = [
-    { name = "linkify-it-py" },
 ]
 
 [[package]]
@@ -1618,7 +1608,7 @@ name = "mlx"
 version = "0.31.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mlx-metal", marker = "sys_platform == 'darwin'" },
+    { name = "mlx-metal" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/f5/e63f6a9316ded2d14a8ebc7a9ca25734c784e8c54d064a78b4dceeacec0e/mlx-0.31.2-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:a13c9ce23c3deef6aa5a09315e7953e1a5dc311e851fa16fc74c81fb2509c0b9", size = 588417, upload-time = "2026-04-22T03:14:54.094Z" },
@@ -2497,23 +2487,6 @@ wheels = [
 ]
 
 [[package]]
-name = "textual"
-version = "8.2.8"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py", extra = ["linkify"] },
-    { name = "mdit-py-plugins" },
-    { name = "platformdirs" },
-    { name = "pygments" },
-    { name = "rich" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/00/21/39a76b01bd5eea82a04baaca7580e105d8c59450df03998345bb2cfb307b/textual-8.2.8.tar.gz", hash = "sha256:3f106a9fbc73e39dd266c9712432087de78a6d644084c7c241d6a25c3169115b", size = 1860502, upload-time = "2026-06-30T06:51:24.495Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/be/35261223d9416a0751cdff1c7b4a6f881387218a12d439fe22fefebc8c04/textual-8.2.8-py3-none-any.whl", hash = "sha256:267375fd402dc8d981457212efa71f0e3365fd17bba144ba9bb3ed7563cb374a", size = 731418, upload-time = "2026-06-30T06:51:26.364Z" },
-]
-
-[[package]]
 name = "tinycss2"
 version = "1.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2621,15 +2594,6 @@ wheels = [
 ]
 
 [[package]]
-name = "uc-micro-py"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/78/67/9a363818028526e2d4579334460df777115bdec1bb77c08f9db88f6389f2/uc_micro_py-2.0.0.tar.gz", hash = "sha256:c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811", size = 6611, upload-time = "2026-03-01T06:31:27.526Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/73/d21edf5b204d1467e06500080a50f79d49ef2b997c79123a536d4a17d97c/uc_micro_py-2.0.0-py3-none-any.whl", hash = "sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c", size = 6383, upload-time = "2026-03-01T06:31:26.257Z" },
-]
-
-[[package]]
 name = "uharfbuzz"
 version = "0.55.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2698,6 +2662,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/8b/4146a55d3ee6b2b67c3dece3ef6be220c443abafc2dc56baa2f74d6b36a8/uv-0.11.25-py3-none-win32.whl", hash = "sha256:86d4759fec9b46f61944d6e9ef1f5eaa2c5fbe2db5ddb59492d9174b08fcf39c", size = 23896598, upload-time = "2026-06-27T00:48:53.01Z" },
     { url = "https://files.pythonhosted.org/packages/64/66/784f9fb457b640dbb96cdd175f4902235b42ffe740dbaee9ea5fc649d8b2/uv-0.11.25-py3-none-win_amd64.whl", hash = "sha256:560b0fbaa6356af533923a349658c21d4f410d16e835787d8a05da451d4ee859", size = 26862205, upload-time = "2026-06-27T00:48:55.667Z" },
     { url = "https://files.pythonhosted.org/packages/85/cb/d7bb121261db0b829f38b1e86b80d8103afd050b8a5c5c9fe4a988d2f1fc/uv-0.11.25-py3-none-win_arm64.whl", hash = "sha256:79f166cd1b84f855e9d2768221d59b403869648289fd884d58ad4299edfb4d9e", size = 25153588, upload-time = "2026-06-27T00:48:58.495Z" },
+]
+
+[[package]]
+name = "uvicorn"
+version = "0.49.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "h11" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/1f/fa18009dea8469069cca78a4e877a008ab78f08b064bfc9ab891579077ff/uvicorn-0.49.0.tar.gz", hash = "sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3", size = 91284, upload-time = "2026-06-03T22:01:30.448Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/fa/e1388bbcf24ef3274f45c0c1c7b501fd14971037c1b6ee23610553307497/uvicorn-0.49.0-py3-none-any.whl", hash = "sha256:ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f", size = 71376, upload-time = "2026-06-03T22:01:29.037Z" },
 ]
 
 [[package]]

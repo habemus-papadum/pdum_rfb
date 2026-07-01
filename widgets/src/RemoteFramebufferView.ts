@@ -9,6 +9,7 @@ import {
   normalizePointerEvent,
   normalizeWheelEvent,
 } from "./events";
+import { makeLogger, type Logger } from "./debug";
 import type { ConnectionState, MainToWorker, Stats, WorkerToMain } from "./types";
 import type { FitMode } from "./viewport";
 import { createInlineWorker } from "./workerFactory";
@@ -30,6 +31,9 @@ export interface RfbViewOptions {
   background?: string;
   /** Auth credential (e.g. a Google OAuth ID token) sent to the server in `hello`. */
   token?: string;
+  /** Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode).
+   *  Genuine errors surface either way; this adds the play-by-play. Default `false`. */
+  debug?: boolean;
   onState?: (state: ConnectionState) => void;
   onStats?: (stats: Stats) => void;
   onError?: (err: Error) => void;
@@ -58,9 +62,12 @@ export class RemoteFramebufferView {
 
   private _state: ConnectionState = "connecting";
   private _stats: Stats = { ...EMPTY_STATS };
+  private log: Logger;
 
   constructor(target: HTMLCanvasElement | HTMLElement, options: RfbViewOptions) {
     this.options = options;
+    this.log = makeLogger(options.debug ?? false, "view");
+    this.log.log("init", { url: options.url, fit: options.fit, imageOnly: options.imageOnly });
     this.dpr = options.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1;
     this.canvas = this.resolveCanvas(target);
     this.canvas.tabIndex = this.canvas.tabIndex >= 0 ? this.canvas.tabIndex : 0;
@@ -94,6 +101,7 @@ export class RemoteFramebufferView {
         token: options.token,
         fit: options.fit,
         background: options.background,
+        debug: options.debug,
       },
     };
     this.worker.postMessage(init, [offscreen]);
@@ -226,6 +234,7 @@ export class RemoteFramebufferView {
     switch (msg.type) {
       case "state":
         this._state = msg.state;
+        this.log.log("state", msg.state);
         this.options.onState?.(msg.state);
         break;
       case "stats":
@@ -243,6 +252,7 @@ export class RemoteFramebufferView {
       }
       case "error":
         this._state = "error";
+        this.log.error("worker", msg.error);
         this.options.onError?.(new Error(msg.error));
         break;
       case "ready":

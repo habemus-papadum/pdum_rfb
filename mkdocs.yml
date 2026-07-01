@@ -19,7 +19,7 @@ nav:
       - Guide: notebook.md
       - Demo (anywidget): demos/anywidget.ipynb
   - Internals: internals.md
-  - Demo harness (pdum-rfb demo): demo.md
+  - Interactive demo (pdum-rfb demo): demo.md
   - Features:
       - Still after settle: still_after_settle.md
       - Multiple streams: multiple_streams.md
@@ -46,6 +46,7 @@ nav:
           - Pipelined encode — NVENC: proposals/completed/pipelined_encode_nvenc_impl.md
           - rendercanvas backend: proposals/completed/rendercanvas_backend.md
           - Sizing, DPR & color: proposals/completed/sizing_dpr_color.md
+          - Demo refactor (web control plane): proposals/completed/demo_refactor.md
       - In progress (not yet built):
           - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
           - Client decode resilience: proposals/active/client_decode_resilience.md

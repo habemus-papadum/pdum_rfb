@@ -73,6 +73,15 @@ cli = [
     "typer>=0.12",
     "rich>=13.7",
 ]
+# `pdum-rfb doctor` with the cross-platform encoders installed, so a fresh
+# `uvx --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor` reports both what runs on
+# this platform *and* what is actually importable here (not just "install X"). Composed
+# from the other extras (self-referencing) so there are no copied dependency lines to
+# keep in sync; the platform-specific paths (CuPy/VideoToolbox/NVENC-SDK) can't be blanket
+# deps and are reported as "available on this platform — install …".
+doctor = [
+    "habemus-papadum-rfb[cli,h264]",
+]
 rendercanvas = [
     "rendercanvas>=2.0",
 ]
@@ -91,13 +100,15 @@ asgi = [
 mac-vt = [
     "habemus-papadum-vtenc",
 ]
-# `pdum-rfb demo` — an interactive Textual TUI that publishes a live feed, serves the
-# browser client (Vite dev), and lets you switch encode backends / retune quality on the
-# fly while watching per-session stats. A dev/eval harness, not a runtime dep.
+# `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
+# (committed under src/pdum/rfb/static/demo/), a REST control plane, and the framebuffer
+# WebSocket(s) over one uvicorn origin; the browser holds the viewer + all controls. No
+# Node/Vite at runtime. Meant for `uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo`.
+# A dev/eval harness, not a runtime dep. Self-references [cli] for the Typer entry point.
 demo = [
-    "typer>=0.12",
-    "rich>=13.7",
-    "textual>=1.0",
+    "habemus-papadum-rfb[cli]",
+    "starlette>=0.37",
+    "uvicorn>=0.30",
 ]
 # Jupyter/marimo notebook widget (pdum.rfb.notebook). The prebuilt, inlined-worker ESM
 # bundle ships in the wheel (src/pdum/rfb/static/widget.{js,css}); this pulls the Python
@@ -117,7 +128,10 @@ build-backend = "hatchling.build"
 packages = ["src/pdum"]
 
 # The anywidget bundle (committed, built from widgets/anywidget/) is package data. Tracked
-# files under src/pdum ship by default (like py.typed); this makes it explicit.
+# files under src/pdum ship by default (like py.typed); this makes it explicit. The
+# `pdum-rfb demo` SPA (committed under static/demo/, built from widgets/packages/demo-app/
+# via `pnpm -C widgets build:demo`) ships by that same default-inclusion of tracked files —
+# a directory force-include here would double-add each file, so it is intentionally omitted.
 [tool.hatch.build.targets.wheel.force-include]
 "src/pdum/rfb/static/widget.js" = "pdum/rfb/static/widget.js"
 "src/pdum/rfb/static/widget.css" = "pdum/rfb/static/widget.css"
@@ -157,8 +171,8 @@ dev = [
     "anywidget>=0.9",
     "pytest-asyncio>=1.4.0",
     "typer>=0.12",
-    "starlette>=0.37",  # exercises the [asgi] adapter in tests (TestClient WS)
-    "textual>=1.0",  # the `pdum-rfb demo` TUI harness
+    "starlette>=0.37",  # the [asgi] adapter + the `pdum-rfb demo` control plane (TestClient in tests)
+    "uvicorn>=0.30",  # serves the `pdum-rfb demo` web app
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",

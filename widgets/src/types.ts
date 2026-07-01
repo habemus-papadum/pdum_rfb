@@ -17,6 +17,9 @@ export interface WorkerInitOptions {
   fit?: FitMode;
   /** Letterbox fill for `contain` (any CSS color; default `"#000"`). */
   background?: string;
+  /** Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode).
+   *  Genuine errors are surfaced either way; this adds the play-by-play. Default `false`. */
+  debug?: boolean;
 }
 
 export type MainToWorker =

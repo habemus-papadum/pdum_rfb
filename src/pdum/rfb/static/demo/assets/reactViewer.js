@@ -1,0 +1,1 @@
+import{r}from"./index2.js";import{Q as o}from"./index.js";import"./index3.js";function f({options:n,onReady:i}){const e=r.useRef(null);return r.useEffect(()=>{if(!e.current)return;const t=new o(e.current,n);return i(t),()=>t.dispose()},[]),r.createElement("div",{ref:e,style:{width:"100%",height:"100%"}})}export{f as ReactViewer};

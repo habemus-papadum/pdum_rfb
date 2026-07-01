@@ -5,6 +5,7 @@ const params = new URLSearchParams(location.search);
 const wsUrl = params.get("ws") ?? `ws://${location.hostname}:8765`;
 const transport = params.get("transport") ?? "auto";
 const fit = (params.get("fit") as FitMode | null) ?? undefined;
+const debug = params.get("debug") === "1";
 
 const stage = document.getElementById("stage") as HTMLElement;
 const statsEl = document.getElementById("stats") as HTMLElement;
@@ -49,6 +50,7 @@ const view = new RemoteFramebufferView(stage, {
   url: wsUrl,
   imageOnly: transport === "image",
   fit,
+  debug,
   onStats: renderHud,
   onState: (st) => {
     connState = st;

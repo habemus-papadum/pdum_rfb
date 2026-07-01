@@ -23,11 +23,13 @@
     "demo:build": "vite build --config vite.demo.config.ts",
     "demo:preview": "vite preview --config vite.demo.config.ts",
     "build:anywidget": "vite build --config vite.anywidget.config.ts && node -e \"require('fs').copyFileSync('packages/rfb-ui/src/rfb.css','../src/pdum/rfb/static/widget.css')\"",
+    "build:demo": "pnpm --filter @habemus-papadum/rfb-demo-app build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.anywidget.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "e2e": "playwright test",
+    "e2e:demo": "playwright test --config playwright.demo.config.ts",
     "gen:fixtures": "cd .. && uv run python -m pdum.rfb.testing widgets/tests/fixtures/protocol"
   },
   "devDependencies": {

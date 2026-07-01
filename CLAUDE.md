@@ -118,14 +118,22 @@ src/pdum/rfb/
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 (libx264/NVENC/VideoToolbox) w/ real PSNR
   notebook.py     opt-in [anywidget] Jupyter/marimo widgets: RfbCanvas (bare) / RfbViewer (batteries)
                   + publish_loop(); Display.widget() lazy-imports it (see docs/notebook.md)
-  static/         COMMITTED widget.{js,css} — prebuilt inlined-worker anywidget bundle (package data;
-                  built from widgets/anywidget/ via `pnpm -C widgets build:anywidget`; .map gitignored)
+  static/         COMMITTED package data: widget.{js,css} (anywidget bundle, built from
+                  widgets/anywidget/ via `pnpm -C widgets build:anywidget`) + demo/ (the
+                  `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
+                  `pnpm -C widgets build:demo`); both ship in the wheel, .map gitignored
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
   cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo
   demos.py        Demo registry: CPU pattern scenes + paint (interactive) + mlx_shader (Metal)
-  demo_tui.py     `pdum-rfb demo` orchestration: serve + render loop + Vite launch + smoke() self-test
-  demo_app.py     the Textual TUI (lazy `[demo]` import): live scene/backend switch, quality, stats
+  demo_server.py  `pdum-rfb demo` = one self-contained web app (opt-in [demo]: starlette+uvicorn).
+                  Starlette ASGI app: prebuilt SPA (static/demo/) + REST control plane
+                  (/demo/capabilities|state, POST /demo/streams[/{name}/{scene,backend,quality,params}])
+                  + rfb_hub_endpoint WS, one origin (the hub's websockets listener is NOT started).
+                  DemoStreamManager owns per-stream _DemoState + render loop; shared 'default'
+                  (fan-out) + reaped private streams. Browser holds the controls; Python logs +
+                  serves. build_demo_app()/run_demo()/smoke() (in-process TestClient CI proof).
+                  (Replaced the retired Textual demo_tui.py/demo_app.py.)
 
 widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-widgets (importer ".")
   src/
@@ -142,6 +150,9 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
     react/                    @habemus-papadum/rfb-react  (useRemoteFramebuffer hook + <RemoteFramebuffer>)
     svelte/                   @habemus-papadum/rfb-svelte  (createRemoteFramebuffer action/stores + component; Svelte 5)
     solid/                    @habemus-papadum/rfb-solid   (createRemoteFramebuffer ref/signals + component)
+    demo-app/                 PRIVATE: the `pdum-rfb demo` SPA (vanilla shell + faicanteen styling +
+                              REST control rail + framework toggle: Vanilla⇄React). Builds via the root
+                              `build:demo` script -> src/pdum/rfb/static/demo/ (committed). Not published.
   # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>
   # (opt-in styles.css, themeable via CSS vars + slots/render-props). Each peer-deps the
   # core; build externalizes framework+core; release.sh version-syncs all 4 npm packages.
@@ -220,6 +231,13 @@ pnpm e2e          # Playwright headless e2e (boots the Python server + demo)
    spec injects real input and checks `GET /recorded-events`. H.264 path is gated on
    `VideoDecoder.isConfigSupported`.
 
+**The Playwright e2e IS runnable here — don't assume otherwise.** Any environment
+bootstrapped by `scripts/setup.sh` has Playwright Chromium installed, and the config
+(`widgets/playwright.config.ts`) starts the Python server + a Vite prod build itself and
+runs headless with swiftshader GL — no display needed. So `pnpm -C widgets e2e` works in
+the agent sandbox (verified: all specs green). Run it to validate client/protocol/wire
+changes rather than claiming it can't run.
+
 `SyntheticFrameSource` / `render_test_pattern` / `expected_quadrant_color` are the
 cross-language contract — keep the Python and TS sides in sync.
 
@@ -294,8 +312,9 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
   metrics, adaptive, testing helpers).
 - `docs/guide_javascript.md` — browser client guide (`RemoteFramebufferView`,
   options, framework integration, CSP/worker packaging).
-- `docs/demo.md` — the `pdum-rfb demo` harness (Textual TUI + Vite client): live scene /
-  backend switching, quality retune, stats, the `--smoke` headless self-test.
+- `docs/demo.md` — the `pdum-rfb demo` web app (one uvicorn process serving the prebuilt SPA
+  + REST control plane + framebuffer WS; run via `uvx`): browser control rail (scene/backend/
+  quality/params), shared vs private streams, the debug toggle, the `--smoke` self-test.
 - `docs/notebook.md` — Jupyter/marimo anywidget (`display.widget()`, `RfbCanvas`/
   `RfbViewer` tiers, `publish_loop`, local vs remote/HTTPS same-origin ASGI, multi-stream,
   theming, CSP/mixed-content).

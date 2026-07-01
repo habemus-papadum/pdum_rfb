@@ -236,6 +236,14 @@ else:
             table.add_row(p.component, _STATUS_MARKUP.get(p.status, p.status), p.detail)
         console.print(table)
         console.print(Panel(f"[bold]Recommended:[/] {rec}", border_style="green", expand=False))
+        # "✓ ok" means importable *in this environment*; a "– n/a"/"△" with a platform note
+        # means the path is possible on this box once you install it. Run from a fresh env
+        # with the cross-platform encoders present via the compound [doctor] extra:
+        console.print(
+            "[dim]✓ = available in this environment · notes show what this platform could run "
+            "if installed.\n"
+            "Fresh probe:  uvx --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor[/]"
+        )
 
     @app.command()
     def benchmark(
@@ -340,46 +348,38 @@ else:
     def demo(
         width: int = typer.Option(1280, help="framebuffer width (even)"),
         height: int = typer.Option(720, help="framebuffer height (even)"),
-        port: int = typer.Option(8765, help="WebSocket/HTTP server port"),
-        web_port: int = typer.Option(5173, help="Vite dev-server port"),
+        port: int = typer.Option(8000, help="HTTP/WebSocket server port"),
         fps: int = typer.Option(30, help="publish frame rate"),
         bitrate: str = typer.Option("8M", help="initial H.264/NVENC bitrate, e.g. 8M"),
-        host: str = typer.Option("127.0.0.1", help="server bind host"),
-        vite: bool = typer.Option(True, "--vite/--no-vite", help="launch the Vite dev server for the client"),
-        web_url: str = typer.Option(None, help="use this client URL instead of launching Vite"),
-        widgets_dir: str = typer.Option(None, help="path to the widgets/ workspace (Vite root)"),
-        smoke: bool = typer.Option(False, help="headless self-test: every backend + a param change, no TUI"),
+        host: str = typer.Option("127.0.0.1", help="bind host (default localhost-only)"),
+        verbose: bool = typer.Option(False, "--verbose", "-v", help="DEBUG-level server logging"),
+        smoke: bool = typer.Option(False, help="headless self-test: every backend + REST control, no browser"),
     ) -> None:
-        """Interactive demo: a live feed + browser client + a TUI to switch backends on the fly."""
-        import asyncio
+        """Interactive web demo: one process serves the app + controls; drive it in the browser.
 
-        from . import demo_tui
+        The control plane (scene / backend / quality / parameters) lives in the browser and
+        rides REST; Python only serves the app and logs. Ships prebuilt — run it with uvx::
+
+            uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo
+        """
+        from . import demo_server
 
         w = width - (width % 2)
         h = height - (height % 2)
         if smoke:
-            asyncio.run(demo_tui.smoke(width=w, height=h, fps=fps))
+            demo_server.smoke(width=w, height=h, fps=fps)
             return
         try:
-            import textual  # noqa: F401
+            import uvicorn  # noqa: F401
         except ModuleNotFoundError:
-            sys.stderr.write("The demo TUI needs Textual.\n  pip install 'habemus-papadum-rfb[demo]'\n")
+            sys.stderr.write(
+                "The demo needs Starlette + uvicorn.\n"
+                "  uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo\n"
+                "  (or: pip install 'habemus-papadum-rfb[demo]')\n"
+            )
             raise SystemExit(1) from None
         try:
-            asyncio.run(
-                demo_tui.run_demo(
-                    width=w,
-                    height=h,
-                    host=host,
-                    port=port,
-                    fps=fps,
-                    bitrate=demo_tui._parse_bitrate(bitrate),
-                    web_port=web_port,
-                    no_vite=not vite,
-                    web_url_override=web_url,
-                    widgets_dir=widgets_dir,
-                )
-            )
+            demo_server.run_demo(width=w, height=h, host=host, port=port, fps=fps, bitrate=bitrate, verbose=verbose)
         except KeyboardInterrupt:
             pass
 
