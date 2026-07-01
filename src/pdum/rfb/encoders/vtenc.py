@@ -136,6 +136,15 @@ class VideoToolboxEncoder:
         keyframe = force_keyframe or _contains_idr(data)
         return [self._payload(frame.seq, frame.timestamp_us, data, keyframe)]
 
+    def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
+        """Encode ``frame`` as a self-contained keyframe (a clean IDR) for "still after settle".
+
+        VideoToolbox has no lossless mode, so the video-path still is a forced IDR — the same
+        contract as the libx264/NVENC backends. Without this method the session's still gate
+        (``hasattr(encoder, "encode_still")``) is False and stills silently no-op on macOS.
+        """
+        return self.encode(frame, force_keyframe=True)
+
     def _encode_pipelined(self, packed, seq: int, timestamp_us: int, force_keyframe: bool) -> list[EncodedPayload]:
         """Submit one frame without waiting; return whatever AUs are ready, each labeled with
         its *recovered* seq (the frame it actually encoded), not this call's seq. See

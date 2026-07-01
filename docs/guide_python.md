@@ -80,8 +80,31 @@ viewer that falls behind simply skips intermediate frames (latest-frame-wins).
 
 For the H.264 path keep dimensions **even** (`yuv420p`) and the `pixel_format`
 constant. Publishing a **differently-shaped** array transparently resizes the
-display: each viewer's encoder is rebuilt and a keyframe forced. Don't mutate an
-array after publishing it — return a fresh array each frame (viewers share it).
+display: each viewer's encoder is rebuilt and a keyframe forced.
+
+### Frame ownership / memory model
+
+`publish()` is **borrow by default**: it stores a bare reference to your buffer and reads
+the pixels **asynchronously**, on each viewer's encode worker thread. So the "borrow"
+outlives the `publish()` call — it runs from `publish()` until every viewer has finished
+encoding that frame, and it is **widest under `still_after`** (the resting frame is re-read
+~`still_after` seconds later to produce the lossless still). In borrow mode, **publish a
+fresh buffer each call, or don't mutate a published buffer until it is encoded** — reusing
+one buffer in place can otherwise let a viewer (or a settle-time still) encode a torn frame.
+
+Two things make this safe without any "frame released" callback:
+
+- **Still-after-settle always snapshots.** The resting frame is copied into a server-owned,
+  reused buffer on the publish thread *before* the (off-thread) still encode, so reusing
+  your buffer **while the scene is idle** can never corrupt a still. Automatic; one copy per
+  settle (rare).
+- **`own_frames=True` copies every frame.** Opt in (`serve(..., own_frames=True)` or
+  `Display(..., own_frames=True)`) and `publish()` copies each frame into a **recycled
+  server buffer** on the publish thread — after which you may reuse/mutate your own buffer
+  immediately, with **no reallocation** (the server keeps a small pool, reallocated only on
+  a size/dtype change) and **no release notification**. Supported for `cpu` and `cuda`
+  frames; `metal` (MLX) raises, since MLX arrays are immutable and the borrow contract
+  already holds. The default (`False`) keeps the zero-copy hot path.
 
 ### Sparse / on-demand rendering
 
@@ -130,6 +153,7 @@ display = await serve(
     origins=None,              # allowed Origin values (CSWSH defense)
     record_events=False,       # also expose received events at GET /recorded-events
     event_log=None,            # path to append received events as JSONL
+    own_frames=False,          # True = server copies each frame so you can reuse your buffer
     encode_pipeline_depth=0,   # 0 = synchronous (default); >0 = pipelined encode (NVENC)
 )
 # ... publish in your own loop ...
@@ -427,6 +451,10 @@ Requirements: the `[mac-vt]` extra (`habemus-papadum-vtenc` / `pdum.vtenc`) and 
 - `pdum.rfb.metal.mlx_available()` gates the path; `pdum.rfb.metal.rgb_to_nv12` /
   `to_host_nv12` / `metal_frame` are the helpers (the Metal analog of `pdum.rfb.gpu`).
 
+Full details — the architecture, the measured Apple-Silicon numbers, install, and why
+input zero-copy/pipelining don't help — are in the
+[Apple Metal / VideoToolbox guide](metal_videotoolbox.md).
+
 ### Registering a custom encoder
 
 The video-encoder registry is the extension seam — the `nvenc_cpu`, `nvenc_gpu_pyav`, and
@@ -525,8 +553,11 @@ h264 2M        640x480     1.32     1.40       6.6      1.63    49.31
 ...
 ```
 
-Call `benchmark_image(...)` / `benchmark_h264(...)` directly for programmatic use;
-both return a `BenchmarkResult`.
+On Linux with an NVENC GPU add `--gpu`/`--sdk` for the zero-copy CUDA→NVENC rows; on
+macOS a hardware **`vtenc`** row (Apple VideoToolbox) is auto-detected and added.
+
+Call `benchmark_image(...)` / `benchmark_h264(...)` / `benchmark_vtenc(...)` directly
+for programmatic use; each returns a `BenchmarkResult`.
 
 ### Adaptive quality
 

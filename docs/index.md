@@ -30,9 +30,11 @@ the browser" for notebooks, and `pdum.rfb` speaks the same
   like `jupyter_rfb`), a low-latency **H.264/WebCodecs** path adds per-client backpressure
   and a keyframe policy — made for continuous, interactive framerates, not just the
   occasional redraw.
-- **Zero-copy on the GPU.** When you render on CUDA, frames can go **straight to NVENC**
-  (CUDA NV12 → H.264) without a host round-trip — via PyAV's `h264_nvenc` or the PyAV-free
-  `pdum.nvenc` encoder. See [GPU zero-copy](gpu_zerocopy.md).
+- **Hardware encode on the GPU.** When you render on CUDA, frames can go **straight to
+  NVENC** (CUDA NV12 → H.264) without a host round-trip — via PyAV's `h264_nvenc` or the
+  PyAV-free `pdum.nvenc` encoder. On **Apple Silicon** the same `serve(gpu=True)` drives
+  **VideoToolbox** from an MLX render, with the color conversion on the GPU. See
+  [CUDA→NVENC](gpu_zerocopy.md) and [Apple Metal / VideoToolbox](metal_videotoolbox.md).
 
 Whether you push every 16 ms or once a minute is entirely up to your loop.
 
@@ -103,12 +105,14 @@ shared path per client.
   for low latency (`ultrafast`/`zerolatency`, no B-frames, ~1 s IDR cadence,
   in-band SPS/PPS). `import pdum.rfb` works without the extra — PyAV loads lazily.
 
-For GPU-rendered scenes there are three hardware NVENC paths, fastest-installed
-first: the **PyAV-free NVENC SDK** wheel (`habemus-papadum-nvenc`), the
-**zero-copy CUDA→NVENC** path (CuPy/DLPack → `h264_nvenc`, PyAV ≥ 18), and
-**host-memory NVENC** (PyAV's bundled `h264_nvenc`). `serve(gpu=True)` prefers the
-SDK backend, then the zero-copy one. See [Installation](installation.md),
-[Performance](performance.md), and the [GPU zero-copy guide](gpu_zerocopy.md).
+For GPU-rendered scenes on **Linux/NVIDIA** there are three hardware NVENC paths,
+fastest-installed first: the **PyAV-free NVENC SDK** wheel (`habemus-papadum-nvenc`),
+the **zero-copy CUDA→NVENC** path (CuPy/DLPack → `h264_nvenc`, PyAV ≥ 18), and
+**host-memory NVENC** (PyAV's bundled `h264_nvenc`). On **macOS/Apple Silicon**,
+`serve(gpu=True)` instead drives Apple **VideoToolbox** from an MLX render (GPU
+RGB→NV12). `serve(gpu=True)` picks the right backend for the platform. See
+[Installation](installation.md), [Performance](performance.md), and the
+[CUDA→NVENC](gpu_zerocopy.md) / [Apple Metal](metal_videotoolbox.md) guides.
 
 ## Verified headlessly, end to end
 
@@ -126,8 +130,8 @@ Every layer is testable without a display or manual clicking:
 
 ## Where to go next
 
-- **[Installation](installation.md)** — image path, CPU H.264, and the three GPU
-  routes, with the platform matrix.
+- **[Installation](installation.md)** — image path, CPU H.264, the NVIDIA GPU
+  routes, and Apple Silicon, with the platform matrix.
 - **[Python Guide](guide_python.md)** — producing/serving frames, events, auth,
   encoders, metrics, adaptive quality, testing helpers.
 - **[JavaScript Guide](guide_javascript.md)** — `RemoteFramebufferView`, options,

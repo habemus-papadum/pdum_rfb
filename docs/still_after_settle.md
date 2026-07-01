@@ -80,6 +80,22 @@ rather than queued — it is a one-shot nicety, not a guaranteed delivery.
   the wire than the JPEG it replaces, but it is sent **once**, when nothing else is
   happening — the opposite of the hot path.
 
+## Frame ownership & memory safety
+
+The still re-encodes the **resting frame**, which the live path only *borrowed* from your
+publish buffer (zero-copy). Because the still fires ~`still_after` seconds **after** your last
+publish and encodes on a worker thread, it is the **widest** window in which the library reads
+your buffer — wider than the live encode, which is usually already finished.
+
+To keep that safe even if you reuse your render buffer in place while the scene is idle, the
+session **snapshots the resting frame into a server-owned, reused buffer** on the publish
+thread before the off-thread still encode. The buffer is allocated once and reused
+(reallocated only on a size/dtype change), so this needs no per-frame allocation and no
+"frame released" callback. **Metal (MLX) frames are exempt** — MLX arrays are immutable, so
+there is nothing to snapshot. To make the *live* path safe to reuse too, opt into
+`own_frames=True` — see the
+[frame ownership model](guide_python.md#frame-ownership-memory-model).
+
 ## Adding a still to a custom encoder
 
 The session looks for an optional `encode_still(frame) -> list[EncodedPayload]` on

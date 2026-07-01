@@ -20,8 +20,9 @@ first**, and the platform limits that apply to the GPU paths.
 | ---- | ------- | -------- | ----- |
 | Just stream something | `pip install habemus-papadum-rfb` | anywhere | image only |
 | Software H.264 | `pip install 'habemus-papadum-rfb[h264]'` | anywhere PyAV has wheels | good |
-| **GPU H.264 (recommended)** | `pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'` | Linux · amd64 · NVIDIA | **fastest** |
-| GPU H.264 (PyAV route) | `[gpu-cuda13]` + **PyAV 18** | Linux · NVIDIA | fastest |
+| **GPU H.264 on NVIDIA (recommended)** | `pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'` | Linux · amd64 · NVIDIA | **fastest** |
+| GPU H.264 on NVIDIA (PyAV route) | `[gpu-cuda13]` + **PyAV 18** | Linux · NVIDIA | fastest |
+| **GPU H.264 on a Mac** | `pip install 'habemus-papadum-rfb[mac-vt]'` + `mlx` | macOS · Apple Silicon | **fastest on Mac** |
 | View in a notebook | `pip install 'habemus-papadum-rfb[anywidget]'` | Jupyter · marimo | — |
 
 The two GPU rows reach the same hardware NVENC speed; the **SDK path is easier to
@@ -123,27 +124,49 @@ Full details (the PyAV-18 requirement, the from-source recipe, the gotchas) live
 [Zero-copy CUDA→NVENC](gpu_zerocopy.md). Prefer **4a** unless you specifically want
 the PyAV/ffmpeg stack.
 
+## 5. Apple Silicon — VideoToolbox + MLX — `[mac-vt]` (macOS)
+
+On a Mac, hardware H.264 comes from Apple **VideoToolbox** instead of NVENC. Render
+with **MLX** and `serve(gpu=True)` selects the VideoToolbox encoder, converting
+RGB→NV12 on the GPU — the macOS counterpart of the NVIDIA GPU paths above.
+
+```bash
+pip install 'habemus-papadum-rfb[mac-vt]'   # habemus-papadum-vtenc / pdum.vtenc
+pip install mlx                              # the GPU frame producer (repo group: mac-dev)
+```
+
+The `[mac-vt]` wheel bundles **no** Apple binaries — the VideoToolbox / CoreVideo /
+CoreMedia frameworks are system-provided, so at runtime it needs only macOS itself.
+MLX is optional: without it, `serve(gpu=True)` still works but converts RGB→NV12 on
+the **CPU** (fine at ≤720p, a bottleneck at 1080p+).
+
+Verify: `pdum-rfb doctor` should show **vtenc — Apple VideoToolbox (H.264): ✓** and
+**mlx — Apple Metal (GPU RGB→NV12): ✓**, and recommend the VideoToolbox path. Full
+details are in the [Apple Metal / VideoToolbox guide](metal_videotoolbox.md).
+
 ## Platform limits (read this for the GPU paths)
 
-The GPU wheels are not universal. Current support, with everything else needing a
-quick issue:
+The **NVIDIA** GPU wheels are not universal (the macOS `[mac-vt]` path is separate —
+see the note below). Current NVENC support, with everything else needing a quick issue:
 
 | Axis | Supported today | Notes |
 | ---- | --------------- | ----- |
 | **Python** | **3.14+** | the package's `requires-python`; CPython only |
-| **OS** | **Linux** | NVENC paths; macOS/Windows untested for GPU |
-| **Arch** | **amd64 (x86_64)** | aarch64 buildable but not yet published |
+| **OS** | **Linux** (NVENC) · **macOS/Apple Silicon** (VideoToolbox, §5) | Windows GPU untested |
+| **Arch** | **amd64 (x86_64)** for NVENC; **arm64** for macOS | aarch64 NVENC wheels buildable but not yet published |
 | **manylinux** | **`manylinux_2_34`** (local build) / **`manylinux_2_28`** (CI) | 2_28 installs on RHEL8 / Ubuntu 18.10+; 2_34 needs glibc ≥ 2.34 (Ubuntu 22.04+) |
 | **CUDA** | **12.x or 13.x** | match the CuPy extra: `gpu-cuda12` vs `gpu-cuda13` |
 | **GPU/driver** | NVIDIA, NVENC-capable, recent driver | not installable by pip; `libcuda`/`libnvidia-encode` come from the driver |
 
 The CPU paths (core, `[h264]`) have none of these limits — they install wherever
-PyAV/Pillow wheels do.
+PyAV/Pillow wheels do. The macOS **`[mac-vt]`** path (§5) has none of the
+NVIDIA-specific rows either (no CUDA, no manylinux, no driver): it needs macOS on
+Apple Silicon and uses the system VideoToolbox frameworks.
 
 ## Need broader support?
 
-If your box is outside the matrix — **aarch64**, an older glibc (need
-`manylinux_2_28`/`_2_17`), a different Python, macOS/Windows GPU, or a CUDA 11
+If your box is outside the matrix — **aarch64** NVENC, an older glibc (need
+`manylinux_2_28`/`_2_17`), a different Python, **Windows** GPU, or a CUDA 11
 toolkit — please **[open an issue](https://github.com/habemus-papadum/pdum_rfb/issues)**.
 Both GPU wheels are built by on-demand CI workflows
 (`build-nvenc-sdk-wheel`, `build-pyav-cuda-wheel`) that already accept a list of

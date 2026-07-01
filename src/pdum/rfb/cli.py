@@ -3,8 +3,8 @@
 Two commands, both optional (install with ``pip install habemus-papadum-rfb[cli]``):
 
 * ``pdum-rfb doctor`` — probe this box and show, as a table, which encode paths
-  work (image, CPU H.264, host NVENC, zero-copy CUDA→NVENC, NVENC SDK) and which
-  one to prefer.
+  work (image, CPU H.264, host NVENC, zero-copy CUDA→NVENC, NVENC SDK, and — on
+  macOS/Apple Silicon — Apple VideoToolbox + MLX) and which one to prefer.
 * ``pdum-rfb benchmark`` — measure per-frame encode latency / size / PSNR for every
   available path (a Rich-rendered wrapper over :mod:`pdum.rfb.benchmark`).
 
@@ -81,14 +81,15 @@ else:
         probes.append(Probe("Python", OK if py_ok else WARN, f"{pyver} (need ≥3.14)"))
         mach = platform.machine()
         syst = platform.system()
-        plat_ok = syst == "Linux" and mach in ("x86_64", "AMD64")
-        probes.append(
-            Probe(
-                "Platform",
-                OK if plat_ok else WARN,
-                f"{syst}/{mach}" + ("" if plat_ok else "  (GPU wheels are Linux/amd64 only)"),
-            )
-        )
+        is_mac_arm = syst == "Darwin" and mach in ("arm64", "aarch64")
+        plat_ok = (syst == "Linux" and mach in ("x86_64", "AMD64")) or is_mac_arm
+        if is_mac_arm:
+            plat_detail = f"{syst}/{mach}  (Apple Silicon: VideoToolbox HW H.264)"
+        elif plat_ok:
+            plat_detail = f"{syst}/{mach}"
+        else:
+            plat_detail = f"{syst}/{mach}  (HW encode: Linux/amd64 NVENC or macOS/arm64 VideoToolbox)"
+        probes.append(Probe("Platform", OK if plat_ok else WARN, plat_detail))
 
         # --- core (always present) ---
         core = ", ".join(f"{m} {_version(m)}" for m in ("numpy", "PIL", "websockets") if _version(m))
@@ -169,8 +170,33 @@ else:
             pass
         probes.append(Probe("nvenc-gpu-pdum — NVENC SDK (pdum.nvenc)", OK if sdk else MISSING, sdk_detail))
 
+        # --- Apple VideoToolbox + MLX (macOS / Apple Silicon) ---
+        not_mac = "macOS + Apple Silicon only"
+        vt = False
+        try:
+            from .encoders.vtenc import vtenc_available
+
+            vt = vtenc_available()
+        except Exception:
+            pass
+        vt_detail = "available" if vt else "pip install 'habemus-papadum-rfb[mac-vt]'" if syst == "Darwin" else not_mac
+        probes.append(Probe("vtenc — Apple VideoToolbox (H.264)", OK if vt else MISSING, vt_detail))
+        mlx_ok = False
+        try:
+            from .metal import mlx_available
+
+            mlx_ok = mlx_available()
+        except Exception:
+            pass
+        mlx_detail = "available" if mlx_ok else "pip install mlx (the mac-dev group)" if syst == "Darwin" else not_mac
+        probes.append(Probe("mlx — Apple Metal (GPU RGB→NV12)", OK if mlx_ok else MISSING, mlx_detail))
+
         # --- recommendation (fastest available, best first) ---
-        if sdk:
+        if vt:
+            rec = "vtenc — Apple VideoToolbox: hardware H.264 on macOS" + (
+                " (with MLX for GPU RGB→NV12)" if mlx_ok else "; add MLX (mac-dev) for GPU color-convert"
+            )
+        elif sdk:
             rec = "nvenc-gpu-pdum — NVENC SDK (pdum.nvenc): fastest GPU path, no PyAV dependency"
         elif zerocopy:
             rec = "nvenc-gpu-pyav — zero-copy CUDA→NVENC (PyAV≥18): GPU encode, no host copy"
@@ -230,11 +256,13 @@ else:
         # detect what's available
         from .encoders.h264_cpu import h264_cpu_available
         from .encoders.nvenc_cpu import NVENC_MIN_WIDTH, nvenc_cpu_available
+        from .encoders.vtenc import VTENC_MIN_WIDTH
 
         have_h264 = h264_cpu_available()
         have_nvenc = nvenc_cpu_available()
         have_gpu = bench._cuda_zerocopy_available()
         have_sdk = bench._nvenc_gpu_pdum_available()
+        have_vtenc = bench._vtenc_available()
 
         results = []
         with console.status("[bold]benchmarking…"):
@@ -272,13 +300,17 @@ else:
                             bitrate=br, frames=frames, width=w, height=h, fps=fps, pattern=pattern
                         )
                     )
+                if have_vtenc and w >= VTENC_MIN_WIDTH:
+                    results.append(
+                        bench.benchmark_vtenc(bitrate=br, frames=frames, width=w, height=h, fps=fps, pattern=pattern)
+                    )
 
         table = Table(title=f"pdum.rfb encoders — {pattern}, {frames} frames @ {fps}fps", title_style="bold")
         for col in ("config", "size", "enc ms", "p95 ms", "KB/frame", "Mbps@fps", "PSNR dB"):
             table.add_column(col, justify="right" if col != "config" else "left")
         for r in results:
             psnr = "inf" if r.psnr_db == float("inf") else f"{r.psnr_db:.2f}"
-            style = "green" if r.encoder.startswith("nvenc") else None
+            style = "green" if r.encoder.startswith(("nvenc", "vtenc")) else None
             table.add_row(
                 r.label,
                 f"{r.width}x{r.height}",
@@ -297,6 +329,7 @@ else:
                 ("nvenc-cpu", have_nvenc),
                 ("nvenc-gpu-pyav", have_gpu),
                 ("nvenc-gpu-pdum", have_sdk),
+                ("vtenc", have_vtenc),
             )
             if not ok
         ]

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -87,6 +88,16 @@ class Display:
     event_queue_size:
         Bound on the un-polled event backlog; the **oldest** events are dropped
         when a publisher never calls :meth:`poll_events`.
+    own_frames:
+        Opt in to **server-owned frames**. By default :meth:`publish` *borrows* the
+        caller's buffer (zero-copy) and reads it asynchronously, so you must publish a
+        fresh buffer each call (or not mutate it until it is encoded). With
+        ``own_frames=True`` each published frame is **copied into a server-owned,
+        recycled buffer** on the publish thread, so you may reuse/mutate your own buffer
+        immediately after :meth:`publish` returns — no reallocation and no "frame
+        released" callback. Supported for ``cpu`` and ``cuda`` frames; ``metal`` raises
+        (MLX arrays are immutable, so the borrow contract already holds). See
+        :meth:`publish`.
     clock:
         Monotonic clock returning seconds; injectable for deterministic tests.
     """
@@ -100,6 +111,7 @@ class Display:
         record_events: bool = False,
         event_log: str | Path | None = None,
         event_queue_size: int = 4096,
+        own_frames: bool = False,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.width = int(width)
@@ -110,6 +122,12 @@ class Display:
 
         self._latest: RawFrame | None = None
         self._version = 0
+        # Opt-in frame ownership (own_frames=True): publish() copies each frame into a
+        # server-owned buffer drawn from this recycled pool, so the caller may reuse its
+        # buffer immediately. Empty/unused when own_frames is False. See _own_copy / _take_owned.
+        self._own_frames = bool(own_frames)
+        self._own_pool: list[Any] = []
+        self._own_key: tuple[Any, ...] | None = None
         self._feeds: set[_ClientFeed] = set()
         self._sessions: set[RfbSession] = set()
         self._clients: dict[str, _ClientFeed] = {}
@@ -148,9 +166,17 @@ class Display:
           (for pre-converted NV12, use :func:`pdum.rfb.metal.metal_frame`);
         * a ready :class:`~pdum.rfb.types.RawFrame` (any ``memory``).
 
-        Latest-frame-wins: a viewer that is behind simply skips intermediate
-        frames. Publish a *fresh* buffer each call — viewers share the reference
-        and may read it asynchronously.
+        Latest-frame-wins: a viewer that is behind simply skips intermediate frames.
+
+        **Ownership.** By default ``publish()`` *borrows* your buffer — it stores a bare
+        reference and reads the pixels **asynchronously**, on each viewer's encode worker
+        thread. The borrow window runs from here until every viewer has finished encoding
+        the frame, and it is **widest under** ``still_after`` (the resting frame is re-read
+        ~``still_after`` seconds later for the lossless still). So in borrow mode, publish a
+        *fresh* buffer each call, or do not mutate a published buffer until it is encoded.
+        Construct the ``Display`` (or call :func:`~pdum.rfb.serve`) with ``own_frames=True``
+        to instead have the server copy each frame into a recycled buffer, after which you
+        may reuse/mutate your own buffer immediately (``cpu``/``cuda`` only; ``metal`` raises).
         """
         if self._closed:
             raise RuntimeError("publish() called on a closed Display")
@@ -191,6 +217,11 @@ class Display:
 
             materialize(data)
 
+        if self._own_frames:
+            # Server-owned mode: copy into a recycled buffer on this (loop) thread so the caller
+            # may reuse/mutate its own buffer immediately. Severs the async-read aliasing entirely.
+            data = self._own_copy(data, memory)
+
         timestamp_us = int((self._clock() - self._start) * 1_000_000)
         # seq is a placeholder; each feed stamps its own per-client sequence.
         self._latest = RawFrame(
@@ -206,6 +237,56 @@ class Display:
         self._version += 1
         for feed in self._feeds:
             feed._wake()
+
+    def _own_copy(self, data: Any, memory: str) -> Any:
+        """Copy ``data`` into a server-owned buffer (``own_frames`` mode) so the caller may
+        reuse its own buffer immediately. Runs on the loop thread. ``cpu`` → numpy, ``cuda`` →
+        CuPy device-to-device; ``metal`` is unsupported (MLX is immutable — borrow already holds)."""
+        if memory == "cpu":
+            arr = np.asarray(data)
+            buf = self._take_owned(arr.shape, arr.dtype, memory)
+            np.copyto(buf, arr)
+            return buf
+        if memory == "cuda":
+            import cupy as cp  # lazy: only when a cuda frame is published under own_frames
+
+            src = cp.asarray(data)
+            buf = self._take_owned(src.shape, src.dtype, memory)
+            cp.copyto(buf, src)
+            return buf
+        raise NotImplementedError(
+            "own_frames is not supported for Metal frames; publish a fresh mx.array per frame "
+            "(MLX arrays are immutable, so the borrow contract already holds). See docs/metal_videotoolbox.md."
+        )
+
+    def _take_owned(self, shape: tuple[int, ...], dtype: Any, memory: str) -> Any:
+        """Return a reusable server-owned buffer of ``(shape, dtype, memory)`` that no in-flight
+        frame still references. A size/dtype/memory change drops the pool (reallocate, like the
+        encoder rebuild on resize).
+
+        Correctness rests on CPython refcounting: while a session holds ``frame =
+        replace(latest, seq)`` across its off-thread encode, that buffer's refcount is elevated,
+        so it is skipped here and never overwritten mid-encode. Steady state the pool stabilizes
+        at ~(concurrently-encoding viewers + 1) buffers and recycles them — no per-frame alloc."""
+        key = (shape, dtype, memory)
+        if key != self._own_key:
+            self._own_pool = []
+            self._own_key = key
+        pool = self._own_pool
+        for i in range(len(pool)):
+            # getrefcount == 2 means the only refs are the pool slot + getrefcount's own argument,
+            # i.e. nothing else holds it. Index as pool[i] (no bound local), or a temporary local
+            # would add one and mask a free buffer.
+            if sys.getrefcount(pool[i]) <= 2:
+                return pool[i]
+        if memory == "cuda":
+            import cupy as cp
+
+            buf = cp.empty(shape, dtype)
+        else:
+            buf = np.empty(shape, dtype)  # C-contiguous regardless of caller layout
+        pool.append(buf)
+        return buf
 
     # --- events ------------------------------------------------------------
 

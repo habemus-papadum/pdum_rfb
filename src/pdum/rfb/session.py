@@ -17,14 +17,17 @@ receive loop keeps draining ACKs, and the two loops run under a
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 from typing import Any, Callable
 
+import numpy as np
+
 from .adaptive import AdaptiveQualityController
 from .metrics import SessionMetrics
 from .protocol import config_message, header_for, pack_binary_message, parse_control
-from .types import EncodedPayload, EncoderBackend, FrameSource
+from .types import EncodedPayload, EncoderBackend, FrameSource, RawFrame
 
 try:  # A client disconnect is a normal lifecycle event, not an error.
     from websockets.exceptions import ConnectionClosed as _ConnectionClosed
@@ -83,6 +86,12 @@ class RfbSession:
         self._stills_enabled = (
             still_after is not None and hasattr(encoder, "encode_still") and hasattr(source, "still_frame")
         )
+        # Server-owned buffers the resting frame is snapshotted into before the off-thread
+        # still encode, so a caller that reuses/mutates its published buffer while idle can't
+        # corrupt the still. Allocated once and reused; reallocated only on a size/dtype change.
+        # See _snapshot_still and docs/still_after_settle.md.
+        self._still_buf: np.ndarray | None = None
+        self._still_buf_cuda: Any = None
 
     def metrics_snapshot(self) -> dict:
         """Return a JSON-serializable snapshot of this session's metrics."""
@@ -275,11 +284,46 @@ class RfbSession:
         if still is None or len(self.inflight) >= self.max_inflight:
             return
         self._ensure_encoder_for(still.width, still.height)
+        # Snapshot the resting frame into a server-owned buffer on THIS (loop) thread, so the
+        # off-thread encode below reads a stable copy even if the caller reuses/mutates its
+        # published buffer while the scene is settled. No await between here and to_thread, so
+        # the copy is atomic w.r.t. the generator (which publishes on the same thread).
+        still = self._snapshot_still(still)
         t0 = self._clock()
         payloads = await asyncio.to_thread(self.encoder.encode_still, still)  # type: ignore[attr-defined]
         self.metrics.record_encode((self._clock() - t0) * 1000, now=self._clock())
         for payload in payloads:
             await self.send_payload(payload)
+
+    def _snapshot_still(self, frame: RawFrame) -> RawFrame:
+        """Copy the resting ``frame`` into a server-owned, reused buffer for the still encode.
+
+        Runs on the loop thread, so it is atomic w.r.t. the generator (which publishes on the
+        same thread); the off-thread ``encode_still`` then reads this stable copy rather than
+        the caller's buffer. The buffer is allocated once and reused; a size/dtype change
+        reallocates it (mirrors the fixed-resolution encoder rebuild in ``_ensure_encoder_for``).
+
+        Metal frames are returned unchanged: MLX arrays are functionally immutable (a render
+        yields a *new* array) and ``publish()`` already materializes them on the loop thread, so
+        there is no torn read to sever. See docs/still_after_settle.md.
+        """
+        data = frame.data
+        if frame.memory == "cpu":
+            arr = np.asarray(data)
+            if self._still_buf is None or self._still_buf.shape != arr.shape or self._still_buf.dtype != arr.dtype:
+                self._still_buf = np.empty(arr.shape, arr.dtype)  # C-contiguous, not empty_like
+            np.copyto(self._still_buf, arr)
+            return dataclasses.replace(frame, data=self._still_buf)
+        if frame.memory == "cuda":
+            import cupy as cp  # lazy: only when a cuda frame settles, so ``import pdum.rfb`` stays dep-free
+
+            src = cp.asarray(data)
+            buf = self._still_buf_cuda
+            if buf is None or buf.shape != src.shape or buf.dtype != src.dtype:
+                buf = self._still_buf_cuda = cp.empty(src.shape, src.dtype)
+            cp.copyto(buf, src)
+            return dataclasses.replace(frame, data=buf)
+        return frame  # metal (MLX immutable) / other: no snapshot needed
 
     async def _maybe_send_stats(self, now: float) -> None:
         """Push a server-truth ``stats`` control message to the client, throttled.

@@ -335,7 +335,11 @@ which case it could slot in behind the same `register_video_encoder("nvenc_gpu_p
   *session* open/close churn. Production uses one long-lived encoder per connection
   and is unaffected; the test suite retries and GCs between encoders.
 - Publish a **fresh** device buffer per frame — viewers share the reference and may
-  read it asynchronously (same rule as the host path).
+  read it asynchronously (same rule as the host path). Or opt into `serve(gpu=True,
+  own_frames=True)`: `publish()` then does a device-to-device copy into a recycled
+  server-owned CuPy buffer, so you may reuse your own device tensor immediately (no
+  reallocation, no release callback). See the
+  [frame ownership model](guide_python.md#frame-ownership-memory-model).
 - Even dimensions only (NV12), and `width ≥ 160` (NVENC minimum).
 - The encoder uses device 0 and the primary context; multi-GPU selection is a
   future extension.

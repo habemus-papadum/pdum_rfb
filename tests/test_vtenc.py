@@ -217,3 +217,44 @@ def test_build_encoder_threads_pipeline_depth_to_vtenc():
     enc = build_encoder(selection, width=W, height=H, fps=30, video_encoder="vtenc", pipeline_depth=3)
     assert isinstance(enc, VideoToolboxEncoder) and enc.pipeline_depth == 3
     enc.close()
+
+
+# --- offline benchmark integration --------------------------------------------------
+
+
+def test_benchmark_vtenc_cpu_path():
+    """benchmark_vtenc runs the CPU-convert path (MLX-independent) and decodes back."""
+    from pdum.rfb.benchmark import _vtenc_available, benchmark_vtenc
+
+    assert _vtenc_available()  # module is skipped unless VideoToolbox works
+    r = benchmark_vtenc(bitrate=4_000_000, frames=8, width=W, height=H, fps=8, use_mlx=False)
+    assert r.encoder == "vtenc" and r.label.startswith("vtenc-cpu")
+    assert r.encode_ms_mean > 0 and r.bytes_per_frame > 0
+    assert r.psnr_db > 20  # the gradient decodes back to something faithful
+
+
+def test_benchmark_vtenc_mlx_gpu_path_when_available():
+    """When MLX is present, benchmark_vtenc times the on-GPU RGB→NV12 + encode."""
+    from pdum.rfb.metal import mlx_available
+
+    if not mlx_available():
+        pytest.skip("MLX (Apple Metal) not available")
+    from pdum.rfb.benchmark import benchmark_vtenc
+
+    r = benchmark_vtenc(bitrate=4_000_000, frames=8, width=W, height=H, fps=8, use_mlx=True)
+    assert r.encoder == "vtenc" and r.label.startswith("vtenc-gpu")
+    assert r.encode_ms_mean > 0 and r.psnr_db > 20
+
+
+def test_encode_still_emits_forced_idr():
+    """VideoToolboxEncoder.encode_still re-encodes as a self-contained keyframe (IDR), so the
+    session's "still after settle" fires on the macOS video path instead of silently no-oping."""
+    from pdum.rfb.encoders.vtenc import VideoToolboxEncoder
+    from pdum.rfb.types import RawFrame
+
+    enc = VideoToolboxEncoder(width=W, height=H, fps=8)
+    enc.encode(RawFrame(0, W, H, 0, "nv12", "cpu", _moving_nv12(0)), force_keyframe=True)
+    payloads = enc.encode_still(RawFrame(1, W, H, 1000, "nv12", "cpu", _moving_nv12(1)))
+    enc.close()
+    assert payloads and payloads[0].keyframe
+    assert has_sps_pps_idr(b"".join(p.payload for p in payloads))

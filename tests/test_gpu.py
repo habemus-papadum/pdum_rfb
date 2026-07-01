@@ -299,3 +299,28 @@ def test_nvenc_gpu_pdum_first_frame_is_keyframe():
     payloads = enc.encode(gpu.cuda_frame(nv12, pixel_format="nv12", height=h, seq=0), force_keyframe=True)
     enc.close()
     assert payloads and payloads[0].keyframe and payloads[0].metadata["encoder"] == "nvenc-gpu-pdum"
+
+
+@requires_cupy
+def test_own_frames_cuda_copies_into_owned_device_buffer():
+    """own_frames on a cuda display copies each frame into an owned device buffer, so the
+    caller may reuse its own device tensor immediately; buffers are recycled + realloc on resize."""
+    import cupy as cp
+
+    from pdum.rfb import Display
+
+    d = Display(16, 16, own_frames=True)
+    src = cp.ones((16, 16, 3), cp.uint8)
+    d.publish(src)
+    assert d._latest.memory == "cuda" and d._latest.data is not src
+    assert int(cp.asnumpy(d._latest.data[0, 0, 0])) == 1
+    src[...] = 9  # caller reuses its device buffer
+    assert int(cp.asnumpy(d._latest.data[0, 0, 0])) == 1  # server copy decoupled
+
+    ids = []
+    for _ in range(4):
+        d.publish(cp.ones((16, 16, 3), cp.uint8))
+        ids.append(id(d._latest.data))
+    assert len(d._own_pool) == 2 and len(set(ids)) == 2  # recycled, not grown
+    d.publish(cp.ones((32, 24, 3), cp.uint8))  # (H, W, 3) -> shape change
+    assert d._latest.data.shape == (32, 24, 3) and len(d._own_pool) == 1

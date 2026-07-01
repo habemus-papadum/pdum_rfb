@@ -81,6 +81,12 @@ are not part of the public API.
   attributes displayed frames for `displayed:true` ACKs. Enabling B-frames breaks
   this.
 - Annex B only (never route H.264 through an mp4 muxer — that yields AVCC).
+- **Frame ownership.** `publish()` **borrows** the caller's buffer (zero-copy) and reads it
+  off-thread; the borrow is widest under `still_after`. Still-after-settle snapshots the
+  resting frame into a per-session server buffer (`session._snapshot_still`), and
+  `serve(own_frames=True)` copies every frame into a refcount-recycled `Display` pool
+  (cpu/cuda; metal raises — MLX is immutable) so the caller may reuse its buffer freely. See
+  `docs/guide_python.md` (Frame ownership / memory model).
 
 ## Where things live
 
@@ -89,7 +95,7 @@ src/pdum/rfb/
   types.py        RawFrame, EncodedPayload, InputEvent, FrameSource/EncoderBackend protocols (dep-free)
   protocol.py     binary envelope, header builders, control parsing, select_transport
   session.py      RfbSession: recv_loop/encode_loop, backpressure, keyframe policy (UNCHANGED by push)
-  display.py      Display (publish/poll_events/events/aclose) + internal _ClientFeed (per connection)
+  display.py      Display (publish/poll_events/events/aclose, opt-in own_frames copy pool) + internal _ClientFeed
   auth.py         AuthContext, Authenticator, Principal — pluggable auth hook (no JWT dep)
   transport.py    Channel protocol + WebSocketTransport (the transport seam; ASGI rides it via asgi.py)
   sources.py      BaseFrameSource, RenderCallbackSource, OnDemandFrameSource (INTERNAL now, not exported)
@@ -98,15 +104,18 @@ src/pdum/rfb/
                   /streams REST), _StreamHost (transport-neutral _serve_connection), _WsConn, CLI
   gpu.py          zero-copy GPU helpers: rgb_to_nv12 kernel, cuda_frame, enable_cuda_context_sharing,
                   cuda_zerocopy_available, HostFrameAdapter (lazy-imports CuPy; see docs/gpu_zerocopy.md)
+  metal.py        Apple Metal/MLX analog of gpu.py: rgb_to_nv12 (mx.fast.metal_kernel), metal_frame,
+                  to_host_nv12, mlx_available, MetalHostFrameAdapter (lazy-imports MLX; see docs/metal_videotoolbox.md)
   encoders/
-    base.py       registry + build_encoder  (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum factories)
+    base.py       registry + build_encoder  (registers h264_cpu + nvenc_cpu + nvenc_gpu_pyav + nvenc_gpu_pdum + vtenc factories)
     image.py      ImageEncoder (Pillow)
     h264_cpu.py  H264CpuEncoder + h264_cpu_available / self_test
     nvenc_cpu.py      NvencCpuEncoder (GPU H.264 via PyAV h264_nvenc, host input) + nvenc_cpu_available
     nvenc_gpu_pyav.py NvencGpuPyavEncoder (zero-copy CUDA NV12 -> h264_nvenc via from_dlpack) + nvenc_gpu_pyav_available
+    vtenc.py          VideoToolboxEncoder (macOS HW H.264 via pdum.vtenc; Metal/MLX input) + vtenc_available
   metrics.py      SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
   adaptive.py     AdaptiveQualityController (opt-in via serve(adaptive=True))
-  benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
+  benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 (libx264/NVENC/VideoToolbox) w/ real PSNR
   notebook.py     opt-in [anywidget] Jupyter/marimo widgets: RfbCanvas (bare) / RfbViewer (batteries)
                   + publish_loop(); Display.widget() lazy-imports it (see docs/notebook.md)
   static/         COMMITTED widget.{js,css} — prebuilt inlined-worker anywidget bundle (package data;
@@ -292,6 +301,9 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 - `docs/gpu_zerocopy.md` — zero-copy CUDA→NVENC (CuPy/DLPack NV12 → `h264_nvenc`):
   `serve(gpu=True)`, the helpers, NV12, the PyAV-18 requirement + why no pure-Python
   monkey-patch, the from-source recipe, the NVENC-SDK alternative, benchmarks.
+- `docs/metal_videotoolbox.md` — macOS hardware H.264 (Apple VideoToolbox from an MLX
+  render): `serve(gpu=True)` on Apple Silicon, GPU RGB→NV12, `[mac-vt]` install, the
+  measured numbers, image-viewer fallback, and why input zero-copy/pipelining don't help.
 - `docs/internals.md` — data flow, wire protocol, session loop, H.264 path, worker,
   module map, testing architecture, extension points.
 - `docs/roadmap.md` — what's next.

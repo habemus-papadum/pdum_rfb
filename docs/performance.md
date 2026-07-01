@@ -64,6 +64,34 @@ the PCIe upload both grow with pixel count.
   mainly to offload the CPU, not for latency.
 - **Image path** is for stills/snapshots and the lossless-final still, not motion.
 
+## Apple Silicon — VideoToolbox (macOS)
+
+Different box, different encoder — so these are **not** comparable to the RTX 4090
+table above; read them on their own. Measured on an **M-series Mac** (macOS 26, MLX
+0.31) with `examples/mlx_vt_bench.py`: MLX renders on the GPU, a Metal kernel converts
+RGB→NV12 on the GPU, and Apple **VideoToolbox** encodes (`serve(gpu=True)` on macOS).
+
+| Resolution | convert RGB→NV12 (GPU) | VideoToolbox encode | `encode()` total | fps |
+| ---------- | ---------------------: | ------------------: | ---------------: | --: |
+| 1280×720   | 0.36 ms                | 5.61 ms             | 5.67 ms          | 142 |
+| 1920×1080  | 0.44 ms                | 5.83 ms             | 5.97 ms          | 134 |
+| 2560×1440  | 0.52 ms                | 9.33 ms             | 9.55 ms          | 89  |
+| 3840×2160  | 0.63 ms                | 18.92 ms            | 19.35 ms         | 47  |
+
+- **Encode is a near-flat ~5.6 ms floor** at 720p and 1080p (VideoToolbox's synchronous
+  low-latency `CompleteFrames` latency dominates over pixel throughput) before compute
+  takes over at 1440p/4K.
+- **The GPU color conversion is the lever.** Sub-millisecond (≈0.3–0.6 ms) on the GPU
+  vs **~6.6 ms** for the numpy/CPU conversion at 1080p — a ~23× cut that also frees a
+  CPU core. This is what publishing an MLX `mx.array` (over a plain numpy array) buys.
+- **Input zero-copy and pipelining were measured to not help here** (unified memory,
+  synchronous RC). See the [Apple Metal guide](metal_videotoolbox.md).
+
+On a Mac, **`pdum-rfb benchmark` auto-includes a `vtenc` row** (no flag — the same
+auto-detect as host NVENC on Linux): `vtenc-gpu` when MLX converts on the GPU, else
+`vtenc-cpu`. That gives a single per-frame encode figure comparable to the other rows;
+`examples/mlx_vt_bench.py` gives the render/convert/copy/encode breakdown above.
+
 ## Reproduce
 
 ```bash

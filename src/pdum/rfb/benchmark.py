@@ -1,4 +1,4 @@
-"""Offline encoder benchmark: image vs CPU H.264 vs GPU NVENC, fully headless.
+"""Offline encoder benchmark: image vs CPU H.264 vs GPU NVENC vs Apple VideoToolbox, fully headless.
 
 Encodes a deterministic synthetic pattern and reports, per configuration:
 
@@ -383,6 +383,83 @@ def benchmark_nvenc_gpu_pdum(
     )
 
 
+def benchmark_vtenc(
+    *,
+    bitrate: int = 8_000_000,
+    frames: int = 60,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
+    pattern: str = "gradient",
+    use_mlx: bool | None = None,
+) -> BenchmarkResult:
+    """Apple VideoToolbox H.264 (macOS) — the counterpart of the NVENC GPU rows.
+
+    When MLX is available (``use_mlx`` ``None`` auto-detects), the RGB→NV12 conversion
+    runs **on the GPU** — the ``serve(gpu=True)`` path — and the timed region covers that
+    GPU convert **and** the VideoToolbox encode, so the ``vtenc-gpu`` row is directly
+    comparable to the NVENC GPU rows. Without MLX the conversion is on the CPU
+    (``vtenc-cpu``). Decoded back with PyAV for real PSNR. See docs/metal_videotoolbox.md.
+    """
+    from .encoders.vtenc import VideoToolboxEncoder
+    from .metal import mlx_available
+    from .testing import decode_annexb
+
+    if use_mlx is None:
+        use_mlx = mlx_available()
+
+    src = _source_frames(pattern, frames, width, height)
+
+    if use_mlx:
+        import mlx.core as mx
+
+        from .metal import metal_frame
+
+        # Pre-upload RGB to the GPU as MLX arrays (not timed); the timed region below
+        # covers the on-GPU RGB→NV12 conversion + the encode, matching the NVENC GPU rows.
+        inputs: list[RawFrame] = [
+            metal_frame(mx.array(arr), pixel_format="rgb24", seq=seq) for seq, arr in enumerate(src)
+        ]
+        mx.eval(*[f.data for f in inputs])
+    else:
+        inputs = [RawFrame(seq, width, height, seq * 1000, "rgb24", "cpu", arr) for seq, arr in enumerate(src)]
+
+    enc = VideoToolboxEncoder(width=width, height=height, fps=fps, bitrate=bitrate)
+    times: list[float] = []
+    total_bytes = 0
+    chunks: list[bytes] = []
+    try:
+        for seq, frame in enumerate(inputs):
+            t0 = perf_counter()
+            payloads = enc.encode(frame, force_keyframe=(seq == 0))
+            times.append((perf_counter() - t0) * 1000)
+            for p in payloads:
+                total_bytes += len(p.payload)
+                chunks.append(p.payload)
+        for p in enc.flush():
+            total_bytes += len(p.payload)
+            chunks.append(p.payload)
+    finally:
+        enc.close()
+
+    decoded = decode_annexb(b"".join(chunks))
+    psnrs = [_psnr(src[i], f.to_ndarray(format="rgb24")) for i, f in enumerate(decoded[:frames])]
+    bytes_per_frame = total_bytes / frames
+    return BenchmarkResult(
+        label=f"vtenc-{'gpu' if use_mlx else 'cpu'} {bitrate // 1_000_000}M",
+        encoder="vtenc",
+        width=width,
+        height=height,
+        frames=frames,
+        fps=fps,
+        encode_ms_mean=float(np.mean(times)),
+        encode_ms_p95=_p95(times),
+        bytes_per_frame=bytes_per_frame,
+        bitrate_at_fps_bps=bytes_per_frame * fps * 8,
+        psnr_db=float(np.mean(psnrs)) if psnrs else float("nan"),
+    )
+
+
 def _nvenc_gpu_pdum_available() -> bool:
     try:
         import cupy  # noqa: F401
@@ -390,6 +467,15 @@ def _nvenc_gpu_pdum_available() -> bool:
 
         return True
     except Exception:  # pragma: no cover - optional wheel
+        return False
+
+
+def _vtenc_available() -> bool:
+    try:
+        from .encoders.vtenc import vtenc_available
+
+        return vtenc_available()
+    except Exception:  # pragma: no cover - non-macOS / not installed
         return False
 
 
@@ -431,7 +517,9 @@ def _cuda_zerocopy_available() -> bool:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Benchmark the image, CPU H.264, and GPU NVENC encoders")
+    parser = argparse.ArgumentParser(
+        description="Benchmark the image, CPU H.264, GPU NVENC, and Apple VideoToolbox encoders"
+    )
     parser.add_argument("--frames", type=int, default=120)
     parser.add_argument("--fps", default="30", help="comma-separated frame rates, e.g. 15,30,60")
     parser.add_argument("--pattern", default="gradient")
@@ -441,6 +529,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--nvenc-bitrate", default=None, help="defaults to --h264-bitrate")
     parser.add_argument("--no-h264", action="store_true")
     parser.add_argument("--no-nvenc", action="store_true", help="skip the GPU NVENC encoder")
+    parser.add_argument(
+        "--no-vtenc",
+        action="store_true",
+        help="skip the Apple VideoToolbox path (macOS; auto-detected, needs [mac-vt])",
+    )
     parser.add_argument(
         "--gpu",
         action="store_true",
@@ -458,12 +551,14 @@ def main(argv: list[str] | None = None) -> None:
 
     from .encoders.h264_cpu import h264_cpu_available
     from .encoders.nvenc_cpu import NVENC_MIN_WIDTH, nvenc_cpu_available
+    from .encoders.vtenc import VTENC_MIN_WIDTH
 
     fps_values = [int(f) for f in args.fps.split(",")]
     use_h264 = not args.no_h264 and h264_cpu_available()
     use_nvenc = not args.no_nvenc and nvenc_cpu_available()
     use_gpu = args.gpu and _cuda_zerocopy_available()
     use_sdk = args.sdk and _nvenc_gpu_pdum_available()
+    use_vtenc = not args.no_vtenc and _vtenc_available()
     nvenc_bitrates = (args.nvenc_bitrate or args.h264_bitrate).split(",")
 
     results: list[BenchmarkResult] = []
@@ -533,10 +628,22 @@ def main(argv: list[str] | None = None) -> None:
                             pattern=args.pattern,
                         )
                     )
+            if use_vtenc and w >= VTENC_MIN_WIDTH:
+                for br in nvenc_bitrates:
+                    results.append(
+                        benchmark_vtenc(
+                            bitrate=_parse_bitrate(br),
+                            frames=args.frames,
+                            width=w,
+                            height=h,
+                            fps=fps,
+                            pattern=args.pattern,
+                        )
+                    )
 
     note = ""
     if not args.no_nvenc and not nvenc_cpu_available():
-        note = "  (NVENC unavailable on this host — GPU rows skipped)"
+        note = "  (NVENC unavailable on this host — NVENC rows skipped)"
     elif args.gpu and not use_gpu:
         note = "  (zero-copy CUDA path unavailable — needs CuPy + PyAV>=18; nvenc-cuda rows skipped)"
     print(f"pattern={args.pattern} frames={args.frames} fps={args.fps}{note}\n")

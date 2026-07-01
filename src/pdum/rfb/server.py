@@ -447,6 +447,7 @@ class Server:
         record_events: bool = False,
         event_log: str | Path | None = None,
         event_queue_size: int = 4096,
+        own_frames: bool = False,
         encode_pipeline_depth: int = 0,
     ) -> Display:
         """Register a new named stream and return its :class:`Display`.
@@ -454,7 +455,8 @@ class Server:
         Streams are independent: each carries its own encoder config (one GPU, one
         image; per-stream bitrate; per-stream ``authenticate``). Safe to call before
         or after :meth:`start` — clients reach it at ``ws://host/<name>`` either way.
-        Raises if ``name`` is already taken.
+        Raises if ``name`` is already taken. ``own_frames`` is forwarded to the
+        stream's :class:`Display` (see :meth:`Display.publish`).
         """
         if name in self._streams:
             raise ValueError(f"stream {name!r} already exists")
@@ -465,6 +467,7 @@ class Server:
             record_events=record_events,
             event_log=event_log,
             event_queue_size=event_queue_size,
+            own_frames=own_frames,
         )
         host = _StreamHost(
             display,
@@ -606,6 +609,7 @@ async def serve(
     record_events: bool = False,
     event_log: str | Path | None = None,
     event_queue_size: int = 4096,
+    own_frames: bool = False,
     encode_pipeline_depth: int = 0,
 ) -> Display:
     """Start the RFB WebSocket server in the background and return a :class:`Display`.
@@ -650,6 +654,12 @@ async def serve(
         closed with code ``4401`` before any frame is sent.
     origins:
         Allowed ``Origin`` values (CSWSH defense) passed to ``websockets``.
+    own_frames:
+        Opt in to **server-owned frames**: ``publish()`` copies each frame into a
+        recycled server buffer so you may reuse/mutate your own buffer immediately after
+        it returns (no reallocation, no "released" callback). Default ``False`` keeps the
+        zero-copy borrow (publish a fresh buffer each call). ``cpu``/``cuda`` only;
+        ``metal`` raises. See :meth:`Display.publish`.
     encode_pipeline_depth:
         Encoder pipeline depth. ``0`` (default) is synchronous 1-in-1-out — lowest
         latency, optimal for the interactive latest-frame-wins model. ``> 0`` opts into
@@ -683,6 +693,7 @@ async def serve(
         record_events=record_events,
         event_log=event_log,
         event_queue_size=event_queue_size,
+        own_frames=own_frames,
         encode_pipeline_depth=encode_pipeline_depth,
     )
     await server.start()

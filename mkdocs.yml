@@ -29,7 +29,8 @@ nav:
   - Repository & Development: development.md
   - Performance: performance.md
   - GPU / hardware encode:
-      - Zero-copy CUDA→NVENC (PyAV): gpu_zerocopy.md
+      - Zero-copy CUDA→NVENC (Linux): gpu_zerocopy.md
+      - Apple Metal / VideoToolbox (macOS): metal_videotoolbox.md
   - Concepts:
       - Modern video encoding — a guide: video_encoding_guide.md
   - Roadmap: roadmap.md

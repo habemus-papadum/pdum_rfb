@@ -160,3 +160,58 @@ async def test_events_async_iterator():
     await feed.handle_event({"type": "pointer_up"})
     await asyncio.wait_for(task, 1.0)
     assert received == ["pointer_move", "pointer_up"]
+
+
+# --- frame ownership: default borrow vs opt-in own_frames copy mode --------------------
+
+
+async def test_borrow_mode_shares_caller_reference():
+    d = Display(16, 16)
+    arr = _rgb(5, 16, 16)
+    d.publish(arr)
+    assert d._latest.data is arr  # default is zero-copy borrow
+
+
+async def test_own_frames_severs_caller_mutation():
+    d = Display(16, 16, own_frames=True)
+    arr = _rgb(1, 16, 16)
+    d.publish(arr)
+    assert d._latest.data is not arr  # copied into a server-owned buffer
+    assert int(d._latest.data[0, 0, 0]) == 1
+    arr[:] = 9  # caller reuses/mutates its own buffer immediately after publish()
+    assert int(d._latest.data[0, 0, 0]) == 1  # the published frame is unaffected
+
+
+async def test_own_frames_reuses_buffer_and_reallocates_on_resize():
+    d = Display(16, 16, own_frames=True)
+    # Capture identity by id() only — holding the arrays would keep refs and (correctly) stop
+    # the recycler from reusing them. `_latest` still holds frame N while frame N+1 is copied,
+    # so the pool double-buffers: it stabilizes at 2 and recycles those two across many publishes.
+    ids = []
+    for v in range(5):
+        d.publish(_rgb(v, 16, 16))
+        ids.append(id(d._latest.data))
+    assert len(d._own_pool) == 2
+    assert len(set(ids)) == 2  # only two distinct buffers ever used -> recycled, not grown
+    # A shape change drops the pool and reallocates.
+    d.publish(_rgb(9, 32, 24))
+    assert d._latest.data.shape == (24, 32, 3)
+    assert len(d._own_pool) == 1
+
+
+async def test_own_frames_pool_protects_inflight_frame():
+    d = Display(16, 16, own_frames=True)
+    d.publish(_rgb(1, 16, 16))
+    feed = d._make_feed("a", None)
+    held = await asyncio.wait_for(feed.next_frame(), 1.0)  # a viewer's in-flight frame
+    first = held.data
+    d.publish(_rgb(2, 16, 16))  # must NOT overwrite the buffer `held` still references
+    assert d._latest.data is not first
+    assert int(held.data[0, 0, 0]) == 1  # the in-flight frame's content is preserved
+    assert len(d._own_pool) == 2
+
+
+async def test_own_frames_metal_branch_raises():
+    d = Display(16, 16, own_frames=True)
+    with pytest.raises(NotImplementedError):
+        d._own_copy(object(), "metal")

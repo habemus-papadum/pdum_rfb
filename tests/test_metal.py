@@ -194,3 +194,15 @@ async def test_serve_gpu_metal_image_viewer_downloads_to_host():
             assert header["type"] == "image_frame" and len(payload) > 0
     finally:
         await display.aclose()
+
+
+def test_own_frames_raises_for_metal_frame():
+    """own_frames is unsupported for Metal frames — MLX arrays are immutable, so the borrow
+    contract already holds. publish() raises NotImplementedError (after the loop-thread materialize)."""
+    import mlx.core as mx
+
+    from pdum.rfb.display import Display
+
+    d = Display(W, H, own_frames=True)
+    with pytest.raises(NotImplementedError):
+        d.publish(mx.zeros((H, W, 4), dtype=mx.uint8))

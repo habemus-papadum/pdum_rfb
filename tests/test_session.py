@@ -130,13 +130,26 @@ async def test_encoder_rebuilt_and_keyframe_forced_on_size_change():
     assert session.force_keyframe is True
 
 
-def _feed_session(*, still_after=None, max_inflight=100):
+def _feed_session(*, still_after=None, max_inflight=100, encoder=None, own_frames=False):
     """A session fed by a real ``_ClientFeed`` (which provides ``still_frame``)."""
-    display = Display(64, 48)
+    display = Display(64, 48, own_frames=own_frames)
     feed = display._make_feed("c", None)
     ws = FakeWebSocket()
-    session = RfbSession(feed, FakeEncoder(), ws, max_inflight=max_inflight, still_after=still_after)
+    session = RfbSession(feed, encoder or FakeEncoder(), ws, max_inflight=max_inflight, still_after=still_after)
     return display, session, ws
+
+
+class _StillRecordingEncoder(FakeEncoder):
+    """Captures the ``frame.data`` handed to ``encode_still`` so tests can check that the
+    still is decoupled from the caller's published buffer (the snapshot)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.still_data: list = []
+
+    def encode_still(self, frame):
+        self.still_data.append(frame.data)
+        return super().encode_still(frame)
 
 
 def _sent_payloads(ws):
@@ -184,6 +197,38 @@ async def test_still_skipped_when_client_behind():
     # Settled, but the client hasn't acked: the still is skipped, not queued.
     assert await session._encode_step() == "still"
     assert len(ws.sent) == 1  # only the live frame went out
+
+
+async def test_still_snapshots_into_server_buffer_not_caller_alias():
+    """The still encodes a server-owned snapshot, so a caller that reuses/mutates its buffer
+    while the scene is settled cannot corrupt the still (the widest borrow window)."""
+    rec = _StillRecordingEncoder()
+    display, session, _ = _feed_session(still_after=0.02, encoder=rec)
+    buf = np.zeros((48, 64, 3), dtype=np.uint8)
+    display.publish(buf)
+    assert await session._encode_step() == "sent"
+    assert await session._encode_step() == "still"
+
+    captured = rec.still_data[-1]
+    assert captured is not buf  # a server-owned snapshot, not the caller's buffer
+    assert int(captured[0, 0, 0]) == 0  # captured the resting content
+    buf[:] = 255  # caller reuses its buffer in place while idle
+    assert int(captured[0, 0, 0]) == 0  # the snapshot is decoupled -> unaffected
+
+
+async def test_still_snapshot_buffer_reallocates_on_shape_change():
+    rec = _StillRecordingEncoder()
+    display, session, _ = _feed_session(still_after=0.02, encoder=rec)
+    display.publish(np.zeros((48, 64, 3), dtype=np.uint8))
+    assert await session._encode_step() == "sent"
+    assert await session._encode_step() == "still"
+    display.publish(np.zeros((96, 128, 3), dtype=np.uint8))  # resize
+    assert await session._encode_step() == "sent"
+    assert await session._encode_step() == "still"
+
+    assert rec.still_data[0].shape == (48, 64, 3)
+    assert rec.still_data[1].shape == (96, 128, 3)
+    assert rec.still_data[0] is not rec.still_data[1]  # buffer reallocated on the size change
 
 
 async def test_stats_interval_pushes_server_stats_to_client():
