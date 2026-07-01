@@ -65,6 +65,7 @@ class NvencGpuPdumEncoder:
         codec_string: str | None = None,
         preset: str = "p4",
         tuning: str = "ll",
+        pipeline_depth: int = 0,
     ) -> None:
         if width < NVENC_MIN_WIDTH:
             raise ValueError(
@@ -84,8 +85,17 @@ class NvencGpuPdumEncoder:
         self.codec_string = codec_string or DEFAULT_H264_CODEC
         self.frame_index = 0
         self._duration_us = int(1_000_000 / fps)
+        # pipeline_depth > 0 selects the token-based pipelined path (submit()/flush_pipeline);
+        # 0 is the synchronous 1-in-1-out default. On NVENC this is the backend where it pays
+        # off: it maps to the SDK's extra_output_delay, so several frames stay in flight and
+        # encode overlaps render/convert for throughput (at depth/fps of extra latency). See
+        # docs/pipelined_encode.md.
+        self.pipeline_depth = max(0, int(pipeline_depth))
+        self._pending_ts: dict[int, int] = {}  # seq -> timestamp_us for in-flight frames
         # Reusable NV12 staging buffer for the rgb/host input paths. ll tuning with no
-        # lookahead consumes each frame before the next, so a single buffer is safe.
+        # lookahead consumes each frame before the next, so a single buffer is safe; under
+        # pipelining CopyToDeviceFrame copies it into NVENC's own input slot before submit()
+        # returns (the deviceSynchronize() in encode() guarantees the NV12 is ready first).
         self._nv12 = cp.empty((height + height // 2, width), cp.uint8)
         # cuda_context=0 -> retain the device *primary* context (the one CuPy uses), so
         # CuPy device pointers are valid to NVENC with no cross-context copy.
@@ -98,6 +108,7 @@ class NvencGpuPdumEncoder:
             fps=fps,
             gop=fps,
             bitrate=bitrate,
+            extra_output_delay=self.pipeline_depth,
         )
 
     def _packed_nv12(self, frame: RawFrame):
@@ -123,12 +134,22 @@ class NvencGpuPdumEncoder:
         # Ensure the NV12 (kernel/upload above) is complete before NVENC's intra-GPU
         # copy reads it. Sub-ms at these sizes; keeps the path correct across streams.
         cp.cuda.runtime.deviceSynchronize()
-        data = self._enc.encode(packed, force_idr=force_keyframe)
         self.frame_index += 1
+        if self.pipeline_depth > 0:
+            return self._encode_pipelined(packed, frame.seq, frame.timestamp_us, force_keyframe)
+        data = self._enc.encode(packed, force_idr=force_keyframe)
         if not data:
             return []
         keyframe = force_keyframe or _contains_idr(data)
         return [self._payload(frame.seq, frame.timestamp_us, data, keyframe)]
+
+    def _encode_pipelined(self, packed, seq: int, timestamp_us: int, force_keyframe: bool) -> list[EncodedPayload]:
+        """Submit one frame without waiting; return whatever AUs are ready, each labeled with
+        its *recovered* seq (the frame it actually encoded), not this call's seq. The recovered
+        keyframe comes straight from NVENC's pictureType. See docs/pipelined_encode.md."""
+        self._pending_ts[seq] = timestamp_us
+        aus = self._enc.submit(packed, seq, force_idr=force_keyframe)
+        return [self._payload(s, self._pending_ts.pop(s, timestamp_us), data, key) for s, data, key in aus]
 
     def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
         """Settled-scene still: a forced **IDR** of the resting frame (see the CPU
@@ -136,6 +157,9 @@ class NvencGpuPdumEncoder:
         return self.encode(frame, force_keyframe=True)
 
     def flush(self) -> list[EncodedPayload]:
+        if self.pipeline_depth > 0:
+            aus = self._enc.flush_pipeline()
+            return [self._payload(s, self._pending_ts.pop(s, 0), data, key) for s, data, key in aus]
         data = self._enc.flush()
         if not data:
             return []

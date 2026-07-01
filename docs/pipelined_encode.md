@@ -34,11 +34,18 @@ Each backend already has a per-frame token channel:
 | Backend | Token channel |
 | --- | --- |
 | `pdum.vtenc` (VideoToolbox) | `VTCompressionSessionEncodeFrame` **`sourceFrameRefCon`** → echoed on the output `CMSampleBuffer` |
-| `pdum.nvenc` (NVENC SDK) | `NV_ENC_PIC_PARAMS.inputTimeStamp` → echoed on `NvEncOutputFrame` |
+| `pdum.nvenc` (NVENC SDK) | in-order FIFO in the binding † (output order == input order) |
 | `h264_cpu` (PyAV/libx264) | `VideoFrame.pts` → `Packet.pts` |
 
 No-B-frames is still required (the browser-side FIFO assumes output order == input order);
-that invariant is unchanged.
+that invariant is unchanged — and on NVENC it is also what makes seq recovery work (see †).
+
+> † NVENC does expose `NV_ENC_PIC_PARAMS.inputTimeStamp`, but NVIDIA's vendored `NvEncoder`
+> helper **overwrites it** with its own monotonic counter (`NvEncoder_130.cpp` /
+> `_121.cpp`), and `packages/nvenc/third_party/` is kept verbatim. So the seq cannot ride
+> `inputTimeStamp`. Instead, because `frameIntervalP=1` guarantees output order == input
+> order, the binding recovers each AU's seq from a FIFO of the tags it pushed at `submit()`
+> — equivalent, and independent of the SDK's internal timestamp.
 
 ## How to use it
 
@@ -103,19 +110,40 @@ on macOS.
 
 ### NVENC (Linux/CUDA) — where it pays off
 
-NVENC is built to pipeline: `extra_output_delay > 0` keeps multiple frames in flight, and the
-`inputTimeStamp` token makes recovered-seq attribution exact. This is the backend the feature
-exists for. The binding-side and wrapper-side implementation is **not done yet** — it is
-specified for a Linux/CUDA agent in
-[`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md). Until that lands,
-`_nvenc_gpu_pdum_factory` drops the kwarg, so `encode_pipeline_depth > 0` runs synchronously
-on NVENC too (a documented no-op, not an error).
+NVENC is built to pipeline: `extra_output_delay > 0` keeps several frames in flight, so
+`EncodeFrame` returns without blocking on the just-submitted frame's bitstream lock and the
+encode overlaps the next frame's convert/copy. This is the backend the feature exists for,
+and it is **implemented**: `pdum.nvenc.NvencEncoder.submit()`/`flush_pipeline()` (the PyAV-free
+SDK binding) feed `NvencGpuPdumEncoder(pipeline_depth=…)`, and `_nvenc_gpu_pdum_factory`
+forwards the kwarg, so `serve(encode_pipeline_depth=k)` maps straight to NVENC
+`extra_output_delay=k`. The synchronous `encode()`/`flush()` bytes are byte-for-byte
+unchanged (depth `0` is still the default and the low-latency path).
+
+Encoder-only, same CUDA NV12 input, differing only in `encode()` (sync) vs `submit()`
+(pipelined, `extra_output_delay=4`) — `examples/nvenc_pipeline_bench.py`, RTX 4090 Laptop,
+CUDA 13, 300 frames + 30 warmup, 30 fps target:
+
+| Resolution | sync `encode()` fps | pipelined `submit()` fps | speedup | max depth |
+| ---------- | ------------------- | ------------------------ | ------- | --------- |
+| 1280×720   | ~800 | ~1250 | ~1.5× | 4 |
+| 1920×1080  | 610  | 722   | 1.20× | 4 |
+| 2560×1440  | 373  | 415   | 1.11× | 4 |
+| 3840×2160  | 176  | 187   | 1.06× | 4 |
+
+The realized depth is a genuine **4** (max `submitted − emitted`), so the recovered-seq token
+is carried across a real pipeline — the point of the exercise. The speedup is largest where
+per-frame fixed latency (the bitstream lock) dominates and shrinks toward 4K where the GPU
+encode compute *is* the bottleneck (less idle to hide); in the live server the overlap also
+covers render/convert, so the real-workload gain is at least this. The cost is the usual
+`depth / fps` of added latency (depth 4 @ 30 fps ≈ 133 ms) — which is why the default stays
+`0`. Correctness (recovered-seq order, no loss through dropped/gappy seqs, decode-back, and
+max depth ≥ 1) is covered by `tests/test_nvenc_gpu_pdum.py`.
 
 ### libx264 / PyAV backends
 
 `h264_cpu`, `nvenc_cpu`, and `nvenc_gpu_pyav` currently drop `pipeline_depth` and run
-synchronously. The `pts` token channel exists to add it later if a throughput case appears;
-it has not been needed.
+synchronously (only the PyAV-free `nvenc_gpu_pdum` SDK path implements pipelining). The `pts`
+token channel exists to add it later if a throughput case appears; it has not been needed.
 
 ## See also
 

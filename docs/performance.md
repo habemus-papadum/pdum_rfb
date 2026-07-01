@@ -100,11 +100,13 @@ PyAV ≥ 18, and `nvenc-gpu-pdum` only with the `habemus-papadum-nvenc` package.
 - Consumer GPUs cap concurrent NVENC sessions and can transiently stall under rapid
   session open/close; production uses one long-lived encoder. Numbers are
   steady-state over 120 frames after a forced IDR on frame 0.
-- The `nvenc-gpu-pdum` backend runs **zero-latency** (`extra_output_delay=0`: each frame's
-  access unit returns from its own `encode()`, no pipeline overlap), so its per-frame
-  figures are honest end-to-end latency, not a pipelined best case. Measured ~2.3 ms at
-  1080p here — still the fastest path. Raising `extra_output_delay` trades latency for
-  a slightly lower per-frame number; the RFB backend keeps it at 0.
+- These `nvenc-gpu-pdum` figures are the **default zero-latency** path (`extra_output_delay=0`:
+  each frame's access unit returns from its own `encode()`, no pipeline overlap), so they are
+  honest end-to-end latency, not a pipelined best case. Measured ~2.3 ms at 1080p here — still
+  the fastest path. Opting into `serve(encode_pipeline_depth=k>0)` trades `k/fps` of latency
+  for higher sustained throughput (≈1.2× at 1080p, up to ~1.5× at 720p; see the measured table
+  in [Pipelined encode](pipelined_encode.md#nvenc-linuxcuda-where-it-pays-off)). The default
+  stays `0` for the interactive, latest-frame-wins use case.
 - Synthetic `gradient` pattern; real scenes change bitrate/PSNR but not the latency
   ordering. Bitrate is a 10 Mbps VBR target.
 - See [Zero-copy CUDA→NVENC](gpu_zerocopy.md) and the

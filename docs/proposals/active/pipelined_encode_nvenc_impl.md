@@ -1,5 +1,20 @@
 # Pipelined encode — NVENC implementation guide (Linux/CUDA agent)
 
+> **Status: IMPLEMENTED** (RTX 4090 Laptop, CUDA 13). `NvencEncoder.submit()` /
+> `flush_pipeline()`, `NvencGpuPdumEncoder(pipeline_depth=…)`, the factory forward, tests
+> (`tests/test_nvenc_gpu_pdum.py`), and a benchmark (`examples/nvenc_pipeline_bench.py`,
+> ≈1.2× at 1080p, ~1.5× at 720p) all landed. Results are in
+> [`pipelined_encode.md`](pipelined_encode.md#nvenc-linuxcuda-where-it-pays-off).
+>
+> **One necessary deviation from the plan below.** Steps 1–2 assume `seq` rides
+> `NV_ENC_PIC_PARAMS.inputTimeStamp` and is read back on `NvEncOutputFrame.timeStamp`. It
+> does **not** survive: NVIDIA's vendored `NvEncoder::DoEncode` overwrites `inputTimeStamp`
+> with its own counter (`NvEncoder_130.cpp:690` / `_121.cpp:653`), and
+> `packages/nvenc/third_party/` is kept verbatim. Because `frameIntervalP=1` guarantees
+> output order == input order, the binding instead recovers seq from an **in-order FIFO**
+> of the tags pushed at `submit()` (`m_pending_seqs`, popped in `tag()`) — equivalent, and
+> independent of the SDK's internal timestamp. Everything else matches the guide.
+
 This is a build-it task for an agent on a **Linux box with an NVIDIA NVENC GPU + CUDA
 toolkit**. The pipelined-encode feature (see [`pipelined_encode.md`](../../pipelined_encode.md)) is
 already implemented end-to-end on the **VideoToolbox** backend and wired through the session

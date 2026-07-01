@@ -163,13 +163,16 @@ lives below the `EncoderBackend` seam:
   the per-frame `sourceFrameRefCon`. The output callback recovers it and pushes a
   seq-tagged access unit onto a queue; `submit()` drains whatever is ready and
   returns a list of `(recovered_seq, annexb, keyframe)` tuples (0..N). `flush_pipeline()`
-  completes the in-flight tail. (NVENC's parallel is `inputTimeStamp` +
-  `extra_output_delay`; see [`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md).)
-- **Wrapper** (`encoders/vtenc.py` `VideoToolboxEncoder`): with `pipeline_depth>0`,
-  `encode()` calls `submit()` and stamps each payload with the **recovered** seq (not
-  the call's `frame.seq`), looking the original `timestamp_us` up from a small
-  `{seq: timestamp_us}` in-flight map. `pipeline_depth=0` keeps the synchronous path
-  byte-identical.
+  completes the in-flight tail. `packages/nvenc`'s `NvencEncoder` implements the same
+  `submit()`/`flush_pipeline()` shape at `extra_output_delay=depth`; NVIDIA's vendored
+  `NvEncoder` helper owns `inputTimeStamp`, so it recovers seq from an **in-order FIFO** of
+  the tags pushed at `submit()` instead — valid because `frameIntervalP=1` forces output
+  order == input order (see [`pipelined_encode.md`](pipelined_encode.md#nvenc-linuxcuda-where-it-pays-off)).
+- **Wrapper** (`encoders/vtenc.py` `VideoToolboxEncoder`, and `encoders/nvenc_gpu_pdum.py`
+  `NvencGpuPdumEncoder`): with `pipeline_depth>0`, `encode()` calls `submit()` and stamps each
+  payload with the **recovered** seq (not the call's `frame.seq`), looking the original
+  `timestamp_us` up from a small `{seq: timestamp_us}` in-flight map. `pipeline_depth=0` keeps
+  the synchronous path byte-identical.
 - **Plumbing**: `build_encoder(..., pipeline_depth=)` forwards it to the video
   factory; only backends that implement the pipelined path consume it (the rest drop
   it → a depth>0 request runs synchronously, not an error). `serve()`/`add_stream()`

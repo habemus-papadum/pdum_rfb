@@ -60,13 +60,11 @@ def _nvenc_gpu_pyav_factory(**kwargs) -> EncoderBackend:
 
 def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
     # Lazy: PyAV-free GPU path via habemus-papadum-nvenc (CuPy + an NVENC GPU);
-    # gated by pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
-    # NOTE (pipelining): this is the backend where pipeline_depth pays off (NVENC
-    # extra_output_delay). Until the pipelined path lands in NvencGpuPdumEncoder (see
-    # docs/proposals/active/pipelined_encode_nvenc_impl.md), drop the kwarg so depth > 0 runs synchronously.
+    # gated by pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available. This is the
+    # backend where pipeline_depth pays off (mapped to NVENC extra_output_delay), so it
+    # *forwards* the kwarg (unlike the PyAV backends). See docs/pipelined_encode.md.
     from .nvenc_gpu_pdum import NvencGpuPdumEncoder
 
-    kwargs.pop("pipeline_depth", None)
     return NvencGpuPdumEncoder(**kwargs)
 
 
