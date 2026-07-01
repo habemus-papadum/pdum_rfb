@@ -84,6 +84,25 @@ def test_nvenc_sync_encode_still_byte_stream_unchanged():
     assert len(frames) >= 6 and all(f.width == W and f.height == H for f in frames)
 
 
+def test_binding_encodes_host_nv12_numpy():
+    """The binding accepts a host NV12 numpy array (`__array_interface__`) directly -- no CuPy
+    needed to feed it, a pageable-copy convenience. The encode path itself uses no CuPy."""
+    import numpy as np
+    from pdum.nvenc import NvencEncoder
+
+    enc = NvencEncoder(W, H, codec="h264", fps=20, gop=20, bitrate=4_000_000)
+    blob = b""
+    for seq in range(10):
+        nv12 = np.empty((H + H // 2, W), np.uint8)  # host: only __array_interface__
+        nv12[:H] = (seq * 9) % 240 + 8
+        nv12[H:] = 128
+        blob += enc.encode(nv12, force_idr=(seq == 0))
+    blob += enc.flush()
+    enc.close()
+    frames = decode_annexb(blob)
+    assert len(frames) >= 7 and all(f.width == W and f.height == H for f in frames)
+
+
 # --- rfb wrapper level (NvencGpuPdumEncoder) -----------------------------------------
 
 

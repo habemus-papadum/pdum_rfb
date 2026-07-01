@@ -227,9 +227,14 @@ cross-language contract — keep the Python and TS sides in sync.
   (`encoders/nvenc_gpu_pdum.py`, registered `"nvenc_gpu_pdum"`) rides the sibling package
   `pdum.nvenc` (`packages/nvenc/`): `serve(gpu=True)` **prefers it** when
   `nvenc_gpu_pdum_available()`, else falls back to `nvenc_gpu_pyav` (PyAV≥18). It needs no
-  PyAV at all and is the fastest path measured. The SDK encoder is configured
-  `extra_output_delay=0` (zero-latency, synchronous 1-in-1-out) so each frame's access
-  unit comes back from its own `encode()` call — required for correct seq attribution.
+  PyAV at all and is the fastest path measured. By default the SDK encoder runs
+  `extra_output_delay=0` (zero-latency, synchronous 1-in-1-out: each frame's access unit
+  comes back from its own `encode()` call, so seq attribution is trivially correct).
+  `serve(encode_pipeline_depth=k>0)` opts into a **pipelined** path (`extra_output_delay=k`)
+  that keeps several frames in flight for throughput (~1.2× at 1080p); seq is recovered
+  per-frame so attribution stays correct. The binding (`pdum.nvenc.NvencEncoder`) accepts a
+  GPU frame (`__cuda_array_interface__`) or a host NV12 numpy array (`__array_interface__`,
+  a pageable-copy convenience). See `docs/pipelined_encode.md`.
 - **Frames:** push `ndarray`s, **CuPy/DLPack CUDA tensors**, or `RawFrame`s to
   `Display.publish()` (a CUDA tensor becomes a `memory="cuda"` frame; the type
   already modelled this). The internal `_ClientFeed` (in `display.py`) is the

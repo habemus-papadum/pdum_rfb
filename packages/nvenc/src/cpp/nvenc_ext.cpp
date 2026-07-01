@@ -264,20 +264,33 @@ public:
     int height() const { return m_height; }
 
 private:
-    // Read a GPU-resident NV12 frame (any __cuda_array_interface__ tensor) and copy it
-    // into NVENC's next input surface (device->device). GIL must be held (Python attr
-    // access); shared verbatim by encode() and submit(). The copy completes before this
-    // returns, so a reused host staging buffer upstream is free to overwrite afterward.
+    // Read an NV12 frame and copy it into NVENC's next input surface. Accepts either a
+    // GPU-resident tensor (`__cuda_array_interface__`, e.g. CuPy — the zero-copy path) or a
+    // host array (`__array_interface__`, e.g. numpy — a pageable-copy convenience). The
+    // vendored NvEncoderCuda::CopyToDeviceFrame handles both source memory types. GIL must
+    // be held (Python attr access); shared by encode() and submit(). The copy completes
+    // before this returns, so a reused staging buffer upstream is free to overwrite after.
     void copy_input(py::object frame) {
-        CUdeviceptr src_ptr = 0;
+        uintptr_t src_ptr = 0;
         uint32_t src_pitch = (uint32_t)m_width;  // NV12 luma stride == width when contiguous
+        CUmemorytype src_mem = CU_MEMORYTYPE_DEVICE;
         {
-            PDUM_NVTX_RANGE("pdum.read_cai");
-            py::dict cai = frame.attr("__cuda_array_interface__").cast<py::dict>();
-            py::tuple data = cai["data"].cast<py::tuple>();
-            src_ptr = (CUdeviceptr)data[0].cast<uintptr_t>();
-            if (cai.contains("strides") && !cai["strides"].is_none()) {
-                py::tuple strides = cai["strides"].cast<py::tuple>();
+            PDUM_NVTX_RANGE("pdum.read_iface");
+            py::dict iface;
+            if (py::hasattr(frame, "__cuda_array_interface__")) {
+                iface = frame.attr("__cuda_array_interface__").cast<py::dict>();
+                src_mem = CU_MEMORYTYPE_DEVICE;
+            } else if (py::hasattr(frame, "__array_interface__")) {
+                iface = frame.attr("__array_interface__").cast<py::dict>();  // host (numpy)
+                src_mem = CU_MEMORYTYPE_HOST;
+            } else {
+                throw std::runtime_error(
+                    "frame exposes neither __cuda_array_interface__ (GPU) nor __array_interface__ (host)");
+            }
+            py::tuple data = iface["data"].cast<py::tuple>();
+            src_ptr = data[0].cast<uintptr_t>();
+            if (iface.contains("strides") && !iface["strides"].is_none()) {
+                py::tuple strides = iface["strides"].cast<py::tuple>();
                 src_pitch = (uint32_t)strides[0].cast<int64_t>();
             }
         }
@@ -285,7 +298,7 @@ private:
         PDUM_NVTX_RANGE("pdum.copy_to_nvenc");
         NvEncoderCuda::CopyToDeviceFrame(m_ctx, (void *)src_ptr, src_pitch,
                                          (CUdeviceptr)in->inputPtr, in->pitch, m_width, m_height,
-                                         CU_MEMORYTYPE_DEVICE, in->bufferFormat, in->chromaOffsets,
+                                         src_mem, in->bufferFormat, in->chromaOffsets,
                                          in->numChromaPlanes);
     }
 
@@ -347,12 +360,13 @@ PYBIND11_MODULE(_nvenc, m) {
              "(default) is zero-latency (each encode() returns its own frame); raise it "
              "to overlap encode with rendering for throughput, at a latency cost.")
         .def("encode", &NvencEncoder::encode, py::arg("frame"), py::arg("force_idr") = false,
-             "Encode one GPU-resident NV12 frame (any __cuda_array_interface__ tensor of "
-             "shape (H*3//2, W) uint8). Returns Annex B bytes (may be empty while NVENC fills "
-             "its pipeline). Synchronous seq-by-call-order; pair with flush().")
+             "Encode one NV12 frame of shape (H*3//2, W) uint8 -- either a GPU tensor "
+             "(__cuda_array_interface__, zero-copy) or a host array (__array_interface__, e.g. "
+             "numpy; a pageable device copy). Returns Annex B bytes (may be empty while NVENC "
+             "fills its pipeline). Synchronous seq-by-call-order; pair with flush().")
         .def("submit", &NvencEncoder::submit, py::arg("frame"), py::arg("seq"),
              py::arg("force_idr") = false,
-             "Pipelined: submit one GPU NV12 frame tagged with `seq` WITHOUT assuming "
+             "Pipelined: submit one NV12 frame (GPU or host, as encode()) tagged with `seq` WITHOUT assuming "
              "1-in-1-out, returning the access units ready now as (seq, annexb_bytes, keyframe) "
              "tuples (0..N; output order == input order). Each seq is the recovered tag of the "
              "frame it actually encodes, regardless of extra_output_delay. Pair with flush_pipeline().")
