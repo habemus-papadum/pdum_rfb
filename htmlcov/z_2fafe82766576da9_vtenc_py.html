@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_6034c9c2e63fb306_gpu_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-07-01 10:19 +0000
+            created at 2026-07-01 12:10 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -221,7 +221,7 @@
     <p class="run"><span class="n"><a id="t139" href="#t139">139</a></span><span class="t">    <span class="key">def</span> <span class="nam">_encode_pipelined</span><span class="op">(</span><span class="nam">self</span><span class="op">,</span> <span class="nam">packed</span><span class="op">,</span> <span class="nam">seq</span><span class="op">:</span> <span class="nam">int</span><span class="op">,</span> <span class="nam">timestamp_us</span><span class="op">:</span> <span class="nam">int</span><span class="op">,</span> <span class="nam">force_keyframe</span><span class="op">:</span> <span class="nam">bool</span><span class="op">)</span> <span class="op">-></span> <span class="nam">list</span><span class="op">[</span><span class="nam">EncodedPayload</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t140" href="#t140">140</a></span><span class="t">        <span class="str">"""Submit one frame without waiting; return whatever AUs are ready, each labeled with</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t141" href="#t141">141</a></span><span class="t"><span class="str">        its *recovered* seq (the frame it actually encoded), not this call's seq. See</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t142" href="#t142">142</a></span><span class="t"><span class="str">        docs/pipelined_encode.md and docs/encoder_sync_and_seq_attribution.md."""</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t142" href="#t142">142</a></span><span class="t"><span class="str">        docs/pipelined_encode.md and docs/proposals/completed/encoder_sync_and_seq_attribution.md."""</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t143" href="#t143">143</a></span><span class="t">        <span class="nam">self</span><span class="op">.</span><span class="nam">_pending_ts</span><span class="op">[</span><span class="nam">seq</span><span class="op">]</span> <span class="op">=</span> <span class="nam">timestamp_us</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t144" href="#t144">144</a></span><span class="t">        <span class="nam">aus</span> <span class="op">=</span> <span class="nam">self</span><span class="op">.</span><span class="nam">_enc</span><span class="op">.</span><span class="nam">submit</span><span class="op">(</span><span class="nam">packed</span><span class="op">,</span> <span class="nam">seq</span><span class="op">,</span> <span class="nam">force_idr</span><span class="op">=</span><span class="nam">force_keyframe</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t145" href="#t145">145</a></span><span class="t">        <span class="nam">self</span><span class="op">.</span><span class="nam">codec_string</span> <span class="op">=</span> <span class="nam">self</span><span class="op">.</span><span class="nam">_enc</span><span class="op">.</span><span class="nam">codec_string</span> <span class="key">or</span> <span class="nam">self</span><span class="op">.</span><span class="nam">codec_string</span>&nbsp;</span><span class="r"></span></p>
@@ -299,7 +299,7 @@
             <a class="nav" href="z_6034c9c2e63fb306_gpu_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-07-01 10:19 +0000
+            created at 2026-07-01 12:10 +0000
         </p>
     </div>
 </footer>
