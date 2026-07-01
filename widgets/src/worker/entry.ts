@@ -28,6 +28,9 @@ let video: VideoPipeline | null = null;
 let bp: BackpressureController | null = null;
 let cssWidth = 0;
 let cssHeight = 0;
+let backingWidth = 0;
+let backingHeight = 0;
+let pixelRatio = 1;
 let initOptions: WorkerInitOptions = {};
 
 let stats: Stats = {
@@ -106,6 +109,21 @@ async function startConnection(url: string): Promise<void> {
       device_pixel_ratio: caps.devicePixelRatio,
       token: initOptions.token, // undefined is dropped by JSON.stringify
     } satisfies HelloMsg);
+    // Always announce the initial viewport so the publisher can map logical CSS
+    // event coordinates -> its framebuffer from the first frame. Without this the
+    // server never learns the CSS size (the ResizeObserver's first callback is a
+    // no-op) and falls back to framebuffer size, mis-scaling clicks by the DPR on
+    // HiDPI displays.
+    if (cssWidth > 0 && cssHeight > 0) {
+      send({
+        type: "set_viewport",
+        width: cssWidth,
+        height: cssHeight,
+        pwidth: backingWidth,
+        pheight: backingHeight,
+        ratio: pixelRatio,
+      } satisfies SetViewportMsg);
+    }
   };
 
   ws.onmessage = (ev: MessageEvent) => {
@@ -144,6 +162,9 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       initOptions = msg.options ?? {};
       cssWidth = msg.cssWidth;
       cssHeight = msg.cssHeight;
+      backingWidth = msg.backingWidth;
+      backingHeight = msg.backingHeight;
+      pixelRatio = msg.devicePixelRatio;
       renderer = new Renderer(msg.canvas);
       renderer.resize(msg.backingWidth, msg.backingHeight);
       bp = new BackpressureController({
@@ -164,6 +185,9 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
     case "resize":
       cssWidth = msg.cssWidth;
       cssHeight = msg.cssHeight;
+      backingWidth = msg.backingWidth;
+      backingHeight = msg.backingHeight;
+      pixelRatio = msg.pixelRatio;
       renderer?.resize(msg.backingWidth, msg.backingHeight);
       video?.reset();
       send({

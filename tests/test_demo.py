@@ -57,6 +57,29 @@ def test_paint_demo_consumes_pointer_events():
     assert len(np.unique(frame.reshape(-1, 3), axis=0)) > 1
 
 
+def test_paint_maps_logical_css_coords_to_framebuffer_on_hidpi():
+    # Regression guard for the HiDPI off-by-DPR bug: the browser sends *logical
+    # CSS* coordinates; the paint demo must scale them to framebuffer pixels using
+    # the CSS canvas size carried by the (initial) resize/set_viewport handshake.
+    # On a 2x display the canvas is CSS 640x360 while the framebuffer is 1280x720,
+    # so a click at CSS (100, 50) must land at framebuffer (200, 100) -- not (100, 50).
+    paint = get_demo("paint").make()
+    paint.frame(0, 0.0, 1280, 720)  # publisher owns the framebuffer resolution
+    paint.on_event({"type": "resize", "width": 640, "height": 360, "ratio": 2})
+    assert paint._to_pixels(100, 50) == (200, 100)
+    # A corner click maps to the far framebuffer corner (clamped in-bounds).
+    assert paint._to_pixels(640, 360) == (1279, 719)
+
+
+def test_paint_falls_back_to_framebuffer_size_before_viewport_handshake():
+    # If the client never announces its viewport, the demo can only assume CSS ==
+    # framebuffer (a 1:1 map). This documents *why* the initial set_viewport must be
+    # sent on connect (widgets/src/worker/entry.ts) rather than only on later resizes.
+    paint = get_demo("paint").make()
+    paint.frame(0, 0.0, 1280, 720)
+    assert paint._to_pixels(100, 50) == (100, 50)
+
+
 async def test_smoke_end_to_end():
     result = await smoke(width=160, height=120, fps=30, verbose=False)
     assert result["ok"] is True
