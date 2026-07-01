@@ -112,6 +112,27 @@ def _cuda_frame(seq: int):
     return cuda_frame(_nv12(seq), pixel_format="nv12", height=H, seq=seq)
 
 
+def test_wrapper_codec_string_matches_bitstream_profile():
+    """Regression: the payload's codec string must match the SPS the SDK actually emits.
+
+    NVENC defaults to **High** profile, so a hardcoded ``avc1.42E01F`` (Baseline) is a lie:
+    PyAV ignores the codec string and decodes fine (so ``smoke()`` stayed green), but the
+    browser configures its ``VideoDecoder`` from the per-chunk codec and fails on the wrong
+    profile — the ``pdum-rfb demo`` nvenc breakage."""
+    from pdum.rfb.encoders.nvenc_gpu_pdum import NvencGpuPdumEncoder, _codec_string_from_annexb
+
+    enc = NvencGpuPdumEncoder(width=W, height=H, fps=20, bitrate=6_000_000)
+    payloads = enc.encode(_cuda_frame(0), force_keyframe=True)
+    enc.close()
+    assert payloads and payloads[0].keyframe
+    advertised = payloads[0].codec
+    actual = _codec_string_from_annexb(payloads[0].payload)
+    assert actual is not None, "keyframe carried no SPS to derive a codec string from"
+    assert advertised == actual, f"advertised codec {advertised!r} != bitstream SPS {actual!r}"
+    # And it must no longer be the hardcoded Baseline placeholder (SDK emits High).
+    assert advertised != "avc1.42E01F", "codec string is still the placeholder, not the real profile"
+
+
 def test_wrapper_pipeline_depth_recovers_seq():
     """The rfb wrapper in pipelined mode labels each payload with the recovered seq."""
     from pdum.rfb.encoders.nvenc_gpu_pdum import NvencGpuPdumEncoder

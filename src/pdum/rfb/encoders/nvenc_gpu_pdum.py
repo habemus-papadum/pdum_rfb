@@ -44,6 +44,22 @@ def _contains_idr(annexb: bytes) -> bool:
     return False
 
 
+def _codec_string_from_annexb(annexb: bytes) -> str | None:
+    """Derive the WebCodecs codec string ``avc1.PPCCLL`` from the first SPS (NAL type 7).
+
+    ``PP`` / ``CC`` / ``LL`` are the SPS ``profile_idc`` / ``constraint_set`` byte / ``level_idc``.
+    NVENC's SDK encoder defaults to **High** profile (``profile_idc`` 100 → ``avc1.64xxYY``), not
+    the negotiated Baseline ``avc1.42E01F``. The wrapper must advertise what the bitstream *is*:
+    the browser configures its ``VideoDecoder`` from the per-chunk codec string, so a wrong one
+    makes it decode against the wrong profile and fail — even though PyAV (which ignores the codec
+    string and reads the SPS) decodes it fine. Returns ``None`` if no SPS is present (delta chunk).
+    """
+    for nal in annexb.split(b"\x00\x00\x01")[1:]:
+        if nal and (nal[0] & 0x1F) == 7 and len(nal) >= 4:
+            return f"avc1.{nal[1]:02X}{nal[2]:02X}{nal[3]:02X}"
+    return None
+
+
 class NvencGpuPdumEncoder:
     """Encode CUDA (or host, with upload) frames to H.264 Annex B via the NVENC SDK.
 
@@ -83,6 +99,11 @@ class NvencGpuPdumEncoder:
         self.fps = fps
         self.bitrate = bitrate
         self.codec_string = codec_string or DEFAULT_H264_CODEC
+        # NVENC chooses the H.264 profile (High by default), which may not match `codec_string`.
+        # We correct it to the real profile/level from the first SPS (see _refresh_codec_string)
+        # so the browser's per-chunk VideoDecoder.configure() matches the bitstream; _codec_locked
+        # guards that one-time update.
+        self._codec_locked = False
         self.frame_index = 0
         self._duration_us = int(1_000_000 / fps)
         # pipeline_depth > 0 selects the token-based pipelined path (submit()/flush_pipeline);
@@ -140,6 +161,7 @@ class NvencGpuPdumEncoder:
         data = self._enc.encode(packed, force_idr=force_keyframe)
         if not data:
             return []
+        self._refresh_codec_string(data)
         keyframe = force_keyframe or _contains_idr(data)
         return [self._payload(frame.seq, frame.timestamp_us, data, keyframe)]
 
@@ -149,7 +171,22 @@ class NvencGpuPdumEncoder:
         keyframe comes straight from NVENC's pictureType. See docs/pipelined_encode.md."""
         self._pending_ts[seq] = timestamp_us
         aus = self._enc.submit(packed, seq, force_idr=force_keyframe)
-        return [self._payload(s, self._pending_ts.pop(s, timestamp_us), data, key) for s, data, key in aus]
+        payloads: list[EncodedPayload] = []
+        for s, data, key in aus:
+            self._refresh_codec_string(data)  # first emitted AU (frame 0) carries the SPS
+            payloads.append(self._payload(s, self._pending_ts.pop(s, timestamp_us), data, key))
+        return payloads
+
+    def _refresh_codec_string(self, annexb: bytes) -> None:
+        """Once the first SPS is seen, replace the placeholder codec string with the profile/level
+        NVENC actually emitted, so every payload (and the browser's decoder) matches the bitstream.
+        Idempotent after the first keyframe; a no-op on delta chunks (no SPS)."""
+        if self._codec_locked:
+            return
+        derived = _codec_string_from_annexb(annexb)
+        if derived is not None:
+            self.codec_string = derived
+            self._codec_locked = True
 
     def encode_still(self, frame: RawFrame) -> list[EncodedPayload]:
         """Settled-scene still: a forced **IDR** of the resting frame (see the CPU
