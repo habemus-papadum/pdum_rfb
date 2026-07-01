@@ -48,6 +48,7 @@ nav:
           - Sizing, DPR & color: proposals/completed/sizing_dpr_color.md
       - In progress (not yet built):
           - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
+          - Client decode resilience: proposals/active/client_decode_resilience.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs
