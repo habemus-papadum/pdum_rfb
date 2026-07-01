@@ -290,6 +290,6 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 - `docs/internals.md` — data flow, wire protocol, session loop, H.264 path, worker,
   module map, testing architecture, extension points.
 - `docs/roadmap.md` — what's next.
-- `docs/remote_framebuffer.md`, `docs/remote_framebuffer_addendum.md`,
-  `docs/remote_framebuffer_implementation_guide.md` — original design notes.
+- `docs/proposals/completed/remote_framebuffer.md`, `docs/proposals/completed/remote_framebuffer_addendum.md`,
+  `docs/proposals/completed/remote_framebuffer_implementation_guide.md` — original design notes.
 - `docs/reference.md` — auto-generated API reference (mkdocstrings).

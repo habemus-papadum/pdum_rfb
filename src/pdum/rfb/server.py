@@ -160,7 +160,7 @@ class _StreamHost:
                 raise RuntimeError(
                     "gpu=True on macOS needs Apple VideoToolbox: install the [mac-vt] extra "
                     "(habemus-papadum-vtenc / pdum.vtenc). Publish MLX (Metal) frames for the "
-                    "GPU RGB→NV12 path; see docs/mlx_metal_videotoolbox_encoder_design.md."
+                    "GPU RGB→NV12 path; see docs/proposals/completed/mlx_metal_videotoolbox_encoder_design.md."
                 )
             self.has_h264 = True  # VideoToolbox provides H.264 itself (no PyAV needed)
             self.video_encoder = "vtenc"

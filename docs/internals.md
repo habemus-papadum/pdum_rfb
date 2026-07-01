@@ -164,7 +164,7 @@ lives below the `EncoderBackend` seam:
   seq-tagged access unit onto a queue; `submit()` drains whatever is ready and
   returns a list of `(recovered_seq, annexb, keyframe)` tuples (0..N). `flush_pipeline()`
   completes the in-flight tail. (NVENC's parallel is `inputTimeStamp` +
-  `extra_output_delay`; see [`pipelined_encode_nvenc_impl.md`](pipelined_encode_nvenc_impl.md).)
+  `extra_output_delay`; see [`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md).)
 - **Wrapper** (`encoders/vtenc.py` `VideoToolboxEncoder`): with `pipeline_depth>0`,
   `encode()` calls `submit()` and stamps each payload with the **recovered** seq (not
   the call's `frame.seq`), looking the original `timestamp_us` up from a small

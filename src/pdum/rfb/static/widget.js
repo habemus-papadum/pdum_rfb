@@ -30,14 +30,14 @@ function L(t) {
   const e = [];
   return t & 1 && e.push(1), t & 2 && e.push(2), t & 4 && e.push(3), t & 8 && e.push(4), t & 16 && e.push(5), e;
 }
-function C(t, e, n) {
+function H(t, e, n) {
   return { x: t - n.left, y: e - n.top };
 }
 function S(t, e, n) {
   return e === 1 ? t * 16 : e === 2 ? t * n : t;
 }
-function B(t, e) {
-  const { x: n, y: s } = C(t.clientX, t.clientY, e);
+function T(t, e) {
+  const { x: n, y: s } = H(t.clientX, t.clientY, e);
   return {
     type: t.type === "pointerdown" ? "pointer_down" : t.type === "pointerup" ? "pointer_up" : "pointer_move",
     x: n,
@@ -48,8 +48,8 @@ function B(t, e) {
     timestamp: t.timeStamp / 1e3
   };
 }
-function F(t, e) {
-  const { x: n, y: s } = C(t.clientX, t.clientY, e);
+function B(t, e) {
+  const { x: n, y: s } = H(t.clientX, t.clientY, e);
   return {
     type: "wheel",
     x: n,
@@ -61,7 +61,7 @@ function F(t, e) {
     timestamp: t.timeStamp / 1e3
   };
 }
-function I(t) {
+function F(t) {
   return {
     type: t.type === "keydown" ? "key_down" : "key_up",
     key: t.key,
@@ -71,26 +71,26 @@ function I(t) {
   };
 }
 function _(t, e, n, s) {
-  let i = Math.max(1, Math.round(t * n)), r = Math.max(1, Math.round(e * n)), c = n;
-  if (s && Math.max(i, r) > s) {
-    const o = s / Math.max(i, r);
-    i = Math.max(1, Math.round(i * o)), r = Math.max(1, Math.round(r * o)), c = t > 0 ? i / t : n;
+  let i = Math.max(1, Math.round(t * n)), a = Math.max(1, Math.round(e * n)), c = n;
+  if (s && Math.max(i, a) > s) {
+    const o = s / Math.max(i, a);
+    i = Math.max(1, Math.round(i * o)), a = Math.max(1, Math.round(a * o)), c = t > 0 ? i / t : n;
   }
-  return { backingWidth: i, backingHeight: r, pixelRatio: c };
+  return { backingWidth: i, backingHeight: a, pixelRatio: c };
 }
-const H = `var m = Object.defineProperty;
-var v = (t, e, s) => e in t ? m(t, e, { enumerable: !0, configurable: !0, writable: !0, value: s }) : t[e] = s;
-var d = (t, e, s) => v(t, typeof e != "symbol" ? e + "" : e, s);
-const k = {
+const C = `var D = Object.defineProperty;
+var _ = (t, e, i) => e in t ? D(t, e, { enumerable: !0, configurable: !0, writable: !0, value: i }) : t[e] = i;
+var d = (t, e, i) => _(t, typeof e != "symbol" ? e + "" : e, i);
+const x = {
   maxInflight: 3,
   slowDownQueue: 3,
   keyframeOnDropQueue: 6
 };
-class D {
+class S {
   constructor(e = {}) {
     d(this, "cfg");
     d(this, "queued", []);
-    this.cfg = { ...k, ...e };
+    this.cfg = { ...x, ...e };
   }
   onQueued(e) {
     this.queued.push(e);
@@ -102,8 +102,8 @@ class D {
   get inflight() {
     return this.queued.length;
   }
-  buildAck(e, s, i = !1) {
-    return { type: "ack", seq: e, decode_queue_size: s, displayed: i };
+  buildAck(e, i, s = !1) {
+    return { type: "ack", seq: e, decode_queue_size: i, displayed: s };
   }
   shouldSlowDown(e) {
     return e > this.cfg.slowDownQueue;
@@ -115,7 +115,7 @@ class D {
     this.queued = [];
   }
 }
-class _ {
+class q {
   constructor() {
     d(this, "armed", !0);
   }
@@ -135,58 +135,58 @@ class _ {
     this.armed = !0;
   }
 }
-const S = "image/jpeg", x = "image/png", q = "webcodecs/h264-annexb", C = "avc1.42E01F";
-async function Q(t, e = 1280, s = 720) {
-  const i = globalThis.VideoDecoder;
-  if (!i || typeof i.isConfigSupported != "function") return !1;
+const C = "image/jpeg", H = "image/png", W = "webcodecs/h264-annexb", Q = "avc1.42E01F";
+async function O(t, e = 1280, i = 720) {
+  const s = globalThis.VideoDecoder;
+  if (!s || typeof s.isConfigSupported != "function") return !1;
   try {
-    return !!(await i.isConfigSupported({ codec: t, codedWidth: e, codedHeight: s })).supported;
+    return !!(await s.isConfigSupported({ codec: t, codedWidth: e, codedHeight: i })).supported;
   } catch {
     return !1;
   }
 }
-async function O(t = {}) {
-  const e = [S, x];
-  return !t.imageOnly && await Q(C, t.width, t.height) && e.push(q), { supported: e, devicePixelRatio: t.devicePixelRatio ?? 1 };
+async function B(t = {}) {
+  const e = [C, H];
+  return !t.imageOnly && await O(Q, t.width, t.height) && e.push(W), { supported: e, devicePixelRatio: t.devicePixelRatio ?? 1 };
 }
-const B = new TextDecoder("utf-8");
+const R = new TextDecoder("utf-8");
 new TextEncoder();
-function H(t) {
+function E(t) {
   const e = t instanceof Uint8Array ? t : new Uint8Array(t);
   if (e.byteLength < 4)
     throw new Error("buffer too small to contain a header length prefix");
-  const i = new DataView(e.buffer, e.byteOffset, e.byteLength).getUint32(0, !0);
-  if (e.byteLength < 4 + i)
-    throw new Error(\`buffer truncated: need \${4 + i} bytes, have \${e.byteLength}\`);
-  const o = JSON.parse(B.decode(e.subarray(4, 4 + i))), l = e.subarray(4 + i);
-  return { header: o, payload: l };
+  const s = new DataView(e.buffer, e.byteOffset, e.byteLength).getUint32(0, !0);
+  if (e.byteLength < 4 + s)
+    throw new Error(\`buffer truncated: need \${4 + s} bytes, have \${e.byteLength}\`);
+  const o = JSON.parse(R.decode(e.subarray(4, 4 + s))), y = e.subarray(4 + s);
+  return { header: o, payload: y };
 }
-function W(t, e) {
-  const s = { ...t };
-  return e.rtt_ms !== void 0 && (s.serverRttMs = e.rtt_ms), e.fps_sent !== void 0 && (s.serverFpsSent = e.fps_sent), e.bitrate_bps !== void 0 && (s.serverBitrateBps = e.bitrate_bps), e.encode_ms !== void 0 && (s.serverEncodeMs = e.encode_ms), e.dropped !== void 0 && (s.serverDropped = e.dropped), e.target_bitrate !== void 0 && (s.targetBitrate = e.target_bitrate), e.target_fps !== void 0 && (s.targetFps = e.target_fps), s;
+function P(t, e) {
+  const i = { ...t };
+  return e.rtt_ms !== void 0 && (i.serverRttMs = e.rtt_ms), e.fps_sent !== void 0 && (i.serverFpsSent = e.fps_sent), e.bitrate_bps !== void 0 && (i.serverBitrateBps = e.bitrate_bps), e.encode_ms !== void 0 && (i.serverEncodeMs = e.encode_ms), e.dropped !== void 0 && (i.serverDropped = e.dropped), e.target_bitrate !== void 0 && (i.targetBitrate = e.target_bitrate), e.target_fps !== void 0 && (i.targetFps = e.target_fps), i;
 }
-function E(t, e) {
-  const s = { ...t };
-  return e.bitrate !== void 0 && (s.targetBitrate = e.bitrate), e.fps !== void 0 && (s.targetFps = e.fps), s;
+function z(t, e) {
+  const i = { ...t };
+  return e.bitrate !== void 0 && (i.targetBitrate = e.bitrate), e.fps !== void 0 && (i.targetFps = e.fps), i;
 }
-async function z(t, e, s) {
-  const i = new Blob([new Uint8Array(s)], { type: e.mime }), o = await createImageBitmap(i);
+async function A(t, e, i) {
+  const s = new Blob([new Uint8Array(i)], { type: e.mime }), o = await createImageBitmap(s);
   try {
     t.draw(o);
   } finally {
     o.close();
   }
 }
-class P {
+class K {
   constructor(e) {
     d(this, "ctx");
     this.canvas = e;
-    const s = e.getContext("2d");
-    if (!s) throw new Error("OffscreenCanvas 2D context unavailable");
-    this.ctx = s;
+    const i = e.getContext("2d");
+    if (!i) throw new Error("OffscreenCanvas 2D context unavailable");
+    this.ctx = i;
   }
-  resize(e, s) {
-    e > 0 && s > 0 && (this.canvas.width = e, this.canvas.height = s);
+  resize(e, i) {
+    e > 0 && i > 0 && (this.canvas.width = e, this.canvas.height = i);
   }
   draw(e) {
     this.ctx.drawImage(e, 0, 0, this.canvas.width, this.canvas.height);
@@ -198,13 +198,13 @@ class P {
     return this.canvas.convertToBlob({ type: e });
   }
 }
-class A {
-  constructor(e, s, i, o, l) {
+class F {
+  constructor(e, i, s, o, y) {
     d(this, "decoder", null);
     d(this, "codec", "");
     d(this, "codedWidth", 0);
     d(this, "codedHeight", 0);
-    this.renderer = e, this.bp = s, this.gate = i, this.onRequestKeyframe = o, this.onDisplayed = l;
+    this.renderer = e, this.bp = i, this.gate = s, this.onRequestKeyframe = o, this.onDisplayed = y;
   }
   get decodeQueueSize() {
     var e;
@@ -212,17 +212,17 @@ class A {
   }
   ensureDecoder(e) {
     this.decoder && this.codec === e.codec && this.codedWidth === e.width && this.codedHeight === e.height || (this.close(), this.codec = e.codec, this.codedWidth = e.width, this.codedHeight = e.height, this.decoder = new VideoDecoder({
-      output: (s) => {
+      output: (i) => {
         try {
-          this.renderer.draw(s);
+          this.renderer.draw(i);
         } finally {
-          s.close();
+          i.close();
         }
-        const i = this.bp.onDisplayed();
-        i !== void 0 && this.onDisplayed(i);
+        const s = this.bp.onDisplayed();
+        s !== void 0 && this.onDisplayed(s);
       },
-      error: (s) => {
-        this.gate.reset(), this.onRequestKeyframe(String(s));
+      error: (i) => {
+        this.gate.reset(), this.onRequestKeyframe(String(i));
       }
     }), this.decoder.configure({
       codec: e.codec,
@@ -230,18 +230,18 @@ class A {
       codedHeight: e.height
     }), this.gate.reset());
   }
-  handleChunk(e, s) {
+  handleChunk(e, i) {
     if (this.ensureDecoder(e), !this.gate.accept(e.keyframe)) {
       this.onRequestKeyframe("awaiting keyframe");
       return;
     }
-    const i = new EncodedVideoChunk({
+    const s = new EncodedVideoChunk({
       type: e.keyframe ? "key" : "delta",
       timestamp: e.timestamp_us,
       duration: e.duration_us,
-      data: new Uint8Array(s)
+      data: new Uint8Array(i)
     });
-    this.bp.onQueued(e.seq), this.decoder.decode(i);
+    this.bp.onQueued(e.seq), this.decoder.decode(s);
   }
   reset() {
     this.gate.reset(), this.bp.reset();
@@ -256,7 +256,7 @@ class A {
     }
   }
 }
-let r = null, u = null, a = null, f = null, y = 0, g = 0, h = {}, n = {
+let n = null, h = null, a = null, g = null, l = 0, f = 0, b = 0, w = 0, v = 1, u = {}, r = {
   framesDisplayed: 0,
   framesDropped: 0,
   lastDisplayedSeq: -1,
@@ -267,111 +267,118 @@ function c(t, e = []) {
   self.postMessage(t, e);
 }
 function p(t) {
-  r && r.readyState === WebSocket.OPEN && r.send(JSON.stringify(t));
+  n && n.readyState === WebSocket.OPEN && n.send(JSON.stringify(t));
 }
-function b(t) {
+function m(t) {
   p({ type: "request_keyframe", reason: t });
 }
-function w(t, e) {
-  n.framesDisplayed += 1, n.lastDisplayedSeq = t, n.decodeQueueSize = e, p({ type: "ack", seq: t, decode_queue_size: e, displayed: !0 }), c({ type: "stats", stats: { ...n } });
+function k(t, e) {
+  r.framesDisplayed += 1, r.lastDisplayedSeq = t, r.decodeQueueSize = e, p({ type: "ack", seq: t, decode_queue_size: e, displayed: !0 }), c({ type: "stats", stats: { ...r } });
 }
-function R(t) {
-  t.type === "config" ? c({ type: "state", state: "negotiated" }) : t.type === "set_quality" ? (n = E(n, t), c({ type: "stats", stats: { ...n } })) : t.type === "stats" && (n = W(n, t), c({ type: "stats", stats: { ...n } }));
+function I(t) {
+  t.type === "config" ? c({ type: "state", state: "negotiated" }) : t.type === "set_quality" ? (r = z(r, t), c({ type: "stats", stats: { ...r } })) : t.type === "stats" && (r = P(r, t), c({ type: "stats", stats: { ...r } }));
 }
-async function K(t) {
-  const { header: e, payload: s } = H(t);
+async function N(t) {
+  const { header: e, payload: i } = E(t);
   if (e.type === "image_frame")
-    n.transport = "image", await z(u, e, s), w(e.seq, 0);
+    r.transport = "image", await A(h, e, i), k(e.seq, 0);
   else if (e.type === "video_chunk") {
-    n.transport = "webcodecs", a.handleChunk(e, s);
-    const i = a.decodeQueueSize;
-    f.shouldRequestKeyframe(i) && b("decode queue backlog");
+    r.transport = "webcodecs", a.handleChunk(e, i);
+    const s = a.decodeQueueSize;
+    g.shouldRequestKeyframe(s) && m("decode queue backlog");
   }
 }
-async function F(t) {
-  r = new WebSocket(t), r.binaryType = "arraybuffer", c({ type: "state", state: "connecting" }), r.onopen = async () => {
+async function T(t) {
+  n = new WebSocket(t), n.binaryType = "arraybuffer", c({ type: "state", state: "connecting" }), n.onopen = async () => {
     c({ type: "state", state: "open" }), a == null || a.reset();
-    const e = await O({
-      width: y || void 0,
-      height: g || void 0,
-      imageOnly: h.imageOnly
+    const e = await B({
+      width: l || void 0,
+      height: f || void 0,
+      imageOnly: u.imageOnly
     });
     p({
       type: "hello",
       supported: e.supported,
       device_pixel_ratio: e.devicePixelRatio,
-      token: h.token
+      token: u.token
       // undefined is dropped by JSON.stringify
+    }), l > 0 && f > 0 && p({
+      type: "set_viewport",
+      width: l,
+      height: f,
+      pwidth: b,
+      pheight: w,
+      ratio: v
     });
-  }, r.onmessage = (e) => {
+  }, n.onmessage = (e) => {
     if (typeof e.data == "string") {
-      R(JSON.parse(e.data));
+      I(JSON.parse(e.data));
       return;
     }
-    K(e.data);
-  }, r.onclose = () => c({ type: "state", state: "closed" }), r.onerror = () => c({ type: "error", error: "websocket error" });
+    N(e.data);
+  }, n.onclose = () => c({ type: "state", state: "closed" }), n.onerror = () => c({ type: "error", error: "websocket error" });
 }
-function I(t, e) {
-  const s = u, i = {
+function U(t, e) {
+  const i = h, s = {
     type: "capture-result",
     id: t,
-    lastDisplayedSeq: n.lastDisplayedSeq,
-    width: s.canvas.width,
-    height: s.canvas.height
+    lastDisplayedSeq: r.lastDisplayedSeq,
+    width: i.canvas.width,
+    height: i.canvas.height
   };
   if (e === "blob")
-    s.toBlob("image/png").then((o) => c({ ...i, blob: o }));
+    i.toBlob("image/png").then((o) => c({ ...s, blob: o }));
   else {
-    const o = s.readPixels();
-    c({ ...i, imageData: o }, [o.data.buffer]);
+    const o = i.readPixels();
+    c({ ...s, imageData: o }, [o.data.buffer]);
   }
 }
 self.onmessage = (t) => {
   const e = t.data;
   switch (e.type) {
     case "init": {
-      h = e.options ?? {}, y = e.cssWidth, g = e.cssHeight, u = new P(e.canvas), u.resize(e.backingWidth, e.backingHeight), f = new D({
-        maxInflight: h.maxInflight,
-        slowDownQueue: h.slowDownQueue,
-        keyframeOnDropQueue: h.keyframeOnDropQueue
-      }), a = new A(
-        u,
-        f,
-        new _(),
-        b,
-        (s) => w(s, a.decodeQueueSize)
-      ), c({ type: "ready" }), F(e.url);
+      u = e.options ?? {}, l = e.cssWidth, f = e.cssHeight, b = e.backingWidth, w = e.backingHeight, v = e.devicePixelRatio, h = new K(e.canvas), h.resize(e.backingWidth, e.backingHeight), g = new S({
+        maxInflight: u.maxInflight,
+        slowDownQueue: u.slowDownQueue,
+        keyframeOnDropQueue: u.keyframeOnDropQueue
+      }), a = new F(
+        h,
+        g,
+        new q(),
+        m,
+        (i) => k(i, a.decodeQueueSize)
+      ), c({ type: "ready" }), T(e.url);
       break;
     }
     case "event":
       p({ type: "event", event: e.event });
       break;
     case "resize":
-      y = e.cssWidth, g = e.cssHeight, u == null || u.resize(e.backingWidth, e.backingHeight), a == null || a.reset(), p({
+      l = e.cssWidth, f = e.cssHeight, b = e.backingWidth, w = e.backingHeight, v = e.pixelRatio, h == null || h.resize(e.backingWidth, e.backingHeight), a == null || a.reset(), p({
         type: "set_viewport",
         width: e.cssWidth,
         height: e.cssHeight,
         pwidth: e.backingWidth,
         pheight: e.backingHeight,
         ratio: e.pixelRatio
-      }), b("viewport resized");
+      }), m("viewport resized");
       break;
     case "capture":
-      I(e.id, e.format);
+      U(e.id, e.format);
       break;
     case "dispose":
       a == null || a.close();
       try {
-        r == null || r.close();
+        n == null || n.close();
       } catch {
       }
-      r = null;
+      n = null;
       break;
   }
 };
-//# sourceMappingURL=entry-CqsAk7cc.js.map
-`, E = typeof self < "u" && self.Blob && new Blob(["URL.revokeObjectURL(import.meta.url);", H], { type: "text/javascript;charset=utf-8" });
-function T(t) {
+//# sourceMappingURL=entry-yEsQcsln.js.map
+`, E = typeof self < "u" && self.Blob && new Blob(["URL.revokeObjectURL(import.meta.url);", C], { type: "text/javascript;charset=utf-8" });
+function I(t) {
   let e;
   try {
     if (e = E && (self.URL || self.webkitURL).createObjectURL(E), !e) throw "";
@@ -384,7 +391,7 @@ function T(t) {
     }), n;
   } catch {
     return new Worker(
-      "data:text/javascript;charset=utf-8," + encodeURIComponent(H),
+      "data:text/javascript;charset=utf-8," + encodeURIComponent(C),
       {
         type: "module",
         name: t == null ? void 0 : t.name
@@ -393,7 +400,7 @@ function T(t) {
   }
 }
 function Q() {
-  return new T();
+  return new I();
 }
 const U = {
   framesDisplayed: 0,
@@ -426,17 +433,17 @@ class $ {
         }
       }
       const n = this.canvas.getBoundingClientRect();
-      this.post({ type: "event", event: B(e, n) });
+      this.post({ type: "event", event: T(e, n) });
     });
     h(this, "onWheel", (e) => {
       const n = this.canvas.getBoundingClientRect();
-      this.post({ type: "event", event: F(e, n) });
+      this.post({ type: "event", event: B(e, n) });
     });
     h(this, "onKey", (e) => {
-      this.post({ type: "event", event: I(e) });
+      this.post({ type: "event", event: F(e) });
     });
     this.options = n, this.dpr = n.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1, this.canvas = this.resolveCanvas(e), this.canvas.tabIndex = this.canvas.tabIndex >= 0 ? this.canvas.tabIndex : 0;
-    const s = this.canvas.getBoundingClientRect(), i = s.width || this.canvas.clientWidth || 320, r = s.height || this.canvas.clientHeight || 240, c = _(i, r, this.dpr, n.maxBackingDimension);
+    const s = this.canvas.getBoundingClientRect(), i = s.width || this.canvas.clientWidth || 320, a = s.height || this.canvas.clientHeight || 240, c = _(i, a, this.dpr, n.maxBackingDimension);
     this.backingWidth = c.backingWidth, this.backingHeight = c.backingHeight, this.canvas.width = c.backingWidth, this.canvas.height = c.backingHeight;
     const o = this.canvas.transferControlToOffscreen();
     this.worker = (n.workerFactory ?? Q)(), this.worker.onmessage = (l) => this.onWorkerMessage(l.data);
@@ -448,7 +455,7 @@ class $ {
       backingWidth: c.backingWidth,
       backingHeight: c.backingHeight,
       cssWidth: i,
-      cssHeight: r,
+      cssHeight: a,
       options: {
         maxInflight: n.maxInflight,
         imageOnly: n.imageOnly,
@@ -514,13 +521,13 @@ class $ {
     }), this.resizeObserver.observe(this.canvas);
   }
   onWorkerMessage(e) {
-    var n, s, i, r, c, o;
+    var n, s, i, a, c, o;
     switch (e.type) {
       case "state":
         this._state = e.state, (s = (n = this.options).onState) == null || s.call(n, e.state);
         break;
       case "stats":
-        this._stats = e.stats, (r = (i = this.options).onStats) == null || r.call(i, e.stats);
+        this._stats = e.stats, (a = (i = this.options).onStats) == null || a.call(i, e.stats);
         break;
       case "capture-result": {
         this._lastCaptureSeq = e.lastDisplayedSeq;
@@ -536,7 +543,7 @@ class $ {
 }
 new TextDecoder("utf-8");
 new TextEncoder();
-const R = (t) => t === void 0 ? "—" : `${(t / 1e6).toFixed(1)} Mbps`, D = (t) => t === void 0 ? "—" : `${t.toFixed(0)} ms`, W = (t) => t === void 0 ? "—" : t.toFixed(1);
+const R = (t) => t === void 0 ? "—" : `${(t / 1e6).toFixed(1)} Mbps`, W = (t) => t === void 0 ? "—" : `${t.toFixed(0)} ms`, D = (t) => t === void 0 ? "—" : t.toFixed(1);
 function q(t) {
   return t === "negotiated" ? "live" : t;
 }
@@ -546,15 +553,15 @@ function K(t, e) {
     ["transport", e.transport],
     ["displayed", `${e.framesDisplayed} (dropped ${e.framesDropped})`],
     ["decode queue", String(e.decodeQueueSize)],
-    ["rtt", D(e.serverRttMs)],
-    ["server fps", W(e.serverFpsSent)],
+    ["rtt", W(e.serverRttMs)],
+    ["server fps", D(e.serverFpsSent)],
     ["server bitrate", R(e.serverBitrateBps)],
-    ["encode", D(e.serverEncodeMs)],
+    ["encode", W(e.serverEncodeMs)],
     ["target bitrate", R(e.targetBitrate)],
-    ["target fps", W(e.targetFps)]
+    ["target fps", D(e.targetFps)]
   ];
 }
-function j(t) {
+function N(t) {
   const n = [t.transport === "webcodecs" ? "H.264" : t.transport === "image" ? "IMG" : "—"];
   return t.serverFpsSent !== void 0 && n.push(`${t.serverFpsSent.toFixed(0)} fps`), t.serverRttMs !== void 0 && n.push(`${t.serverRttMs.toFixed(0)} ms`), n.join(" · ");
 }
@@ -562,13 +569,13 @@ function b(t, e, n) {
   const s = document.createElement("button");
   return s.type = "button", s.className = "rfb-button", s.title = e, s.textContent = t, s.addEventListener("click", n), s;
 }
-function N(t, e, n) {
+function j(t, e, n) {
   const s = document.createElement("div");
   s.className = "rfb-status";
   const i = document.createElement("div");
   i.className = "rfb-badge", i.style.display = "none";
-  const r = document.createElement("pre");
-  r.className = "rfb-hud", r.style.display = "none";
+  const a = document.createElement("pre");
+  a.className = "rfb-hud", a.style.display = "none";
   const c = document.createElement("span"), o = document.createElement("div");
   o.className = "rfb-banner", o.setAttribute("role", "alert"), o.style.display = "none", o.append(c, b("↻", "Reconnect", () => n.reconnect()));
   const u = document.createElement("div");
@@ -579,8 +586,8 @@ function N(t, e, n) {
     b("⇄", "Toggle transport", () => n.toggleTransport()),
     b("📷", "Screenshot", z),
     b("⛶", "Fullscreen", () => n.fullscreen())
-  ), t.append(s, i, f, r, o, u);
-  let p = !1, a = "connecting", g = null;
+  ), t.append(s, i, f, a, o, u);
+  let p = !1, r = "connecting", g = null;
   function z() {
     n.capture("blob").then((d) => {
       const v = URL.createObjectURL(d), y = document.createElement("a");
@@ -592,7 +599,7 @@ function N(t, e, n) {
   }
   function m() {
     const d = p && e.get("show_stats") !== !1;
-    r.style.display = d ? "" : "none", l.dataset.active = String(p), d && g && (r.textContent = K(a, g).map(([v, y]) => `${v.padEnd(15)}${y}`).join(`
+    a.style.display = d ? "" : "none", l.dataset.active = String(p), d && g && (a.textContent = K(r, g).map(([v, y]) => `${v.padEnd(15)}${y}`).join(`
 `));
   }
   function x() {
@@ -600,10 +607,10 @@ function N(t, e, n) {
   }
   return x(), {
     setState(d) {
-      a = d, s.textContent = q(d), m();
+      r = d, s.textContent = q(d), m();
     },
     setStats(d) {
-      g = d, d.transport !== "none" && (i.style.display = "", i.textContent = j(d)), d.framesDisplayed > 0 && (u.style.display = "none"), m();
+      g = d, d.transport !== "none" && (i.style.display = "", i.textContent = N(d)), d.framesDisplayed > 0 && (u.style.display = "none"), m();
     },
     setError(d) {
       d ? (c.textContent = d.message, o.style.display = "") : o.style.display = "none";
@@ -611,7 +618,7 @@ function N(t, e, n) {
     toggleHud: k,
     refresh: x,
     destroy() {
-      for (const d of [s, i, f, r, o, u]) d.remove();
+      for (const d of [s, i, f, a, o, u]) d.remove();
     }
   };
 }
@@ -623,8 +630,8 @@ function A(t) {
     const c = String(i).replace(/\/+$/, "");
     return `${s}://${location.host}${c}/${n}`;
   }
-  let r = t.get("host");
-  return (!r || r === "auto" || r === "0.0.0.0" || r === "::") && (r = location.hostname || "127.0.0.1"), `${s}://${r}:${t.get("port")}/${n}`;
+  let a = t.get("host");
+  return (!a || a === "auto" || a === "0.0.0.0" || a === "::") && (a = location.hostname || "127.0.0.1"), `${s}://${a}:${t.get("port")}/${n}`;
 }
 const X = {
   render({ model: t, el: e }) {
@@ -633,27 +640,27 @@ const X = {
     n && (e.style.height = typeof n == "number" ? `${n}px` : String(n));
     const s = document.createElement("div");
     s.className = "rfb-viewport", e.appendChild(s);
-    let i = null, r = 0;
-    const o = N(e, t, {
-      capture: (a) => i ? i.capture(a) : Promise.reject(new Error("RemoteFramebuffer is not ready yet")),
+    let i = null, a = 0;
+    const o = j(e, t, {
+      capture: (r) => i ? i.capture(r) : Promise.reject(new Error("RemoteFramebuffer is not ready yet")),
       toggleTransport: () => {
         t.set("image_only", !t.get("image_only")), t.save_changes();
       },
       fullscreen: () => {
-        var a;
-        return void ((a = e.requestFullscreen) == null ? void 0 : a.call(e));
+        var r;
+        return void ((r = e.requestFullscreen) == null ? void 0 : r.call(e));
       },
       reconnect: () => l()
     });
-    function u(a) {
+    function u(r) {
       const g = performance.now();
-      g - r < 1e3 || (r = g, t.set("stats", {
-        transport: a.transport,
-        framesDisplayed: a.framesDisplayed,
-        framesDropped: a.framesDropped,
-        decodeQueueSize: a.decodeQueueSize,
-        serverFpsSent: a.serverFpsSent ?? null,
-        serverRttMs: a.serverRttMs ?? null
+      g - a < 1e3 || (a = g, t.set("stats", {
+        transport: r.transport,
+        framesDisplayed: r.framesDisplayed,
+        framesDropped: r.framesDropped,
+        decodeQueueSize: r.decodeQueueSize,
+        serverFpsSent: r.serverFpsSent ?? null,
+        serverRttMs: r.serverRttMs ?? null
       }), t.save_changes());
     }
     function l() {
@@ -661,20 +668,20 @@ const X = {
         url: A(t),
         token: t.get("token") || void 0,
         imageOnly: !!t.get("image_only"),
-        onState: (a) => {
-          e.dataset.state = a, t.set("state", a), t.save_changes(), o.setState(a);
+        onState: (r) => {
+          e.dataset.state = r, t.set("state", r), t.save_changes(), o.setState(r);
         },
-        onStats: (a) => {
-          o.setStats(a), u(a);
+        onStats: (r) => {
+          o.setStats(r), u(r);
         },
-        onError: (a) => {
-          t.set("last_error", a.message), t.save_changes(), o.setError(a);
+        onError: (r) => {
+          t.set("last_error", r.message), t.save_changes(), o.setError(r);
         }
       }), o.setError(null);
     }
     const f = () => l(), p = () => o.refresh();
-    for (const a of ["url", "host", "base_path", "port", "stream", "token", "image_only"])
-      t.on(`change:${a}`, f);
+    for (const r of ["url", "host", "base_path", "port", "stream", "token", "image_only"])
+      t.on(`change:${r}`, f);
     return t.on("change:show_toolbar", p), t.on("change:show_stats", p), l(), () => {
       t.off(null, null), i == null || i.dispose(), i = null, o.destroy(), s.remove(), e.classList.remove("rfb-root"), delete e.dataset.state;
     };

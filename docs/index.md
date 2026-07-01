@@ -20,7 +20,7 @@ The project ships two halves:
 
 [`jupyter_rfb`](https://github.com/vispy/jupyter_rfb) pioneered "render in Python, view in
 the browser" for notebooks, and `pdum.rfb` speaks the same
-[renderview event vocabulary](rendercanvas_backend.md) — so it drops in under
+[renderview event vocabulary](proposals/completed/rendercanvas_backend.md) — so it drops in under
 `rendercanvas` / `pygfx` / `fastplotlib`. Three differences shape it:
 
 - **Not tied to Jupyter.** Frames travel over a plain WebSocket, not ipywidgets/kernel

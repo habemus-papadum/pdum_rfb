@@ -11,7 +11,7 @@ It is the spiritual equivalent of ``rendercanvas``'s own ``jupyter_rfb`` backend
 this library's transport. **Cross-platform**: the ``"bitmap"`` present method downloads
 the rendered frame to a host ``numpy`` array, so it works identically on macOS and Linux
 (no CUDA/NVENC required). The GPU zero-copy path is a separate, Linux-only future track
-(see ``docs/wgpu_nvenc_zerocopy.md``).
+(see ``docs/proposals/active/wgpu_nvenc_zerocopy.md``).
 
 Usage (own your asyncio loop; reuse :func:`pdum.rfb.serve`)::
 

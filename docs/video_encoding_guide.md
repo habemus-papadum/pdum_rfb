@@ -572,7 +572,7 @@ table:
 | Hardware encode | NVENC (CUDA) and VideoToolbox (Metal) backends | `encoders/nvenc_*.py`, `packages/vtenc` |
 | Capability gate | `VideoDecoder.isConfigSupported` before the video path | `capabilities.ts`, `videoDecode.ts` |
 | Rate/quality control | adaptive bitrate+fps controller | `adaptive.py`, `metrics.py` |
-| Color/DPR roadmap | descriptor + P3 + fit modes | `docs/sizing_dpr_color.md` |
+| Color/DPR roadmap | descriptor + P3 + fit modes | `docs/proposals/active/sizing_dpr_color.md` |
 
 If you remember one thing per section: **§4** no B-frames = no reorder latency;
 **§5** small VBV = predictable latency; **§6** color is metadata, and 4:2:0 hurts
@@ -668,6 +668,6 @@ place.
 
 ---
 
-*See also:* `docs/sizing_dpr_color.md` (fit modes, DPR, and the color descriptor
+*See also:* `docs/proposals/active/sizing_dpr_color.md` (fit modes, DPR, and the color descriptor
 this guide's §6 motivates), `docs/internals.md` (the concrete data flow and wire
 protocol), and `docs/gpu_zerocopy.md` (the NV12 zero-copy encode path).

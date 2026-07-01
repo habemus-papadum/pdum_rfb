@@ -7,7 +7,7 @@ every frame out to N viewers, each with its own `RfbSession`/encoder/backpressur
 
 This page proposes where to go next; items carry a rough **benefit · difficulty**
 read to help triage. Items marked _(addendum)_ come from the
-[design addendum](remote_framebuffer_addendum.md).
+[design addendum](proposals/completed/remote_framebuffer_addendum.md).
 
 ## Current plan
 
@@ -139,7 +139,7 @@ The core is framework-agnostic by design; thin, optional wrappers ride on it:
   NVIDIA's Video Codec SDK encoder, **no PyAV at all** — so it sidesteps the
   unreleased-PyAV-18 problem entirely. `serve(gpu=True)` **prefers** it (gated by
   `nvenc_gpu_pdum_available()`), falling back to `nvenc_gpu_pyav`. It's the fastest path
-  measured (1080p ~2.3 ms). See `docs/nvenc_sdk_evaluation.md`.
+  measured (1080p ~2.3 ms). See `docs/proposals/completed/nvenc_sdk_evaluation.md`.
 
 Remaining: NVENC AV1 (`av1_nvenc`) and HEVC; a zero-copy OpenGL/CUDA-interop source;
 true zero-copy device input via `RegisterResource` (the SDK path does one intra-GPU

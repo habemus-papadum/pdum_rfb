@@ -300,7 +300,7 @@ browser input (pointer / wheel / key) is drained from the display and delivered 
 call `display.poll_events()` yourself; the backend drains it.) The canvas size is the
 render resolution and what gets published; browser resize is informational (the publisher
 owns the resolution). Keep the size **even** for the H.264 path. See
-[the design doc](rendercanvas_backend.md) for internals and the (separate, Linux-only)
+[the design doc](proposals/completed/rendercanvas_backend.md) for internals and the (separate, Linux-only)
 zero-copy GPU track.
 
 ## Encoders
@@ -381,7 +381,7 @@ This is ~2.4–4.3× lower per-frame latency than the host path and frees the CP
   sibling package `habemus-papadum-nvenc` (`import pdum.nvenc`). It needs **no PyAV
   at all**, so it works today on Python 3.14 with a single `pip install`
   (`habemus-papadum-rfb[gpu-nvenc-sdk]`). Gated by `nvenc_gpu_pdum_available()`. It's
-  the fastest path measured — see [the SDK evaluation](nvenc_sdk_evaluation.md).
+  the fastest path measured — see [the SDK evaluation](proposals/completed/nvenc_sdk_evaluation.md).
 - **`nvenc_gpu_pyav`** (fallback) — the `from_dlpack` → `h264_nvenc` path above. It
   **requires PyAV ≥ 18** (gated by `rfb.cuda_zerocopy_available()`); on PyAV 17.x a
   pure-Python workaround is impossible, so you build PyAV from source.
@@ -411,7 +411,7 @@ while running:
 thread runs the GPU NV12 conversion and hands VideoToolbox a host NV12 view (unified memory →
 the remaining copy is negligible, ≤2 % of frame time — true zero-copy input buys nothing on
 Apple Silicon, and pipelining doesn't help either; both are measured dead-ends, see
-[the VideoToolbox design doc](mlx_metal_videotoolbox_encoder_design.md)).
+[the VideoToolbox design doc](proposals/completed/mlx_metal_videotoolbox_encoder_design.md)).
 
 Requirements: the `[mac-vt]` extra (`habemus-papadum-vtenc` / `pdum.vtenc`) and MLX (the
 `mac-dev` group). Details:

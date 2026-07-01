@@ -1,7 +1,7 @@
 # Pipelined encode — NVENC implementation guide (Linux/CUDA agent)
 
 This is a build-it task for an agent on a **Linux box with an NVIDIA NVENC GPU + CUDA
-toolkit**. The pipelined-encode feature (see [`pipelined_encode.md`](pipelined_encode.md)) is
+toolkit**. The pipelined-encode feature (see [`pipelined_encode.md`](../../pipelined_encode.md)) is
 already implemented end-to-end on the **VideoToolbox** backend and wired through the session
 and `serve(encode_pipeline_depth=…)`. VideoToolbox was measured to gain **nothing** from
 pipelining (its low-latency RC is synchronous). **NVENC is the backend where it pays off** —
@@ -215,7 +215,7 @@ Unlike VideoToolbox, you should see a **real throughput increase**. Extend the N
 benchmark (or write an apples-to-apples encoder-only loop like
 `examples/mlx_vt_bench.py --compare-pipeline`: same prebuilt CUDA NV12, only `encode()` vs
 `submit()` differs) and report sync fps vs pipelined fps vs depth at 1080p/1440p/4K. Record
-the numbers in [`pipelined_encode.md`](pipelined_encode.md)'s "NVENC" subsection and
+the numbers in [`pipelined_encode.md`](../../pipelined_encode.md)'s "NVENC" subsection and
 `docs/performance.md`. Expectation: pipelined fps > sync fps, max depth ≈ `extra_output_delay`.
 If you measure **no** speedup, stop and report — it means NVENC is already throughput-bound on
 that GPU at that resolution (the per-frame encode already saturates the engine), which is a
@@ -256,4 +256,4 @@ The session books `payload.seq` from whatever the wrapper returns, so recovered-
 `seq`. Latest-frame-wins still drops *before* `submit()`, so the encoder pipeline only ever
 holds a valid reference chain; `max_inflight` bounds the wire independent of encoder depth. The
 browser is untouched (Annex B in `seq` order, keyframes intact). See
-[`internals.md`](internals.md#pipelined-encode-token-based-seq-attribution).
+[`internals.md`](../../internals.md#pipelined-encode-token-based-seq-attribution).

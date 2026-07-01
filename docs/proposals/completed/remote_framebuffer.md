@@ -14,9 +14,9 @@ The browser client decodes frames **inside a Web Worker** (so the main thread
 stays free) and is framework-agnostic: a single `RemoteFramebufferView` class
 that React/Vue/Svelte/vanilla can drop in.
 
-> **Where to go next:** the [Python Guide](guide_python.md) (producing/serving
-> frames), the [JavaScript Guide](guide_javascript.md) (embedding the client), and
-> [Internals](internals.md) (wire protocol, session loop, worker design). The
+> **Where to go next:** the [Python Guide](../../guide_python.md) (producing/serving
+> frames), the [JavaScript Guide](../../guide_javascript.md) (embedding the client), and
+> [Internals](../../internals.md) (wire protocol, session loop, worker design). The
 > original [implementation guide](remote_framebuffer_implementation_guide.md) and
 > [addendum](remote_framebuffer_addendum.md) capture the design rationale.
 

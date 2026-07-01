@@ -139,7 +139,7 @@ class VideoToolboxEncoder:
     def _encode_pipelined(self, packed, seq: int, timestamp_us: int, force_keyframe: bool) -> list[EncodedPayload]:
         """Submit one frame without waiting; return whatever AUs are ready, each labeled with
         its *recovered* seq (the frame it actually encoded), not this call's seq. See
-        docs/pipelined_encode.md and docs/encoder_sync_and_seq_attribution.md."""
+        docs/pipelined_encode.md and docs/proposals/completed/encoder_sync_and_seq_attribution.md."""
         self._pending_ts[seq] = timestamp_us
         aus = self._enc.submit(packed, seq, force_idr=force_keyframe)
         self.codec_string = self._enc.codec_string or self.codec_string

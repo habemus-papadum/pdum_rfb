@@ -109,7 +109,7 @@ esac
 if ! uv sync --frozen ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; then
     if [ ${#EXTRA_ARGS[@]} -gt 0 ]; then
         echo "   ⚠ GPU extra sync failed; retrying base-only so you still have a working env."
-        echo "     Build prereqs/troubleshooting: packages/nvenc/build-wheel.sh, docs/nvenc_sdk_evaluation.md"
+        echo "     Build prereqs/troubleshooting: packages/nvenc/build-wheel.sh, docs/proposals/completed/nvenc_sdk_evaluation.md"
         uv sync --frozen
     else
         exit 1

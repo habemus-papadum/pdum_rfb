@@ -1,6 +1,6 @@
 # A minimal package for zero-copy wgpu-native → NVENC
 
-Follow-on to [`rendercanvas_backend.md`](rendercanvas_backend.md) §5. We *do* want the
+Follow-on to [`rendercanvas_backend.md`](../completed/rendercanvas_backend.md) §5. We *do* want the
 `wgpu` ecosystem (`pygfx`/`fastplotlib`). This doc scopes the smallest package that
 makes a `wgpu`-rendered frame reach NVENC **without a host round-trip** on Linux
 (`wgpu-native` → Vulkan), and lays out a de-risking spike.
@@ -232,7 +232,7 @@ The entire user-facing surface is three things: **set one env var (before `impor
 call `assert_patched()`, wrap your render texture in `ExportableTarget`.** Everything else
 is ordinary `pygfx`. If `WGPU_LIB_PATH` isn't the patched build, `assert_patched()` raises
 with a clear message and you fall back to the bitmap (host-download) path from
-[`rendercanvas_backend.md`](rendercanvas_backend.md) §4 — nothing breaks silently.
+[`rendercanvas_backend.md`](../completed/rendercanvas_backend.md) §4 — nothing breaks silently.
 
 `ExportableTarget` does the one-time CUDA import of the two FDs (memory + semaphore) in its
 constructor; `capture()` calls `pdum_copy_texture_to_target` then

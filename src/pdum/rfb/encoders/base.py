@@ -63,7 +63,7 @@ def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
     # gated by pdum.rfb.encoders.nvenc_gpu_pdum.nvenc_gpu_pdum_available.
     # NOTE (pipelining): this is the backend where pipeline_depth pays off (NVENC
     # extra_output_delay). Until the pipelined path lands in NvencGpuPdumEncoder (see
-    # docs/pipelined_encode_nvenc_impl.md), drop the kwarg so depth > 0 runs synchronously.
+    # docs/proposals/active/pipelined_encode_nvenc_impl.md), drop the kwarg so depth > 0 runs synchronously.
     from .nvenc_gpu_pdum import NvencGpuPdumEncoder
 
     kwargs.pop("pipeline_depth", None)

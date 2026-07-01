@@ -317,7 +317,7 @@ def benchmark_nvenc_gpu_pdum(
     memory (one intra-GPU copy into NVENC's input surface). Comparable to
     :func:`benchmark_nvenc_gpu_pyav`, but via NVIDIA's ``NvEncoderCuda`` instead of
     PyAV's ``h264_nvenc`` — and so works without PyAV>=18. See
-    docs/nvenc_sdk_evaluation.md.
+    docs/proposals/completed/nvenc_sdk_evaluation.md.
     """
     from time import sleep
 
@@ -449,7 +449,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sdk",
         action="store_true",
-        help="also benchmark the NVENC SDK path (needs CuPy + habemus-papadum-nvenc); see docs/nvenc_sdk_evaluation.md",
+        help=(
+            "also benchmark the NVENC SDK path (needs CuPy + habemus-papadum-nvenc); "
+            "see docs/proposals/completed/nvenc_sdk_evaluation.md"
+        ),
     )
     args = parser.parse_args(argv)
 

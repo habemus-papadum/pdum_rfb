@@ -26,11 +26,11 @@ _Date: 2026-06-30_
 > `serve(gpu=True)` on macOS selects VideoToolbox and converts **RGB(A)→NV12 on the GPU** with a
 > custom `mx.fast.metal_kernel` — **~0.28 ms vs ~6.6 ms** for the numpy path at 1080p (23×, and
 > off the CPU). Image-only viewers still work via `metal.MetalHostFrameAdapter`. See
-> [`guide_python.md`](guide_python.md#mlx-apple-metal-frames-macos). Two things were
+> [`guide_python.md`](../../guide_python.md#mlx-apple-metal-frames-macos). Two things were
 > **investigated and measured to not be worth it** on Apple Silicon: input **zero-copy** (the
 > next section — the residual `CVPixelBuffer` copy is ≤2 % of frame time) and **pipelined
 > encode** (VideoToolbox's low-latency RC is synchronous — see
-> [`pipelined_encode.md`](pipelined_encode.md)). Both `encode_pipeline_depth` and the zero-copy
+> [`pipelined_encode.md`](../../pipelined_encode.md)). Both `encode_pipeline_depth` and the zero-copy
 > variants exist/were prototyped but confer no speedup here; 1-in-1-out + GPU-convert is optimal.
 
 ## Measured: is input zero-copy worth it on Apple Silicon? (no)

@@ -107,7 +107,7 @@ NVENC is built to pipeline: `extra_output_delay > 0` keeps multiple frames in fl
 `inputTimeStamp` token makes recovered-seq attribution exact. This is the backend the feature
 exists for. The binding-side and wrapper-side implementation is **not done yet** — it is
 specified for a Linux/CUDA agent in
-[`pipelined_encode_nvenc_impl.md`](pipelined_encode_nvenc_impl.md). Until that lands,
+[`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md). Until that lands,
 `_nvenc_gpu_pdum_factory` drops the kwarg, so `encode_pipeline_depth > 0` runs synchronously
 on NVENC too (a documented no-op, not an error).
 
@@ -119,13 +119,13 @@ it has not been needed.
 
 ## See also
 
-- [`encoder_sync_and_seq_attribution.md`](encoder_sync_and_seq_attribution.md) — the design
+- [`encoder_sync_and_seq_attribution.md`](proposals/completed/encoder_sync_and_seq_attribution.md) — the design
   note this feature implements (why 1-in-1-out is load-bearing, the two correlation concerns,
   the token-recovery plan).
-- [`pipelined_encode_nvenc_impl.md`](pipelined_encode_nvenc_impl.md) — implementation guide
+- [`pipelined_encode_nvenc_impl.md`](proposals/active/pipelined_encode_nvenc_impl.md) — implementation guide
   for the NVENC side (Linux/CUDA agent).
 - [`internals.md`](internals.md#pipelined-encode-token-based-seq-attribution) — how the
   pipelined path threads through the binding, wrapper, and session.
-- [`mlx_metal_videotoolbox_encoder_design.md`](mlx_metal_videotoolbox_encoder_design.md) — the
+- [`mlx_metal_videotoolbox_encoder_design.md`](proposals/completed/mlx_metal_videotoolbox_encoder_design.md) — the
   VideoToolbox shim, including the zero-copy measurement (the input-side analog of this
   output-side investigation).

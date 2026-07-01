@@ -108,5 +108,5 @@ PyAV ≥ 18, and `nvenc-gpu-pdum` only with the `habemus-papadum-nvenc` package.
 - Synthetic `gradient` pattern; real scenes change bitrate/PSNR but not the latency
   ordering. Bitrate is a 10 Mbps VBR target.
 - See [Zero-copy CUDA→NVENC](gpu_zerocopy.md) and the
-  [NVENC SDK evaluation](nvenc_sdk_evaluation.md) for the architecture behind the two
+  [NVENC SDK evaluation](proposals/completed/nvenc_sdk_evaluation.md) for the architecture behind the two
   GPU rows.

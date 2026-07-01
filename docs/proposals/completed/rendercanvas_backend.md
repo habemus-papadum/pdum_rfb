@@ -8,7 +8,7 @@
 > `pygfx`-on-`wgpu` render round-trip (`tests/test_rendercanvas_render.py`) runs in CI on
 > **Mesa lavapipe** (software Vulkan — no GPU needed). Runnable example:
 > `examples/rendercanvas_pygfx.py`. This doc is the design + rationale; for usage see the
-> [Python guide](guide_python.md#the-rendercanvas-backend).
+> [Python guide](../../guide_python.md#the-rendercanvas-backend).
 
 **Question.** This project is similar in spirit to `jupyter_rfb`. The `rendercanvas`
 package (the canvas-abstraction layer under `pygfx` / `fastplotlib` / `wgpu`) ships a
@@ -183,7 +183,7 @@ The render test self-selects lavapipe on Linux when present (deterministic, GPU-
 otherwise uses whatever adapter is available (a GPU, or Metal on macOS). CI installs it
 with `apt-get install mesa-vulkan-drivers`. The dev render stack (`rendercanvas` + `wgpu` +
 `pygfx`) is the `viz` dependency group, auto-installed by `uv sync` (see
-[Repository & Development](development.md)).
+[Repository & Development](../../development.md)).
 
 **Verdict: a clear, low-risk feature.** The CPU download in `"bitmap"` present is the
 same cost `jupyter_rfb` already pays; we simply replace JPEG-over-ipywidgets with this
@@ -207,12 +207,12 @@ What happens next depends on the encoder the client negotiated:
   zero-copy would eliminate.
 
 So the bitmap backend is correct and useful immediately, but it does **not** get you
-the win documented in [`gpu_zerocopy.md`](gpu_zerocopy.md). For that, read on.
+the win documented in [`gpu_zerocopy.md`](../../gpu_zerocopy.md). For that, read on.
 
 ## 5. Zero-copy WebGPU → NVENC
 
 > A concrete, minimal-package design and a 1–2 day de-risking spike for this section
-> now live in [`wgpu_nvenc_zerocopy.md`](wgpu_nvenc_zerocopy.md). The short version: the
+> now live in [`wgpu_nvenc_zerocopy.md`](../active/wgpu_nvenc_zerocopy.md). The short version: the
 > handoff *is* buildable — `wgpu-py` can load a patched `wgpu-native` via `WGPU_LIB_PATH`
 > — but it needs a small native patch because the `wgpu-native` **C** API exposes no
 > Vulkan handles. The rest of this section is the background.
@@ -389,10 +389,10 @@ change**, which is precisely why now (pre-1.0, no external consumers) is the tim
 
 - [How backends work — rendercanvas](https://rendercanvas.readthedocs.io/stable/backendapi.html)
 - [Backends (jupyter_rfb vs anywidget, loop integration) — rendercanvas](https://rendercanvas.readthedocs.io/latest/backends.html)
-- [renderview event spec](https://github.com/pygfx/renderview/blob/main/src/spec.md) (the `type`/`buttons`/`modifiers`/`ratio` vocabulary shared by jupyter_rfb / pygfx / fastplotlib) and [minimal package design](wgpu_nvenc_zerocopy.md)
+- [renderview event spec](https://github.com/pygfx/renderview/blob/main/src/spec.md) (the `type`/`buttons`/`modifiers`/`ratio` vocabulary shared by jupyter_rfb / pygfx / fastplotlib) and [minimal package design](../active/wgpu_nvenc_zerocopy.md)
 - [`rendercanvas/jupyter.py`](https://github.com/pygfx/rendercanvas/blob/main/rendercanvas/jupyter.py) and [`rendercanvas/offscreen.py`](https://github.com/pygfx/rendercanvas/blob/main/rendercanvas/offscreen.py) (the bitmap-present backend templates)
 - [wgpu-py guide / API](https://wgpu-py.readthedocs.io/en/stable/guide.html) (bitmap present = render-to-texture then download to RAM)
 - [Share buffer between CUDA and wgpu — gfx-rs/wgpu #7988](https://github.com/gfx-rs/wgpu/discussions/7988) (the Rust/HAL 10-step recipe; no public API)
 - [Texture memory import API — gfx-rs/wgpu #2320](https://github.com/gfx-rs/wgpu/issues/2320) and [native texture sharing — wgpu-native #422](https://github.com/gfx-rs/wgpu-native/issues/422)
 - [CUDA Interoperability with APIs (Vulkan external memory/semaphores)](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html) and [CUDA external-resource interop API](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXTRES__INTEROP.html)
-- In-repo: [`gpu_zerocopy.md`](gpu_zerocopy.md), `src/pdum/rfb/gpu.py` (`rgb_to_nv12`), `src/pdum/rfb/display.py` (`publish` accepts CUDA tensors), `packages/nvenc/` (`NvEncoderCuda`)
+- In-repo: [`gpu_zerocopy.md`](../../gpu_zerocopy.md), `src/pdum/rfb/gpu.py` (`rgb_to_nv12`), `src/pdum/rfb/display.py` (`publish` accepts CUDA tensors), `packages/nvenc/` (`NvEncoderCuda`)

@@ -7,7 +7,7 @@ versus the current PyAV `h264_nvenc` path. The source drop lives in
 out has since been **productionized** as the `packages/nvenc/` workspace package —
 **`habemus-papadum-nvenc`** (`import pdum.nvenc`), published to PyPI, shipping both
 NVENC 12.1 and 13.0 ABIs. For the PyAV path this complements, see
-[GPU zero-copy encoding](gpu_zerocopy.md).
+[GPU zero-copy encoding](../../gpu_zerocopy.md).
 
 ## TL;DR
 

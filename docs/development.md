@@ -55,7 +55,7 @@ The project uses **uv exclusively**. Key rules:
   | `nvenc` | `av` | host-memory NVENC (same wheel; documents intent) |
   | `gpu-cuda12` / `gpu-cuda13` | CuPy | zero-copy CUDA→NVENC (needs PyAV ≥ 18) |
   | `gpu-nvenc-sdk` | `habemus-papadum-nvenc` + CuPy | PyAV-free GPU H.264 (recommended) |
-  | `rendercanvas` | `rendercanvas` | the [rendercanvas backend](rendercanvas_backend.md) (bring your own wgpu/pygfx) |
+  | `rendercanvas` | `rendercanvas` | the [rendercanvas backend](proposals/completed/rendercanvas_backend.md) (bring your own wgpu/pygfx) |
   | `cli` | `typer`, `rich` | `pdum-rfb doctor` / `pdum-rfb benchmark` |
 
   | Group | Pulls | For |

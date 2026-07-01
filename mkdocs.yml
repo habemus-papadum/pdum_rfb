@@ -30,28 +30,29 @@ nav:
   - Performance: performance.md
   - GPU / hardware encode:
       - Zero-copy CUDA→NVENC (PyAV): gpu_zerocopy.md
-      - NVENC SDK evaluation: nvenc_sdk_evaluation.md
-      - VideoToolbox encoder (macOS): mlx_metal_videotoolbox_encoder_design.md
-      - Pipelined encode — NVENC impl guide: pipelined_encode_nvenc_impl.md
-  - Integrations:
-      - rendercanvas backend (feasibility): rendercanvas_backend.md
-      - Zero-copy wgpu→NVENC package: wgpu_nvenc_zerocopy.md
-  - Roadmap: roadmap.md
-  - API: reference.md
-  - Design Notes:
-      - Architecture overview: remote_framebuffer.md
-      - Implementation Guide: remote_framebuffer_implementation_guide.md
-      - Addendum: remote_framebuffer_addendum.md
-      - Encoder sync & seq attribution: encoder_sync_and_seq_attribution.md
-      - Sizing, DPR & color: sizing_dpr_color.md
   - Concepts:
       - Modern video encoding — a guide: video_encoding_guide.md
+  - Roadmap: roadmap.md
+  - API: reference.md
+  - Proposals:
+      - Implemented (shipped):
+          - Architecture overview: proposals/completed/remote_framebuffer.md
+          - Implementation guide: proposals/completed/remote_framebuffer_implementation_guide.md
+          - Addendum (timing / WebTransport / framing): proposals/completed/remote_framebuffer_addendum.md
+          - VideoToolbox encoder (macOS): proposals/completed/mlx_metal_videotoolbox_encoder_design.md
+          - Encoder sync & seq attribution: proposals/completed/encoder_sync_and_seq_attribution.md
+          - NVENC SDK evaluation: proposals/completed/nvenc_sdk_evaluation.md
+          - rendercanvas backend: proposals/completed/rendercanvas_backend.md
+      - In progress (not yet built):
+          - Sizing, DPR & color: proposals/active/sizing_dpr_color.md
+          - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
+          - Pipelined encode — NVENC impl guide: proposals/active/pipelined_encode_nvenc_impl.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs
 
 # Markdown extensions — LaTeX (arithmatex + MathJax) and mermaid/admonitions for
-# the concept guides (docs/video_encoding_guide.md, docs/sizing_dpr_color.md).
+# the concept guides (docs/video_encoding_guide.md, docs/proposals/active/sizing_dpr_color.md).
 markdown_extensions:
   - admonition
   - attr_list
