@@ -20,6 +20,7 @@ nav:
       - Demo (anywidget): demos/anywidget.ipynb
   - Internals: internals.md
   - Interactive demo (pdum-rfb demo): demo.md
+  - Agentic frontend debugging: agentic_frontend_debugging.md
   - Features:
       - Still after settle: still_after_settle.md
       - Multiple streams: multiple_streams.md
@@ -47,9 +48,9 @@ nav:
           - rendercanvas backend: proposals/completed/rendercanvas_backend.md
           - Sizing, DPR & color: proposals/completed/sizing_dpr_color.md
           - Demo refactor (web control plane): proposals/completed/demo_refactor.md
+          - Client decode resilience: proposals/completed/client_decode_resilience.md
       - In progress (not yet built):
           - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
-          - Client decode resilience: proposals/active/client_decode_resilience.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs

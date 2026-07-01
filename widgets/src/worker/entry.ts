@@ -39,6 +39,7 @@ let pixelRatio = 1;
 let frameDpr = 1;
 let initOptions: WorkerInitOptions = {};
 let dbg: Logger = makeLogger(false, "worker");
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 let stats: Stats = {
   framesDisplayed: 0,
@@ -244,7 +245,20 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         requestKeyframe,
         (seq) => onDisplayed(seq, video!.decodeQueueSize),
         dbg,
+        {
+          onDecoderReset: () => {
+            dbg.log("recover", "-> decoder_reset (asking server to clear inflight)");
+            send({ type: "decoder_reset" });
+          },
+          onRecovered: () => {
+            stats.recoveries = (stats.recoveries ?? 0) + 1;
+            post({ type: "stats", stats: { ...stats } });
+          },
+          onFatal: (message) => post({ type: "error", error: message }),
+        },
       );
+      // Stall watchdog: a decoder that stops emitting output must not brick the viewer.
+      watchdogTimer = self.setInterval(() => video?.checkStall(), 500);
       post({ type: "ready" });
       void startConnection(msg.url);
       break;
@@ -280,6 +294,10 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       handleCapture(msg.id, msg.format);
       break;
     case "dispose":
+      if (watchdogTimer !== null) {
+        clearInterval(watchdogTimer);
+        watchdogTimer = null;
+      }
       video?.close();
       try {
         ws?.close();

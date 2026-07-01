@@ -54,6 +54,7 @@ class RfbSession:
         adaptive: AdaptiveQualityController | None = None,
         still_after: float | None = None,
         stats_interval: float | None = None,
+        inflight_timeout: float = 2.0,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.source = source
@@ -66,6 +67,13 @@ class RfbSession:
         self.adaptive = adaptive
         self.still_after = still_after
         self.stats_interval = stats_interval
+        # Defense-in-depth backstop (docs/proposals/completed/client_decode_resilience.md):
+        # if a sent seq sits unacked longer than this, the client is wedged (a stalled
+        # decoder, an old build). Clear inflight + force a keyframe rather than dropping
+        # every frame forever — this breaks the client↔server deadlock from the server side.
+        self.inflight_timeout = inflight_timeout
+        self.inflight_timeouts = 0  # count of backstop trips (for tests / metrics)
+        self.decoder_resets = 0  # count of client decoder_reset controls honored
         self._last_stats_t = -1e9
         self._clock = clock or time.monotonic
 
@@ -102,6 +110,16 @@ class RfbSession:
 
     # --- receive side -------------------------------------------------------
 
+    def _reset_inflight(self) -> None:
+        """Clear the unacked-payload set so the encode loop can send again, and force the next
+        frame to a self-contained keyframe. Shared by the client ``decoder_reset`` control and
+        the server-side inflight-timeout backstop. It does **not** ACK the stalled seqs (that
+        would corrupt the displayed-FIFO seq attribution + RTT); it just stops waiting."""
+        self.inflight.clear()
+        self._send_times.clear()
+        self.metrics.inflight = 0
+        self.force_keyframe = True
+
     async def _handle_control(self, data: dict) -> None:
         """Process one decoded JSON control message (one step of ``recv_loop``)."""
         kind = data.get("type")
@@ -120,6 +138,11 @@ class RfbSession:
             await self._maybe_send_stats(now)
         elif kind == "request_keyframe":
             self.force_keyframe = True
+        elif kind == "decoder_reset":
+            # The client's decoder stalled and it rebuilt — stop waiting for frames it will
+            # never display so the next encode can send it a fresh keyframe.
+            self.decoder_resets += 1
+            self._reset_inflight()
         elif kind == "event":
             await self.source.handle_event(data["event"])
         elif kind == "set_viewport":
@@ -234,10 +257,19 @@ class RfbSession:
         # Latest-frame-wins: if the client is behind, drop this frame before
         # spending encode time and force the next sent one to be a keyframe.
         if len(self.inflight) >= self.max_inflight:
-            self.dropped += 1
-            self.force_keyframe = True
-            self.metrics.record_dropped(now=self._clock())
-            return "dropped"
+            now = self._clock()
+            oldest = min(self._send_times.values(), default=now)
+            if self._send_times and now - oldest > self.inflight_timeout:
+                # Backstop: nothing acked for inflight_timeout — the client is wedged (a
+                # stalled decoder / old build). Clear inflight + force a keyframe and fall
+                # through to send *this* frame, instead of dropping forever (silent deadlock).
+                self.inflight_timeouts += 1
+                self._reset_inflight()
+            else:
+                self.dropped += 1
+                self.force_keyframe = True
+                self.metrics.record_dropped(now=now)
+                return "dropped"
 
         if self._reconfig is not None:
             await self._apply_reconfigure(frame.width, frame.height)

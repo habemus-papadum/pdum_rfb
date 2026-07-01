@@ -276,3 +276,43 @@ async def test_metrics_track_encode_send_and_ack_rtt():
     assert snap["decode_queue_size"] == 2
     assert snap["rtt_ms"] == pytest.approx(50, abs=1)
     assert snap["inflight"] == 0
+
+
+# --- decode-resilience backstops (docs/proposals/completed/client_decode_resilience.md) ---
+
+
+async def test_decoder_reset_clears_inflight_and_forces_keyframe():
+    # A client whose decoder stalled + rebuilt sends `decoder_reset`; the server must stop
+    # waiting for the frames it will never display and resume with a fresh keyframe.
+    session, ws, _ = _make_session(max_inflight=2, max_frames=10)
+    for _ in range(4):  # 2 sent, then dropped -> inflight full at 2
+        await session._encode_step()
+    assert len(session.inflight) == 2
+
+    await session._handle_control({"type": "decoder_reset"})
+    assert session.inflight == set()  # released (NOT acked — keeps displayed-FIFO intact)
+    assert session.decoder_resets == 1
+    assert session.force_keyframe is True
+
+    assert await session._encode_step() == "sent"  # can send again...
+    assert _sent_headers(ws)[-1]["keyframe"] is True  # ...as a self-contained keyframe
+
+
+async def test_inflight_timeout_backstop_breaks_deadlock():
+    # Even if the client never sends decoder_reset (old build / wedged), a seq unacked past
+    # inflight_timeout must break the deadlock server-side: clear inflight + send a keyframe.
+    clock = _FakeClock()
+    source = SyntheticFrameSource(pattern="solid", width=64, height=48, fps=1000, pace=False)
+    ws = FakeWebSocket()
+    session = RfbSession(source, FakeEncoder(), ws, max_inflight=2, inflight_timeout=2.0, clock=clock)
+
+    assert await session._encode_step() == "sent"  # seq 0
+    assert await session._encode_step() == "sent"  # seq 1 -> inflight full
+    assert await session._encode_step() == "dropped"  # within the timeout window -> normal drop
+    assert session.inflight_timeouts == 0
+
+    clock.advance(2.5)  # no ack for > inflight_timeout: the client is wedged
+    assert await session._encode_step() == "sent"  # backstop trips, sends instead of dropping
+    assert session.inflight_timeouts == 1
+    assert _sent_headers(ws)[-1]["keyframe"] is True
+    assert len(session.inflight) == 1  # just the fresh keyframe

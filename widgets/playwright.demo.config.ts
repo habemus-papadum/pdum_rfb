@@ -27,7 +27,7 @@ export default defineConfig({
   ],
   webServer: {
     // Build the SPA into the Python package's static dir, then serve it via the demo CLI.
-    command: `pnpm build:demo && cd .. && uv run pdum-rfb demo --port ${PORT} --width 320 --height 240`,
+    command: `pnpm build:demo && cd .. && uv run pdum-rfb demo --port ${PORT} --width 320 --height 240 --no-open`,
     url: `http://127.0.0.1:${PORT}/demo/capabilities`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

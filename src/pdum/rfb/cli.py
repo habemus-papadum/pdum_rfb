@@ -348,11 +348,15 @@ else:
     def demo(
         width: int = typer.Option(1280, help="framebuffer width (even)"),
         height: int = typer.Option(720, help="framebuffer height (even)"),
-        port: int = typer.Option(8000, help="HTTP/WebSocket server port"),
+        port: int = typer.Option(0, help="HTTP/WebSocket server port (0 = pick a free one)"),
         fps: int = typer.Option(30, help="publish frame rate"),
         bitrate: str = typer.Option("8M", help="initial H.264/NVENC bitrate, e.g. 8M"),
         host: str = typer.Option("127.0.0.1", help="bind host (default localhost-only)"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="DEBUG-level server logging"),
+        open_browser: bool = typer.Option(True, "--open/--no-open", help="open the browser at the demo URL"),
+        dev: bool = typer.Option(
+            False, "--dev", help="live-reload agentic mode: Vite HMR (TS) + uvicorn reload (Python); needs repo + Node"
+        ),
         smoke: bool = typer.Option(False, help="headless self-test: every backend + REST control, no browser"),
     ) -> None:
         """Interactive web demo: one process serves the app + controls; drive it in the browser.
@@ -361,6 +365,10 @@ else:
         rides REST; Python only serves the app and logs. Ships prebuilt — run it with uvx::
 
             uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo
+
+        For pair-debugging with an agent, ``--dev`` runs the SPA under Vite (instant TS HMR) and
+        the API under uvicorn ``reload=True`` (Python auto-restart) so edits to either side are
+        picked up live; the browser opens on the Vite URL and proxies REST + WS to Python.
         """
         from . import demo_server
 
@@ -379,7 +387,17 @@ else:
             )
             raise SystemExit(1) from None
         try:
-            demo_server.run_demo(width=w, height=h, host=host, port=port, fps=fps, bitrate=bitrate, verbose=verbose)
+            demo_server.run_demo(
+                width=w,
+                height=h,
+                host=host,
+                port=port,
+                fps=fps,
+                bitrate=bitrate,
+                verbose=verbose,
+                open_browser=open_browser,
+                dev=dev,
+            )
         except KeyboardInterrupt:
             pass
 

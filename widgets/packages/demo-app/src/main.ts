@@ -107,6 +107,10 @@ function onViewerStats(stats: Stats): void {
     if (k === "state") continue; // shown by the pill
     statsDl.append(el("dt", { text: k }), el("dd", { text: v }));
   }
+  // Decode-stall recoveries (client auto-healed a stalled decoder) — only once it happens.
+  if (stats.recoveries) {
+    statsDl.append(el("dt", { text: "recoveries" }), el("dd", { text: String(stats.recoveries) }));
+  }
 }
 
 // --- control rail -----------------------------------------------------------

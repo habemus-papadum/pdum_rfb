@@ -1,6 +1,14 @@
 # Client decode resilience — surfacing and recovering from decode stalls
 
-Status: **proposal** (no code yet). Scope: the browser client (`@habemus-papadum/rfb-widgets`
+> **SHIPPED.** All six changes below are implemented. Client: a tagged logger
+> (`widgets/src/debug.ts`), observable decode/config error paths + `optimizeForLatency`
+> (`widgets/src/worker/videoDecode.ts`), and a pure stall watchdog that rebuilds the decoder
+> and requests recovery (`widgets/src/worker/stallWatchdog.ts`,
+> `tests/unit/stallWatchdog.test.ts`). Server: a `decoder_reset` control + an inflight-timeout
+> backstop (`src/pdum/rfb/session.py`, `tests/test_session.py`). The reusable practice is
+> written up in `docs/agentic_frontend_debugging.md`. Kept here for the design rationale.
+
+Status: **shipped** (was: proposal). Scope: the browser client (`@habemus-papadum/rfb-widgets`
 worker) plus one complementary server-side backstop.
 
 ## Why this exists

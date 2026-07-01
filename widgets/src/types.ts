@@ -53,6 +53,9 @@ export interface Stats {
   lastDisplayedSeq: number;
   decodeQueueSize: number;
   transport: "image" | "webcodecs" | "none";
+  /** Times the client auto-recovered a decode stall/error (rebuild + keyframe). Undefined
+   *  until the first recovery; a nonzero value means the stream hit — and survived — a stall. */
+  recoveries?: number;
   // Server-truth metrics, populated from the server's `stats` / `set_quality`
   // control messages (undefined until the server pushes them; enable with
   // `serve(stats_interval=...)`). The decode-side fields above are always local.

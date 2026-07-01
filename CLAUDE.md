@@ -314,7 +314,12 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
   options, framework integration, CSP/worker packaging).
 - `docs/demo.md` — the `pdum-rfb demo` web app (one uvicorn process serving the prebuilt SPA
   + REST control plane + framebuffer WS; run via `uvx`): browser control rail (scene/backend/
-  quality/params), shared vs private streams, the debug toggle, the `--smoke` self-test.
+  quality/params), shared vs private streams, the debug toggle, `--dev` live-reload (Vite HMR +
+  uvicorn reload), `--open` + random-port, the `--smoke` self-test.
+- `docs/agentic_frontend_debugging.md` — how to instrument the client so failures are
+  observable (tagged `debug.ts` logger, stall watchdog, no silent catches, both-ends deadlock
+  fixes) + the agent+human pairing loop (`pdum-rfb demo --dev`). Invocable skill:
+  `.claude/skills/frontend-debugging/SKILL.md`.
 - `docs/notebook.md` — Jupyter/marimo anywidget (`display.widget()`, `RfbCanvas`/
   `RfbViewer` tiers, `publish_loop`, local vs remote/HTTPS same-origin ASGI, multi-stream,
   theming, CSP/mixed-content).

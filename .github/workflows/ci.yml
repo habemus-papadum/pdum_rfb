@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: {}   # allow manually re-running the experimental macOS probe on demand
 
 permissions:
   contents: write
@@ -134,3 +135,72 @@ jobs:
 
       - name: End-to-end tests
         run: pnpm -C widgets e2e
+
+  macos:
+    name: macOS (experimental — Metal / VideoToolbox probe)
+    runs-on: macos-latest   # Apple Silicon (arm64); MLX needs arm64 + macOS >= 14
+    # EXPERIMENT — standard GitHub-hosted macOS runners are virtualized and historically do NOT
+    # expose a working Metal GPU (actions/runner-images#7085). This job reports what actually
+    # runs vs. skips here: the Metal (MLX) tests gate on a real GPU device, and MLX has a history
+    # of hard-aborting on headless boxes (ml-explore/mlx#3148), so we isolate the probe. Kept
+    # non-blocking (continue-on-error) until we've seen the outcome — flip it off to make it gate.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install macOS video deps (VideoToolbox encoder + MLX)
+        # mac-vt builds the native pdum.vtenc (clang / Xcode CLT, present on the runner);
+        # mac-dev adds MLX (Apple Metal). Deliberately NOT ./scripts/setup.sh — no pnpm /
+        # Playwright / pre-commit; this is a focused capability probe.
+        run: uv sync --frozen --extra mac-vt --group mac-dev
+
+      - name: Probe Metal (MLX) + VideoToolbox
+        # MLX runs in a SUBPROCESS so a native abort() (the #3148 failure mode) surfaces as a
+        # non-zero exit code we can report — not a silent step kill. This step never fails.
+        shell: bash
+        run: |
+          echo "## host"; uname -sm; sw_vers || true; echo
+          echo "## MLX / Metal (subprocess; non-zero rc == native crash, the flagged risk)"
+          set +e
+          uv run python - <<'PY'
+          import sys
+          print("python  :", sys.version.split()[0])
+          print("platform:", sys.platform)
+          try:
+              import mlx.core as mx
+              dev = mx.default_device()
+              print("mlx import :", "OK")
+              print("default_dev:", dev, "| reports gpu:", "gpu" in str(dev).lower())
+              a = mx.ones((512, 512)); b = a @ a; mx.eval(b)   # force a real Metal kernel
+              print("matmul eval: OK  sum=%.0f" % float(b.sum()))
+          except Exception as e:
+              print("mlx raised (catchable -> tests skip cleanly):", type(e).__name__, e)
+          PY
+          echo "mlx probe exit code: $?  (0 = clean, non-zero = native crash/abort)"
+          echo
+          echo "## VideoToolbox"
+          uv run python - <<'PY'
+          try:
+              from pdum.vtenc import supported
+              print("pdum.vtenc import: OK | supported() =", supported())
+          except Exception as e:
+              print("pdum.vtenc raised:", type(e).__name__, e)
+          PY
+          set -e
+
+      - name: VideoToolbox tests (tests/test_vtenc.py)
+        # Exception-safe gate (a real one-frame VT encode) -> cleanly skips if VT can't open.
+        continue-on-error: true
+        run: uv run pytest tests/test_vtenc.py -ra
+
+      - name: Metal / MLX tests (tests/test_metal.py)
+        # Gates on a real Metal GPU device; expected to skip on a GPU-less runner. Last + isolated
+        # so it can't hide the VideoToolbox result even if MLX aborts.
+        continue-on-error: true
+        run: uv run pytest tests/test_metal.py -ra

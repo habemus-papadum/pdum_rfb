@@ -18,11 +18,20 @@ export function el(tag: string, attrs: Attrs = {}, children: (Node | string)[] =
   return node;
 }
 
-/** A labelled control row with an optional unobtrusive "?" help tooltip. */
+/** A labelled control row with an optional unobtrusive "?" help affordance. The help is a
+ *  focusable/hoverable icon that reveals a styled popover (a real CSS tooltip — the native
+ *  `title` attribute is unreliable and unstyled). */
 export function field(label: string, control: Node, help?: string, wide = false): HTMLElement {
   const lbl = el("label", { text: label });
-  if (help) lbl.append(el("span", { class: "help", text: "?", title: help }));
-  return el("div", { class: wide ? "field field--wide" : "field" }, wide ? [lbl, control] : [lbl, control]);
+  if (help) {
+    lbl.append(
+      el("span", { class: "help", tabindex: "0", role: "note", "aria-label": help }, [
+        "?",
+        el("span", { class: "help__tip", role: "tooltip", text: help }),
+      ]),
+    );
+  }
+  return el("div", { class: wide ? "field field--wide" : "field" }, [lbl, control]);
 }
 
 export function clear(node: Node): void {

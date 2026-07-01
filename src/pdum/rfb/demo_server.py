@@ -814,30 +814,141 @@ and the framebuffer WebSocket at <code>/rfb/default</code>.</p>
 # --- run (uvicorn) ----------------------------------------------------------
 
 
+def _free_port(host: str) -> int:
+    """Pick an available TCP port (bind :0, read it back). Tiny TOCTOU race — fine for a dev tool."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return int(s.getsockname()[1])
+
+
+def _open_browser_when_ready(url: str, host: str, port: int, timeout: float = 20.0) -> None:
+    """Open the default browser at ``url`` once ``host:port`` accepts connections (background thread)."""
+    import socket
+    import threading
+    import time
+    import webbrowser
+
+    def _wait() -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection((host, port), timeout=0.5):
+                    break
+            except OSError:
+                time.sleep(0.2)
+        with contextlib.suppress(Exception):
+            webbrowser.open(url)
+
+    threading.Thread(target=_wait, daemon=True).start()
+
+
+def _repo_root() -> Path:
+    """The repo root (…/src/pdum/rfb/demo_server.py → repo). Only meaningful in a dev checkout."""
+    return Path(__file__).resolve().parents[3]
+
+
+def make_dev_app() -> Any:
+    """App factory for ``pdum-rfb demo --dev`` — uvicorn ``reload=True`` re-imports this on every
+    Python change, so config is read from env (it survives the reload subprocess). API-only: in
+    dev the SPA is served by Vite (with HMR), which proxies REST + WS back to this process."""
+    import os
+
+    return build_demo_app(
+        width=int(os.environ.get("RFB_DEMO_W", "1280")),
+        height=int(os.environ.get("RFB_DEMO_H", "720")),
+        fps=int(os.environ.get("RFB_DEMO_FPS", "30")),
+        bitrate=os.environ.get("RFB_DEMO_BITRATE", "8M"),
+        static_dir=None,
+    )
+
+
+def _run_static(host: str, port: int, w: int, h: int, fps: int, bitrate: int | str, open_browser: bool) -> None:
+    """The default path: serve the prebuilt SPA + REST + WS from one uvicorn process (blocking)."""
+    import uvicorn
+
+    app = build_demo_app(width=w, height=h, fps=fps, bitrate=bitrate)
+    built = STATIC_DEMO_DIR.is_dir()
+    url = f"http://{host}:{port}/"
+    spa = "built" if built else "NOT BUILT — run `pnpm -C widgets build:demo`"
+    log.info("pdum-rfb demo ▶ %s   (SPA: %s)", url, spa)
+    if open_browser:
+        _open_browser_when_ready(url, host, port)
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def _run_dev(host: str, api_port: int, w: int, h: int, fps: int, bitrate: int | str, open_browser: bool) -> None:
+    """Live-reload dev/agentic mode: Vite dev server (TS HMR) for the SPA, proxying REST + WS to a
+    uvicorn process run with ``reload=True`` (Python HMR). Needs the repo checkout + Node."""
+    import os
+    import subprocess
+
+    import uvicorn
+
+    demo_dir = _repo_root() / "widgets" / "packages" / "demo-app"
+    if not (demo_dir / "package.json").exists():
+        log.warning("dev mode unavailable (widgets/packages/demo-app not found) — serving the prebuilt SPA instead")
+        _run_static(host, api_port, w, h, fps, bitrate, open_browser)
+        return
+
+    vite_port = _free_port(host)
+    env = dict(os.environ, RFB_DEMO_API=f"http://{host}:{api_port}")
+    vite = subprocess.Popen(
+        ["pnpm", "dev", "--host", host, "--port", str(vite_port), "--strictPort"],
+        cwd=str(demo_dir),
+        env=env,
+    )
+    url = f"http://{host}:{vite_port}/"
+    log.info("pdum-rfb demo ▶ DEV %s", url)
+    log.info("  Vite HMR (TS) + uvicorn reload (Python); REST+WS proxied to http://%s:%d", host, api_port)
+    if open_browser:
+        _open_browser_when_ready(url, host, vite_port)
+    # Config for the reloadable API factory — env so it survives uvicorn's reload subprocess.
+    os.environ.update(RFB_DEMO_W=str(w), RFB_DEMO_H=str(h), RFB_DEMO_FPS=str(fps), RFB_DEMO_BITRATE=str(bitrate))
+    try:
+        uvicorn.run(
+            "pdum.rfb.demo_server:make_dev_app",
+            factory=True,
+            reload=True,
+            reload_dirs=[str(_repo_root() / "src" / "pdum")],
+            host=host,
+            port=api_port,
+            log_level="warning",
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            vite.terminate()
+
+
 def run_demo(
     *,
     width: int = 1280,
     height: int = 720,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int = 0,
     fps: int = 30,
     bitrate: int | str = "8M",
     verbose: bool = False,
+    open_browser: bool = True,
+    dev: bool = False,
 ) -> None:
-    """Serve the demo web app with uvicorn (blocking). Localhost-only by default."""
-    import uvicorn
+    """Serve the demo web app (blocking). Localhost-only by default; ``port=0`` picks a free one.
 
+    ``open_browser`` launches the browser at the URL once it's up; ``dev`` runs the live-reload
+    agentic mode (Vite HMR + uvicorn reload) — see :func:`_run_dev`.
+    """
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
     w, h = _even(width), _even(height)
-    app = build_demo_app(width=w, height=h, fps=fps, bitrate=bitrate)
-    built = STATIC_DEMO_DIR.is_dir()
-    url = f"http://{host}:{port}/"
-    log.info("pdum-rfb demo → %s   (SPA: %s)", url, "built" if built else "NOT BUILT — placeholder page")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    api_port = _free_port(host) if port == 0 else port
+    if dev:
+        _run_dev(host, api_port, w, h, fps, bitrate, open_browser)
+    else:
+        _run_static(host, api_port, w, h, fps, bitrate, open_browser)
 
 
 # --- headless self-test (Starlette TestClient, in-process) ------------------

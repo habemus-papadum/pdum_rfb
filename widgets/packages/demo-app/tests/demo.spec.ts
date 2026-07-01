@@ -43,6 +43,20 @@ test("unavailable backends are greyed out", async ({ page }) => {
   await expect(page.locator("[data-testid=backend] option[value='nvenc_gpu_pdum']")).toBeDisabled();
 });
 
+test("help tooltips reveal their text on hover (CSS popover, not the native title attr)", async ({ page }) => {
+  await page.goto("/");
+  const help = page.locator(".help").first();
+  await expect(help).toBeVisible();
+  const tip = help.locator(".help__tip");
+  // Hidden at rest (visibility:hidden + opacity:0), and it carries real text — not empty.
+  await expect(tip).toHaveCSS("visibility", "hidden");
+  await expect(tip).not.toBeEmpty();
+  // Hovering the icon reveals a styled, readable popover.
+  await help.hover();
+  await expect(tip).toHaveCSS("visibility", "visible");
+  await expect(tip).toHaveCSS("opacity", "1");
+});
+
 test("debug toggle lights up the console play-by-play", async ({ page }) => {
   const logs: string[] = [];
   page.on("console", (m) => {

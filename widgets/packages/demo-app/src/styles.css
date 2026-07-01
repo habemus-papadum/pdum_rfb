@@ -188,20 +188,72 @@ body {
   grid-template-columns: 1fr;
 }
 
-/* inline help "?" — unobtrusive, reveals via the native tooltip */
+/* inline help "?" — a small quiet glyph that reveals a styled popover on hover/focus */
 .help {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 0.85rem;
+  height: 0.85rem;
   border: 1px solid var(--hairline);
   border-radius: 50%;
   color: var(--muted);
-  font-size: 0.6rem;
-  font-family: var(--font-serif);
+  font-size: 0.58rem;
+  line-height: 1;
+  font-family: var(--font-sans);
   cursor: help;
   user-select: none;
+  outline: none;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.help:hover,
+.help:focus {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+/* the popover — right-anchored (the rail is on the right) so it never overflows off-screen */
+.help__tip {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  right: -0.2rem;
+  z-index: 20;
+  width: 15rem;
+  max-width: 80vw;
+  padding: 0.5rem 0.6rem;
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 300;
+  line-height: 1.4;
+  text-align: left;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+/* little downward tick pointing at the icon */
+.help__tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0.4rem;
+  border: 5px solid transparent;
+  border-top-color: var(--ink);
+}
+
+.help:hover .help__tip,
+.help:focus .help__tip,
+.help:focus-within .help__tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 /* --- inputs (quiet, square, hairline) ------------------------------------- */
