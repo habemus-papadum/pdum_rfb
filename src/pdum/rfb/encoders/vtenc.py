@@ -98,6 +98,8 @@ class VideoToolboxEncoder:
 
     def _packed_nv12(self, frame: RawFrame) -> np.ndarray:
         data = frame.data
+        if frame.memory == "metal":
+            return self._packed_nv12_metal(frame)
         if frame.pixel_format == "nv12":
             arr = np.ascontiguousarray(np.asarray(data))
             if arr.shape != self._nv12.shape:
@@ -106,6 +108,21 @@ class VideoToolboxEncoder:
         if frame.pixel_format not in ("rgb24", "rgba8"):
             raise TypeError(f"VideoToolboxEncoder cannot encode {frame.pixel_format!r} frames")
         return _host_rgb_to_nv12(np.asarray(data), self._nv12)
+
+    def _packed_nv12_metal(self, frame: RawFrame) -> np.ndarray:
+        """Metal (MLX) frame: convert RGB(A)→NV12 on the GPU, then hand the binding a host NV12
+        view (unified memory → near-zero-copy). Avoids the ~6.6 ms/1080p CPU color conversion."""
+        from ..metal import rgb_to_nv12 as _mlx_rgb_to_nv12
+        from ..metal import to_host_nv12
+
+        if frame.pixel_format == "nv12":
+            arr = to_host_nv12(frame.data)
+            if arr.shape != self._nv12.shape:
+                raise ValueError(f"nv12 frame shape {arr.shape!r} != encoder {self._nv12.shape!r}")
+            return arr
+        if frame.pixel_format not in ("rgb24", "rgba8"):
+            raise TypeError(f"VideoToolboxEncoder cannot encode {frame.pixel_format!r} Metal frames")
+        return to_host_nv12(_mlx_rgb_to_nv12(frame.data))
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         packed = self._packed_nv12(frame)

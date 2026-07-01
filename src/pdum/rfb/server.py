@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -144,12 +145,27 @@ class _StreamHost:
         else:
             self.has_nvenc = has_nvenc and self.has_h264
         # GPU encode is opt-in (gpu=True) and validated up front: the publisher pushes
-        # CUDA frames and every viewer's H.264 encoder reads them directly. Two
-        # backends, preferred in this order:
-        #   1. nvenc_gpu_pdum  — habemus-papadum-nvenc (pdum.nvenc); PyAV-free, fastest;
-        #   2. nvenc_gpu_pyav — zero-copy via PyAV >= 18 (needs the PyAV-18 stack).
+        # GPU-resident frames and every viewer's H.264 encoder reads them directly. The
+        # backend is platform-specific:
+        #   * macOS — Apple VideoToolbox + MLX/Metal; RGB(A)→NV12 converts on the GPU
+        #     (pdum.rfb.metal), avoiding the ~6.6 ms/1080p CPU color pass (self._gpu_kind="metal");
+        #   * Linux/CUDA — NVENC, preferred: nvenc_gpu_pdum (PyAV-free, fastest), else
+        #     nvenc_gpu_pyav (zero-copy via PyAV >= 18)  (self._gpu_kind="cuda").
         self.gpu = bool(gpu)
-        if self.gpu:
+        self._gpu_kind: str | None = None
+        if self.gpu and sys.platform == "darwin":
+            from .encoders.vtenc import vtenc_available
+
+            if not vtenc_available():
+                raise RuntimeError(
+                    "gpu=True on macOS needs Apple VideoToolbox: install the [mac-vt] extra "
+                    "(habemus-papadum-vtenc / pdum.vtenc). Publish MLX (Metal) frames for the "
+                    "GPU RGB→NV12 path; see docs/mlx_metal_videotoolbox_encoder_design.md."
+                )
+            self.has_h264 = True  # VideoToolbox provides H.264 itself (no PyAV needed)
+            self.video_encoder = "vtenc"
+            self._gpu_kind = "metal"
+        elif self.gpu:
             from .encoders.nvenc_gpu_pdum import nvenc_gpu_pdum_available
 
             if nvenc_gpu_pdum_available():
@@ -158,6 +174,7 @@ class _StreamHost:
                 self.has_h264 = True
                 self.has_nvenc = True
                 self.video_encoder = "nvenc_gpu_pdum"
+                self._gpu_kind = "cuda"
             else:
                 from .gpu import cuda_zerocopy_available
 
@@ -172,6 +189,7 @@ class _StreamHost:
                     )
                 self.has_nvenc = True
                 self.video_encoder = "nvenc_gpu_pyav"
+                self._gpu_kind = "cuda"
         else:
             self.video_encoder = "nvenc_cpu" if self.has_nvenc else "h264_cpu"
         self.fps = fps
@@ -282,12 +300,18 @@ class _StreamHost:
                 video_encoder=self.video_encoder,
                 pipeline_depth=self.encode_pipeline_depth,
             )
-            # In GPU mode the publisher pushes CUDA frames; an image-transport viewer's
-            # host encoder is wrapped so those frames are downloaded first.
+            # In GPU mode the publisher pushes GPU-resident frames; an image-transport
+            # viewer's host encoder is wrapped so those frames are downloaded first —
+            # CUDA via gpu.HostFrameAdapter, Metal/MLX via metal.MetalHostFrameAdapter.
             if self.gpu and selection.transport == "image":
-                from .gpu import HostFrameAdapter
+                if self._gpu_kind == "metal":
+                    from .metal import MetalHostFrameAdapter
 
-                encoder = HostFrameAdapter(encoder)
+                    encoder = MetalHostFrameAdapter(encoder)
+                else:
+                    from .gpu import HostFrameAdapter
+
+                    encoder = HostFrameAdapter(encoder)
             return encoder
 
         return factory

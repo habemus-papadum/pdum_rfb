@@ -92,6 +92,10 @@ class H264CpuEncoder:
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         import av
 
+        if frame.memory == "metal":  # a published MLX frame: download to host rgb24
+            from ..metal import to_host_frame
+
+            frame = to_host_frame(frame)
         if frame.memory != "cpu" or frame.pixel_format != "rgb24":
             raise TypeError("H264CpuEncoder expects CPU rgb24 frames")
         arr = frame.data

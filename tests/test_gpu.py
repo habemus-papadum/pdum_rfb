@@ -93,10 +93,14 @@ def test_publish_rejects_unknown_object():
 
 def test_serve_gpu_raises_when_unavailable():
     import asyncio
+    import sys
 
+    from pdum.rfb.encoders.vtenc import vtenc_available
     from pdum.rfb.server import serve
 
-    if ZEROCOPY or SDK:
+    if ZEROCOPY or SDK or (sys.platform == "darwin" and vtenc_available()):
+        # A GPU encoder is available (CUDA NVENC, or Apple VideoToolbox on macOS), so
+        # gpu=True legitimately succeeds; this test asserts only the *unavailable* path.
         pytest.skip("a GPU encoder is available; this asserts the *unavailable* path")
     with pytest.raises(RuntimeError):
         asyncio.run(serve(256, 256, port=0, gpu=True))

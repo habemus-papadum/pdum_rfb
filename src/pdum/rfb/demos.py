@@ -161,10 +161,13 @@ def _mlx_available() -> bool:
 
 
 class _MlxShader:
-    """Render RGBA on the GPU with a custom MLX Metal kernel, then publish.
+    """Render RGBA on the GPU with a custom MLX Metal kernel, then publish the ``mx.array``.
 
-    Showcases an MLX/Metal frame producer. (The frame is downloaded to host here; the
-    zero-copy MLX→VideoToolbox NV12 path lives in ``examples/mlx_vt_stream.py``.)
+    Showcases an MLX/Metal frame producer end-to-end: ``frame()`` returns the Metal
+    ``mx.array`` directly, so ``display.publish()`` treats it as a ``memory="metal"`` frame.
+    On the **VideoToolbox** backend the RGB→NV12 conversion runs on the GPU (``pdum.rfb.metal``,
+    ~23× cheaper than the CPU path, off the core); on any other backend the frame is downloaded
+    to host automatically. See ``docs/guide_python.md`` (MLX / Apple Metal frames).
     """
 
     def __init__(self) -> None:
@@ -191,7 +194,8 @@ class _MlxShader:
             """,
         )
 
-    def frame(self, seq: int, t: float, width: int, height: int) -> np.ndarray:
+    def frame(self, seq: int, t: float, width: int, height: int):
+        """Return the rendered RGBA as a Metal ``mx.array`` (publish() materializes it)."""
         mx = self._mx
         (out,) = self._kernel(
             inputs=[mx.array([t], dtype=mx.float32)],
@@ -201,8 +205,7 @@ class _MlxShader:
             output_shapes=[(height, width, 4)],
             output_dtypes=[mx.uint8],
         )
-        mx.eval(out)
-        return np.asarray(out)[:, :, :3]
+        return out
 
 
 # --- the built-in registry --------------------------------------------------

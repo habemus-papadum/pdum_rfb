@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
-MemoryKind = Literal["cpu", "cuda", "opengl"]
+MemoryKind = Literal["cpu", "cuda", "metal", "opengl"]
 PixelFormat = Literal["rgb24", "rgba8", "bgra8", "nv12", "yuv420p"]
 EncodedKind = Literal["image", "video"]
 

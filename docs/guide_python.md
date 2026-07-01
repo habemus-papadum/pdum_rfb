@@ -390,6 +390,43 @@ If neither is usable, `serve(gpu=True)` raises at startup. Full details, the
 conversion helpers, and the build recipe are in
 [the GPU zero-copy guide](gpu_zerocopy.md).
 
+### MLX / Apple Metal frames (macOS)
+
+If you render on Apple Silicon with **MLX**, `serve(gpu=True)` selects the **VideoToolbox**
+encoder and converts **RGB(A)→NV12 on the GPU** with a custom `mx.fast.metal_kernel` — so the
+color conversion stays off the CPU (measured **~0.28 ms vs ~6.6 ms** for the numpy path at
+1080p, a **23×** win that also frees a core). `publish()` recognizes an MLX array directly:
+
+```python
+import mlx.core as mx, pdum.rfb as rfb
+
+display = await rfb.serve(1920, 1080, gpu=True)   # macOS: VideoToolbox + MLX/Metal
+while running:
+    rgba = render_scene_mlx(state)                # an (H, W, 4) uint8 mx.array (GPU)
+    display.publish(rgba)                         # recognized as a memory="metal" frame
+    await asyncio.sleep(1 / 60)
+```
+
+`publish()` materializes the MLX render on the calling (loop) thread, then the encoder's worker
+thread runs the GPU NV12 conversion and hands VideoToolbox a host NV12 view (unified memory →
+the remaining copy is negligible, ≤2 % of frame time — true zero-copy input buys nothing on
+Apple Silicon, and pipelining doesn't help either; both are measured dead-ends, see
+[the VideoToolbox design doc](mlx_metal_videotoolbox_encoder_design.md)).
+
+Requirements: the `[mac-vt]` extra (`habemus-papadum-vtenc` / `pdum.vtenc`) and MLX (the
+`mac-dev` group). Details:
+
+- **Pre-converted NV12.** If you already produce NV12 in MLX, wrap it so `publish()` skips the
+  RGB→NV12 step: `display.publish(rfb.metal.metal_frame(nv12_mx_array))`.
+- **Image-only viewers still work.** A viewer that negotiates the image transport (no
+  WebCodecs) gets each Metal frame downloaded to host automatically (`MetalHostFrameAdapter`),
+  exactly like the CUDA path.
+- **Off `gpu=True`.** Publishing a plain numpy RGBA array still works everywhere; it just uses
+  the CPU RGB→NV12 conversion (fine at ≤720p, a bottleneck at 1080p+). Convert in MLX and pass
+  the `mx.array` to get the GPU path.
+- `pdum.rfb.metal.mlx_available()` gates the path; `pdum.rfb.metal.rgb_to_nv12` /
+  `to_host_nv12` / `metal_frame` are the helpers (the Metal analog of `pdum.rfb.gpu`).
+
 ### Registering a custom encoder
 
 The video-encoder registry is the extension seam — the `nvenc_cpu`, `nvenc_gpu_pyav`, and

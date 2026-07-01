@@ -27,6 +27,10 @@ class ImageEncoder:
         self.quality = quality
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
+        if frame.memory == "metal":  # a published MLX frame: download to host rgb24
+            from ..metal import to_host_frame
+
+            frame = to_host_frame(frame)
         if frame.memory != "cpu":
             raise TypeError("ImageEncoder expects CPU frames")
 

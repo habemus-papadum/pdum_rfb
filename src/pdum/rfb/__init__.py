@@ -18,12 +18,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import gpu
+from . import gpu, metal
 from .adaptive import AdaptiveQualityController, QualityTarget
 from .auth import AuthContext, Authenticator, Principal
 from .display import Display
 from .encoders import ImageEncoder, available_video_encoders, build_encoder, register_video_encoder
 from .gpu import cuda_frame, cuda_zerocopy_available, enable_cuda_context_sharing
+from .metal import metal_frame, mlx_available
 from .metrics import SessionMetrics
 from .protocol import (
     BackendSelection,
@@ -68,6 +69,9 @@ __all__ = [
     "cuda_zerocopy_available",
     "enable_cuda_context_sharing",
     "gpu",
+    "metal",
+    "metal_frame",
+    "mlx_available",
     "h264_available",  # lazy
     "nvenc_cpu_available",  # lazy
     "pack_binary_message",

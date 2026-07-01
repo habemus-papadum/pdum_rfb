@@ -21,11 +21,17 @@ _Date: 2026-06-30_
 >    `avc1.420028` (level 4.0), 720p is `avc1.42001F` — `VtEncoder.codec_string` reports the
 >    real value.
 >
-> **Next milestones:** the `pdum.rfb` `Display.publish()`/`serve()` wiring (a `videotoolbox_gpu`
-> `EncoderBackend` — *done*, `src/pdum/rfb/encoders/vtenc.py`). The input **zero-copy** path
-> was investigated and **measured to not be worth it on this platform** — see the next
-> section. The throughput lever turned out to be the *output* side (synchronous vs pipelined
-> encode), see [`encoder_sync_and_seq_attribution.md`](encoder_sync_and_seq_attribution.md).
+> **Shipped since:** the full **MLX → `serve()` ingress path** is now first-class.
+> `display.publish(mlx_rgba)` is recognized as a `memory="metal"` frame (`pdum.rfb.metal`), and
+> `serve(gpu=True)` on macOS selects VideoToolbox and converts **RGB(A)→NV12 on the GPU** with a
+> custom `mx.fast.metal_kernel` — **~0.28 ms vs ~6.6 ms** for the numpy path at 1080p (23×, and
+> off the CPU). Image-only viewers still work via `metal.MetalHostFrameAdapter`. See
+> [`guide_python.md`](guide_python.md#mlx-apple-metal-frames-macos). Two things were
+> **investigated and measured to not be worth it** on Apple Silicon: input **zero-copy** (the
+> next section — the residual `CVPixelBuffer` copy is ≤2 % of frame time) and **pipelined
+> encode** (VideoToolbox's low-latency RC is synchronous — see
+> [`pipelined_encode.md`](pipelined_encode.md)). Both `encode_pipeline_depth` and the zero-copy
+> variants exist/were prototyped but confer no speedup here; 1-in-1-out + GPU-convert is optimal.
 
 ## Measured: is input zero-copy worth it on Apple Silicon? (no)
 

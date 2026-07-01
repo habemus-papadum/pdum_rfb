@@ -54,6 +54,20 @@ def _is_cuda_tensor(obj: Any) -> bool:
     return False
 
 
+def _is_metal_tensor(obj: Any) -> bool:
+    """True for an MLX (Apple Metal, unified-memory) array."""
+    t = type(obj)
+    if t.__module__.split(".")[0] == "mlx" and t.__name__ == "array":
+        return True
+    dldev = getattr(obj, "__dlpack_device__", None)
+    if dldev is not None:
+        try:
+            return dldev()[0] == 8  # DLDeviceType.kDLMetal
+        except Exception:  # pragma: no cover - defensive
+            return False
+    return False
+
+
 class Display:
     """A single shared framebuffer that one or more browsers attach to.
 
@@ -129,6 +143,9 @@ class Display:
           shape ``(H, W, 3|4)`` — published as a zero-copy ``cuda`` frame (for
           NV12, or other frameworks, build a ``RawFrame`` via
           :func:`pdum.rfb.gpu.cuda_frame`);
+        * an **MLX (Apple Metal) array** of shape ``(H, W, 3|4)`` — published as a
+          ``metal`` frame; the VideoToolbox encoder converts RGB(A)→NV12 on the GPU
+          (for pre-converted NV12, use :func:`pdum.rfb.metal.metal_frame`);
         * a ready :class:`~pdum.rfb.types.RawFrame` (any ``memory``).
 
         Latest-frame-wins: a viewer that is behind simply skips intermediate
@@ -154,8 +171,25 @@ class Display:
             height, width = int(shape[0]), int(shape[1])
             pixel_format = "rgb24" if shape[2] == 3 else "rgba8"
             data, memory = frame, "cuda"
+        elif _is_metal_tensor(frame):
+            shape = getattr(frame, "shape", None)
+            if shape is None or len(shape) != 3 or shape[2] not in (3, 4):
+                raise ValueError(
+                    "Metal publish expects an (H, W, 3|4) MLX array; use pdum.rfb.metal.metal_frame() for NV12"
+                )
+            height, width = int(shape[0]), int(shape[1])
+            pixel_format = "rgb24" if shape[2] == 3 else "rgba8"
+            data, memory = frame, "metal"
         else:
-            raise TypeError("publish() expects a numpy.ndarray, a CUDA tensor, or a RawFrame")
+            raise TypeError("publish() expects a numpy.ndarray, a CUDA/Metal tensor, or a RawFrame")
+
+        if memory == "metal":
+            # Materialize the lazy MLX render on *this* (loop) thread: MLX binds a lazy graph to
+            # its origin thread's stream, so the session's encode worker thread cannot evaluate a
+            # frame built here. The GPU NV12 conversion still runs on the worker. See metal.materialize.
+            from .metal import materialize
+
+            materialize(data)
 
         timestamp_us = int((self._clock() - self._start) * 1_000_000)
         # seq is a placeholder; each feed stamps its own per-client sequence.
