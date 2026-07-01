@@ -25,6 +25,10 @@ repos:
       - id: end-of-file-fixer
         exclude: \.ipynb$
       - id: check-yaml
+        # mkdocs.yml uses a mkdocs-specific `!!python/name:` tag (for the
+        # pymdownx superfences mermaid fence) that check-yaml's safe loader
+        # cannot construct. It is valid mkdocs config, so skip it here.
+        exclude: ^mkdocs\.yml$
       - id: check-added-large-files
         args: ['--maxkb=1000']
 

@@ -40,9 +40,37 @@ nav:
       - Implementation Guide: remote_framebuffer_implementation_guide.md
       - Addendum: remote_framebuffer_addendum.md
       - Encoder sync & seq attribution: encoder_sync_and_seq_attribution.md
+      - Sizing, DPR & color: sizing_dpr_color.md
+  - Concepts:
+      - Modern video encoding — a guide: video_encoding_guide.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs
+
+# Markdown extensions — LaTeX (arithmatex + MathJax) and mermaid/admonitions for
+# the concept guides (docs/video_encoding_guide.md, docs/sizing_dpr_color.md).
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# MathJax (rendered by pymdownx.arithmatex generic mode)
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 # Plugins to enable
 plugins:
