@@ -13,7 +13,7 @@ export async function decodeImageFrame(
   const blob = new Blob([new Uint8Array(payload)], { type: header.mime });
   const bitmap = await createImageBitmap(blob);
   try {
-    renderer.draw(bitmap);
+    renderer.draw(bitmap, bitmap.width, bitmap.height);
   } finally {
     bitmap.close(); // release promptly; ImageBitmap holds GPU/decoder resources
   }

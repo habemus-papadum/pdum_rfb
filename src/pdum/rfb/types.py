@@ -11,15 +11,51 @@ The design follows three independent concerns (see the implementation guide):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
 MemoryKind = Literal["cpu", "cuda", "metal", "opengl"]
 PixelFormat = Literal["rgb24", "rgba8", "bgra8", "nv12", "yuv420p"]
 EncodedKind = Literal["image", "video"]
 
+Primaries = Literal["bt709", "display-p3", "bt2020"]
+Transfer = Literal["srgb", "bt709", "pq", "hlg", "linear"]
+ColorMatrix = Literal["rgb", "bt709", "bt2020-ncl"]
+
 #: A normalized user-input event (see the common event vocabulary in the guide).
 EventDict = dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
+class ColorSpace:
+    """A small, explicit display-referred color descriptor for a frame/stream.
+
+    Mirrors the WebCodecs ``VideoColorSpace`` fields the browser consumes directly
+    (``primaries`` gamut, ``transfer`` function, ``matrix`` RGB-vs-YUV coupling) plus a
+    ``full_range`` flag and a ``bit_depth`` for the HDR future. Two presets ship as
+    first-class — :data:`SRGB` (the implicit default) and :data:`DISPLAY_P3` (Apple
+    wide-gamut SDR, 8-bit); ``bt2020``/``pq``/``hlg`` are expressible (HDR is designed-for)
+    but not yet wired through a 10-bit pipeline.
+
+    The library **tags** color; it does not convert. The upstream renderer is responsible
+    for producing pixels already in the declared space.
+    """
+
+    primaries: Primaries = "bt709"
+    transfer: Transfer = "srgb"
+    matrix: ColorMatrix = "rgb"
+    full_range: bool = True
+    bit_depth: int = 8
+
+    def to_dict(self) -> dict:
+        """The wire/JSON form (as carried on frame headers and the ``config`` message)."""
+        return asdict(self)
+
+
+#: sRGB — the implicit default space (BT.709 primaries, sRGB transfer).
+SRGB = ColorSpace(primaries="bt709", transfer="srgb", matrix="rgb")
+#: Display P3, SDR, 8-bit (Apple wide-gamut). For YUV/H.264, matrix stays BT.709.
+DISPLAY_P3 = ColorSpace(primaries="display-p3", transfer="srgb", matrix="bt709")
 
 
 @dataclass(slots=True)
@@ -42,6 +78,14 @@ class RawFrame:
         The pixel payload. For CPU frames this is a ``numpy.ndarray`` of
         ``uint8``; for ``rgb24`` the shape is ``(H, W, 3)`` and for ``rgba8``
         it is ``(H, W, 4)``.
+    pixel_ratio:
+        Render-side device-pixels-per-logical-pixel of this frame (default ``1.0``).
+        Display intent, not a resample instruction: the pixels are delivered as-is; the
+        client uses it to size the frame in *logical* space for fit, and echoes it on
+        input events so a publisher rendering in logical coordinates can divide it out.
+    color:
+        Optional color descriptor (``dict`` form of a :class:`ColorSpace`); ``None`` means
+        sRGB. The renderer must produce pixels **in** the declared space (no conversion here).
     """
 
     seq: int
@@ -51,6 +95,8 @@ class RawFrame:
     pixel_format: PixelFormat
     memory: MemoryKind
     data: Any
+    pixel_ratio: float = 1.0
+    color: dict | None = None
 
 
 @dataclass(slots=True)
@@ -72,6 +118,11 @@ class EncodedPayload:
     keyframe: bool = False
     duration_us: int | None = None
     metadata: dict[str, Any] | None = None
+    # Render-side descriptors carried from the source RawFrame onto the wire header. The
+    # session stamps these from the frame after encode (so no encoder needs to know about
+    # them); ``header_for`` emits them when non-default. See RawFrame.pixel_ratio / color.
+    pixel_ratio: float = 1.0
+    color: dict | None = None
 
 
 @dataclass(slots=True)

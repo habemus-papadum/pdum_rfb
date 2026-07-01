@@ -14,8 +14,10 @@ import type {
   VideoChunkHeader,
 } from "../protocol";
 import { unpackBinaryMessage } from "../protocol";
+import type { NormalizedEvent } from "../eventTypes";
 import { applyServerStats, applySetQuality } from "../serverStats";
 import type { MainToWorker, Stats, WorkerInitOptions, WorkerToMain } from "../types";
+import { backingToFrame } from "../viewport";
 import { decodeImageFrame } from "./imageDecode";
 import { Renderer } from "./renderer";
 import { VideoPipeline } from "./videoDecode";
@@ -31,6 +33,9 @@ let cssHeight = 0;
 let backingWidth = 0;
 let backingHeight = 0;
 let pixelRatio = 1;
+// The frame's render DPR (device px per logical px), from `config`/frame headers;
+// echoed on pointer/wheel events so a publisher can recover logical coordinates.
+let frameDpr = 1;
 let initOptions: WorkerInitOptions = {};
 
 let stats: Stats = {
@@ -61,11 +66,37 @@ function onDisplayed(seq: number, decodeQueueSize: number): void {
   post({ type: "stats", stats: { ...stats } });
 }
 
+/** Map a stream color descriptor to a canvas color space (only P3 vs sRGB matter here). */
+function canvasColorSpace(color: unknown): PredefinedColorSpace {
+  const primaries = color && typeof color === "object" ? (color as { primaries?: string }).primaries : undefined;
+  return primaries === "display-p3" ? "display-p3" : "srgb";
+}
+
+/** Map a browser event (CSS canvas coords) to the wire event. Pointer/wheel get their
+ *  position remapped CSS -> backing -> frame pixels (via the shared viewport geometry)
+ *  plus an `inside` flag and the frame `pixel_ratio` echo; other events pass through. */
+function mapEvent(event: NormalizedEvent): NormalizedEvent {
+  if (
+    event.type === "pointer_move" ||
+    event.type === "pointer_down" ||
+    event.type === "pointer_up" ||
+    event.type === "wheel"
+  ) {
+    const sx = cssWidth > 0 ? backingWidth / cssWidth : 1;
+    const sy = cssHeight > 0 ? backingHeight / cssHeight : 1;
+    const { x, y, inside } = backingToFrame(renderer!.viewportState(), event.x * sx, event.y * sy);
+    return { ...event, x, y, inside, pixel_ratio: frameDpr };
+  }
+  return event;
+}
+
 function handleControl(control: { type: string; [k: string]: unknown }): void {
-  // Server -> client control. `config` advances negotiation; `set_quality` and
-  // `stats` carry adaptive targets / server-truth metrics we fold into Stats so
-  // the app's onStats sees authoritative RTT, fps, and bitrate.
+  // Server -> client control. `config` advances negotiation and carries the frame's
+  // render DPR + color space; `set_quality` and `stats` carry adaptive targets /
+  // server-truth metrics we fold into Stats so onStats sees authoritative metrics.
   if (control.type === "config") {
+    if (typeof control.pixel_ratio === "number") frameDpr = control.pixel_ratio;
+    if (control.color) renderer?.setColorSpace(canvasColorSpace(control.color));
     post({ type: "state", state: "negotiated" });
   } else if (control.type === "set_quality") {
     stats = applySetQuality(stats, control as never);
@@ -78,6 +109,9 @@ function handleControl(control: { type: string; [k: string]: unknown }): void {
 
 async function handleBinary(buf: ArrayBuffer): Promise<void> {
   const { header, payload } = unpackBinaryMessage(buf);
+  // Frame headers may carry a per-frame render DPR (P2); keep the echo current.
+  const framePixelRatio = (header as { pixel_ratio?: unknown }).pixel_ratio;
+  if (typeof framePixelRatio === "number") frameDpr = framePixelRatio;
   if (header.type === "image_frame") {
     stats.transport = "image";
     await decodeImageFrame(renderer!, header as ImageFrameHeader, payload);
@@ -166,6 +200,8 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       backingHeight = msg.backingHeight;
       pixelRatio = msg.devicePixelRatio;
       renderer = new Renderer(msg.canvas);
+      if (initOptions.fit) renderer.fit = initOptions.fit;
+      if (initOptions.background) renderer.background = initOptions.background;
       renderer.resize(msg.backingWidth, msg.backingHeight);
       bp = new BackpressureController({
         maxInflight: initOptions.maxInflight,
@@ -180,7 +216,13 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       break;
     }
     case "event":
-      send({ type: "event", event: msg.event });
+      send({ type: "event", event: mapEvent(msg.event) });
+      break;
+    case "set_fit":
+      if (renderer) {
+        if (msg.fit) renderer.fit = msg.fit;
+        if (msg.background !== undefined) renderer.background = msg.background;
+      }
       break;
     case "resize":
       cssWidth = msg.cssWidth;

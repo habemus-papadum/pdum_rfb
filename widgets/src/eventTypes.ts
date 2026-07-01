@@ -6,7 +6,12 @@
 // the event schema shared by jupyter_rfb / pygfx / fastplotlib / rendercanvas, so
 // events feed those consumers (and a future rendercanvas backend) without a remap:
 //   - `type` names the event;
-//   - coordinates are logical (canvas-relative CSS) pixels, top-left origin;
+//   - pointer/wheel `x`/`y` are **physical framebuffer pixels** (0..width-1, top-left
+//     origin): the worker maps CSS -> backing -> frame through viewport.ts before send,
+//     so the publisher receives coordinates that index straight into the frame it
+//     published, correct under any fit mode / DPR. `inside` is false when the point
+//     falls in letterbox padding (or a `cover` crop); `pixel_ratio` echoes the frame's
+//     render DPR so a publisher that renders in logical space can divide it out;
 //   - `button` is 0=none, 1=left, 2=right, 3=middle, 4-9=…; `buttons` is the tuple
 //     of currently-pressed buttons (same numbering);
 //   - `modifiers` are capitalized: "Shift", "Control", "Alt", "Meta";
@@ -16,8 +21,13 @@ export type Modifier = "Shift" | "Control" | "Alt" | "Meta";
 
 export interface NormalizedPointerEvent {
   type: "pointer_move" | "pointer_down" | "pointer_up";
+  /** Physical framebuffer pixels (top-left origin); see the file header. */
   x: number;
   y: number;
+  /** False when the point is in letterbox padding / a `cover` crop (out of frame). */
+  inside?: boolean;
+  /** The frame's render DPR (device px per logical px), echoed for the publisher. */
+  pixel_ratio?: number;
   /** Renderview button: 0=none, 1=left, 2=right, 3=middle, 4-9=…. */
   button: number;
   /** Currently-pressed buttons (renderview numbering). */
@@ -27,8 +37,14 @@ export interface NormalizedPointerEvent {
 }
 export interface NormalizedWheelEvent {
   type: "wheel";
+  /** Physical framebuffer pixels (top-left origin); see the file header. */
   x: number;
   y: number;
+  /** False when the point is in letterbox padding / a `cover` crop (out of frame). */
+  inside?: boolean;
+  /** The frame's render DPR (device px per logical px), echoed for the publisher. */
+  pixel_ratio?: number;
+  /** Scroll deltas stay in the event's own pixel units (publisher-defined semantics). */
   dx: number;
   dy: number;
   buttons: number[];

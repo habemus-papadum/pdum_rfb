@@ -127,6 +127,7 @@ class NvencCpuEncoder(H264CpuEncoder):
         fps: int = 30,
         bitrate: int = 12_000_000,
         codec_string: str | None = None,
+        color: dict | None = None,
     ) -> None:
         if width < NVENC_MIN_WIDTH:
             raise ValueError(
@@ -139,6 +140,7 @@ class NvencCpuEncoder(H264CpuEncoder):
             fps=fps,
             bitrate=bitrate,
             codec_string=codec_string or DEFAULT_H264_CODEC,
+            color=color,
         )
 
     def _make_context(self):

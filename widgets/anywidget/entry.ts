@@ -80,6 +80,8 @@ export default {
         url: resolveUrl(model),
         token: model.get("token") || undefined,
         imageOnly: !!model.get("image_only"),
+        fit: model.get("fit") || undefined,
+        background: model.get("background") || undefined,
         onState: (s: ConnectionState) => {
           el.dataset.state = s;
           model.set("state", s);
@@ -102,7 +104,7 @@ export default {
     // Connect-time traits rebuild the view; chrome-only traits just toggle DOM.
     const onConnect = () => build();
     const onChrome = () => chrome.refresh();
-    for (const t of ["url", "host", "base_path", "port", "stream", "token", "image_only"]) {
+    for (const t of ["url", "host", "base_path", "port", "stream", "token", "image_only", "fit", "background"]) {
       model.on(`change:${t}`, onConnect);
     }
     model.on("change:show_toolbar", onChrome);

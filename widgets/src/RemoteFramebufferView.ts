@@ -10,6 +10,7 @@ import {
   normalizeWheelEvent,
 } from "./events";
 import type { ConnectionState, MainToWorker, Stats, WorkerToMain } from "./types";
+import type { FitMode } from "./viewport";
 import { createInlineWorker } from "./workerFactory";
 
 export interface RfbViewOptions {
@@ -22,6 +23,11 @@ export interface RfbViewOptions {
   /** Force the image transport (advertise image-only capabilities). */
   imageOnly?: boolean;
   maxInflight?: number;
+  /** How the frame fits the canvas when their aspect ratios differ. Default `"contain"`
+   *  (letterbox, no distortion); `"cover"` crops; `"fill"` stretches each axis. */
+  fit?: FitMode;
+  /** Letterbox fill color for `"contain"` (any CSS color; default `"#000"`). */
+  background?: string;
   /** Auth credential (e.g. a Google OAuth ID token) sent to the server in `hello`. */
   token?: string;
   onState?: (state: ConnectionState) => void;
@@ -86,6 +92,8 @@ export class RemoteFramebufferView {
         maxInflight: options.maxInflight,
         imageOnly: options.imageOnly,
         token: options.token,
+        fit: options.fit,
+        background: options.background,
       },
     };
     this.worker.postMessage(init, [offscreen]);
@@ -105,6 +113,11 @@ export class RemoteFramebufferView {
   /** Seq of the frame measured by the most recent capture() (debug/test hook). */
   get lastCaptureSeq(): number {
     return this._lastCaptureSeq;
+  }
+
+  /** Change the fit mode (and optionally the letterbox background) on the live view. */
+  setFit(fit: FitMode, background?: string): void {
+    this.post({ type: "set_fit", fit, background });
   }
 
   capture(format: "imagedata" | "blob" = "imagedata"): Promise<ImageData | Blob> {

@@ -130,7 +130,8 @@ src/pdum/rfb/
 widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-widgets (importer ".")
   src/
     index.ts                  public exports
-    RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture)
+    RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture, setFit)
+    viewport.ts               pure frame<->canvas geometry (frameDestRect/backingToFrame; fit modes)
     protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
     workerFactory.ts          inline worker (?worker&inline)
     worker/{entry,renderer,imageDecode,videoDecode}.ts

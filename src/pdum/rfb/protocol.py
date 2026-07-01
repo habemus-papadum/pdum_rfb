@@ -73,6 +73,17 @@ def unpack_binary_message(buf: bytes | bytearray | memoryview) -> tuple[dict, by
     return header, payload
 
 
+def _render_descriptors(p: EncodedPayload) -> dict:
+    """The optional render-side header fields (``pixel_ratio`` / ``color``), emitted only
+    when non-default so existing golden fixtures and older clients are unaffected."""
+    extra: dict = {}
+    if p.pixel_ratio is not None and p.pixel_ratio != 1.0:
+        extra["pixel_ratio"] = p.pixel_ratio
+    if p.color is not None:
+        extra["color"] = p.color
+    return extra
+
+
 def image_header(p: EncodedPayload) -> dict:
     """Build the binary-envelope header for an image frame."""
     return {
@@ -82,6 +93,7 @@ def image_header(p: EncodedPayload) -> dict:
         "width": p.width,
         "height": p.height,
         "mime": p.mime,
+        **_render_descriptors(p),
     }
 
 
@@ -102,6 +114,7 @@ def video_header(p: EncodedPayload) -> dict:
     }
     if p.duration_us is not None:
         header["duration_us"] = p.duration_us
+    header.update(_render_descriptors(p))
     return header
 
 
@@ -118,11 +131,38 @@ def parse_control(text: str) -> dict:
     return json.loads(text)
 
 
-def config_message(*, transport: str, width: int, height: int, codec: str | None = None) -> str:
-    """Build the server ``config`` control message (sent right after ``hello``)."""
-    msg: dict = {"type": "config", "transport": transport, "width": width, "height": height}
+def config_message(
+    *,
+    transport: str,
+    width: int,
+    height: int,
+    codec: str | None = None,
+    pixel_ratio: float = 1.0,
+    color: dict | None = None,
+    coords: str = "frame-pixels",
+) -> str:
+    """Build the server ``config`` control message (sent right after ``hello``).
+
+    ``coords`` declares the event coordinate space the client sends (always
+    ``"frame-pixels"`` in this version — pointer/wheel ``x``/``y`` index the published
+    framebuffer directly). ``pixel_ratio`` is the frame's render DPR and ``color`` an
+    optional color descriptor (the ``dict`` form of a
+    :class:`~pdum.rfb.types.ColorSpace`); both are omitted when at their defaults so
+    older clients are unaffected.
+    """
+    msg: dict = {
+        "type": "config",
+        "transport": transport,
+        "width": width,
+        "height": height,
+        "coords": coords,
+    }
     if codec is not None:
         msg["codec"] = codec
+    if pixel_ratio is not None and pixel_ratio != 1.0:
+        msg["pixel_ratio"] = pixel_ratio
+    if color is not None:
+        msg["color"] = color
     return json.dumps(msg, separators=(",", ":"))
 
 

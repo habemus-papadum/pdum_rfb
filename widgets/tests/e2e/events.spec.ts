@@ -9,14 +9,17 @@ interface RecordedEvent {
   y?: number;
   dx?: number;
   dy?: number;
+  inside?: boolean;
+  pixel_ratio?: number;
   code?: string;
   modifiers?: string[];
 }
 
 // Inject real input and assert the normalized events reach the Python server via
-// its recorded-events HTTP side channel. Events follow the renderview spec
-// (logical coords, capitalized modifiers); deviceScaleFactor is 1 (playwright
-// config), so logical coords equal CSS coords.
+// its recorded-events HTTP side channel. Pointer/wheel coordinates are now *frame
+// pixels* (mapped client-side through the viewport fit). The demo streams 640x480
+// into a 640x480 stage at deviceScaleFactor 1, so `contain` is identity and the
+// frame pixel equals the CSS coordinate — plus an `inside` flag and `pixel_ratio`.
 test("pointer / key / wheel events round-trip to the server", async ({ page, request }) => {
   await request.get(`${HTTP}/recorded-events/reset`);
   await page.goto(`/?ws=${encodeURIComponent(WS)}&transport=image`);
@@ -57,6 +60,9 @@ test("pointer / key / wheel events round-trip to the server", async ({ page, req
   expect(move, "a pointer_move event was recorded").toBeTruthy();
   expect(move?.x).toBe(100);
   expect(move?.y).toBe(50);
+  // The frame-pixel contract adds an in-frame flag and the frame's render DPR echo.
+  expect(move?.inside).toBe(true);
+  expect(move?.pixel_ratio).toBe(1);
 
   const wheel = events.find((e) => e.type === "wheel");
   expect(wheel?.dy).toBe(-120);

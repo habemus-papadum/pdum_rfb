@@ -126,12 +126,18 @@ display.publish(render(state))
 `InputEvent`s (`client_id`, `principal`, `event`, `received_us`). The `event` dict
 follows the [renderview vocabulary](https://github.com/pygfx/renderview) shared by
 jupyter_rfb / pygfx / fastplotlib (`pointer_move`, `pointer_down`, `pointer_up`,
-`wheel`, `key_down`, `key_up`, `resize`): coordinates are **logical** (canvas) pixels,
-`button` is `0=none,1=left,2=right,3=middle`, `buttons` is a tuple of pressed buttons,
-and `modifiers` are capitalized (`"Shift"`, `"Control"`, …). A `resize` (sent on the
-wire as `set_viewport`) carries logical `width`/`height`, physical `pwidth`/`pheight`,
-and `ratio`. In a shared display the publisher owns the resolution, so `resize` is
-**informational** (recorded on the event, not applied to the frame size). Prefer the single-loop poll style above; an
+`wheel`, `key_down`, `key_up`, `resize`): pointer/wheel `x`/`y` are **physical
+framebuffer pixels** (`0..width-1`) — the client maps CSS → backing → frame through its
+fit, so they index straight into the array you published, correct under any fit mode or
+device pixel ratio. They also carry `inside` (false when the click fell in letterbox
+padding / a `cover` crop — ignore or clamp) and `pixel_ratio` (the frame's render DPR, so
+a publisher rendering in *logical* coordinates can divide it out). `button` is
+`0=none,1=left,2=right,3=middle`, `buttons` is a tuple of pressed buttons, and `modifiers`
+are capitalized (`"Shift"`, `"Control"`, …). A `resize` (sent on the wire as
+`set_viewport`) carries logical `width`/`height`, physical `pwidth`/`pheight`, and
+`ratio`; by default the publisher owns resolution so it is **informational** (opt into
+letting it drive the size with `resize_policy="match_client"` — see
+[Sizing, DPR & color](#sizing-dpr--color)). Prefer the single-loop poll style above; an
 `async for ev in display.events()` iterator is also available for a dedicated task.
 
 ## Running the server
@@ -278,6 +284,58 @@ up a live feed, serves the browser client via Vite, and opens a Textual TUI to s
 scenes and **encode backends live** (image ⇄ libx264 ⇄ VideoToolbox ⇄ NVENC), retune
 bitrate/fps, and watch per-session stats — all on one WebSocket, no reconnect. `pdum-rfb
 demo --smoke` runs the same machinery headlessly as a self-test. See `docs/demo.md`.
+
+## Sizing, DPR & color
+
+Four related, **opt-in and additive** knobs control how a frame is sized, scaled, and
+colored on the way to the browser. The full design is in
+[Sizing, DPR & color](proposals/completed/sizing_dpr_color.md); the essentials:
+
+**Fit modes (client-side).** When the frame's aspect ratio differs from the canvas, the
+browser applies a fit mode — `"contain"` (default; letterbox, no distortion), `"cover"`
+(crop), or `"fill"` (stretch each axis). This is a **client** option
+([`fit` / `background`](guide_javascript.md#options)); the publisher does nothing.
+
+**Frame-pixel coordinates.** Because the client owns the fit + DPR, it maps every
+pointer/wheel event to **framebuffer pixels** before sending, so `event["x"]`/`["y"]`
+index straight into the array you published — no CSS-to-pixel math on your side. Events
+also carry `inside` and `pixel_ratio` (see [Handling input](#handling-input)).
+
+**Frame pixel ratio.** Tag a frame's render DPR so the client displays it at the intended
+logical size (e.g. render at 2× for crispness on a HiDPI display):
+
+```python
+display.publish(frame_2x, pixel_ratio=2.0)   # additive; default 1.0
+```
+
+**Match-client resize.** By default you own the render size. Opt into *following the
+viewer* with `serve(resize_policy="match_client")`: the latest `set_viewport` becomes
+`display.target_size` (debounced, clamped to `max_render_dimension`, last-writer-wins
+across viewers), which your loop reads to size the next frame:
+
+```python
+display = await serve(1280, 720, resize_policy="match_client", max_render_dimension=2560)
+while running:
+    w, h = display.target_size or (display.width, display.height)
+    display.publish(render(state, w, h), pixel_ratio=display.target_ratio)
+    await asyncio.sleep(1 / 30)
+```
+
+**Color descriptor.** Tag a stream's color space — `SRGB` (default) or `DISPLAY_P3`
+(Apple wide-gamut SDR) — and the library carries it to the client, which renders on a
+matching canvas:
+
+```python
+from pdum.rfb import DISPLAY_P3
+display.publish(frame_in_p3, color=DISPLAY_P3)   # or color=ColorSpace(...) / a dict
+```
+
+The library **tags**, it does not convert: your renderer must already produce pixels in
+the declared space. On the H.264 path P3 rides the bitstream **VUI** (`colour_primaries`,
+`transfer`, matrix, range) on the PyAV libx264/NVENC backends; the image path and the
+VideoToolbox / NVENC-SDK backends carry the descriptor but P3-primaries tagging there is a
+follow-up. HDR (Rec.2100 PQ/HLG, 10-bit) is designed-for in the descriptor
+(`bit_depth`/`transfer`) but not yet wired through a pipeline.
 
 ## The rendercanvas backend
 

@@ -55,6 +55,16 @@ def _is_cuda_tensor(obj: Any) -> bool:
     return False
 
 
+def _color_to_dict(color: Any) -> dict | None:
+    """Normalize a color descriptor (``ColorSpace`` | ``dict`` | ``None``) to its wire dict."""
+    if color is None or isinstance(color, dict):
+        return color
+    to_dict = getattr(color, "to_dict", None)
+    if callable(to_dict):
+        return to_dict()
+    raise TypeError(f"unsupported color descriptor {type(color)!r}; pass a ColorSpace or a dict")
+
+
 def _is_metal_tensor(obj: Any) -> bool:
     """True for an MLX (Apple Metal, unified-memory) array."""
     t = type(obj)
@@ -98,6 +108,17 @@ class Display:
         released" callback. Supported for ``cpu`` and ``cuda`` frames; ``metal`` raises
         (MLX arrays are immutable, so the borrow contract already holds). See
         :meth:`publish`.
+    resize_policy:
+        ``"publisher"`` (default) — you own the render size and a viewer's ``set_viewport``
+        is informational. ``"match_client"`` — the render stream *follows the viewer*: the
+        latest ``set_viewport`` becomes :attr:`target_size` (last-writer-wins across viewers),
+        which your render loop reads to size the next frame.
+    max_render_dimension:
+        Cap on either dimension of a ``match_client`` :attr:`target_size` (AR-preserving),
+        guarding against a maximized 4K window forcing a huge encode. ``None`` = no cap.
+    resize_debounce:
+        Seconds a ``match_client`` target must be stable before it surfaces through
+        :attr:`target_size`, so a drag-resize doesn't storm the encoder rebuild (default 0.12).
     clock:
         Monotonic clock returning seconds; injectable for deterministic tests.
     """
@@ -112,6 +133,9 @@ class Display:
         event_log: str | Path | None = None,
         event_queue_size: int = 4096,
         own_frames: bool = False,
+        resize_policy: str = "publisher",
+        max_render_dimension: int | None = None,
+        resize_debounce: float = 0.12,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.width = int(width)
@@ -119,6 +143,21 @@ class Display:
         self.fps = fps
         self._clock = clock or time.monotonic
         self._start = self._clock()
+
+        # "match-client" resize policy: when enabled, a viewer's set_viewport becomes a
+        # *target size* the render loop follows (default "publisher" = you own the size,
+        # set_viewport is informational). Last-writer-wins across viewers; debounced so a
+        # drag-resize doesn't storm the encoder rebuild; clamped to max_render_dimension.
+        if resize_policy not in ("publisher", "match_client"):
+            raise ValueError(f"resize_policy must be 'publisher' or 'match_client', got {resize_policy!r}")
+        self.resize_policy = resize_policy
+        self.max_render_dimension = max_render_dimension
+        self._resize_debounce = float(resize_debounce)
+        self._pending_target: tuple[int, int] | None = None
+        self._pending_ratio = 1.0
+        self._pending_at = 0.0
+        self._committed_target: tuple[int, int] | None = None
+        self._committed_ratio = 1.0
 
         self._latest: RawFrame | None = None
         self._version = 0
@@ -150,7 +189,13 @@ class Display:
 
     # --- publishing --------------------------------------------------------
 
-    def publish(self, frame: np.ndarray | RawFrame | Any) -> None:
+    def publish(
+        self,
+        frame: np.ndarray | RawFrame | Any,
+        *,
+        pixel_ratio: float | None = None,
+        color: Any = None,
+    ) -> None:
         """Make ``frame`` the latest frame and wake every connected viewer.
 
         Synchronous and non-blocking. ``frame`` may be:
@@ -177,9 +222,25 @@ class Display:
         Construct the ``Display`` (or call :func:`~pdum.rfb.serve`) with ``own_frames=True``
         to instead have the server copy each frame into a recycled buffer, after which you
         may reuse/mutate your own buffer immediately (``cpu``/``cuda`` only; ``metal`` raises).
+
+        Parameters
+        ----------
+        pixel_ratio:
+            Render-side DPR for this frame (device px per logical px). ``None`` keeps a
+            :class:`~pdum.rfb.types.RawFrame`'s own value (else ``1.0``). See
+            :attr:`~pdum.rfb.types.RawFrame.pixel_ratio`.
+        color:
+            Color descriptor for this frame — a :class:`~pdum.rfb.types.ColorSpace`, its
+            ``dict`` form, or ``None`` (sRGB). The renderer must already produce pixels in
+            the declared space; the library only tags them.
         """
         if self._closed:
             raise RuntimeError("publish() called on a closed Display")
+
+        frame_pr = frame.pixel_ratio if isinstance(frame, RawFrame) else 1.0
+        frame_color = frame.color if isinstance(frame, RawFrame) else None
+        resolved_pr = float(frame_pr if pixel_ratio is None else pixel_ratio)
+        resolved_color = frame_color if color is None else _color_to_dict(color)
 
         if isinstance(frame, RawFrame):
             data, width, height = frame.data, frame.width, frame.height
@@ -232,6 +293,8 @@ class Display:
             pixel_format=pixel_format,  # type: ignore[arg-type]
             memory=memory,  # type: ignore[arg-type]
             data=data,
+            pixel_ratio=resolved_pr,
+            color=resolved_color,
         )
         self.width, self.height = width, height
         self._version += 1
@@ -312,6 +375,63 @@ class Display:
     def client_count(self) -> int:
         """Number of currently connected viewers."""
         return len(self._feeds)
+
+    @property
+    def pixel_ratio(self) -> float:
+        """Render-side DPR of the latest published frame (``1.0`` before the first publish)."""
+        return self._latest.pixel_ratio if self._latest is not None else 1.0
+
+    @property
+    def color(self) -> dict | None:
+        """Color descriptor of the latest published frame, or ``None`` (sRGB)."""
+        return self._latest.color if self._latest is not None else None
+
+    # --- match-client resize (opt-in) --------------------------------------
+
+    def _clamp_render_size(self, w: int, h: int) -> tuple[int, int]:
+        """Clamp a requested render size to ``max_render_dimension`` (AR-preserving) and to
+        even, >= 2 dimensions (H.264 / NV12 need even). ``max_render_dimension=None`` = no cap."""
+        w, h = max(2, int(w)), max(2, int(h))
+        cap = self.max_render_dimension
+        if cap is not None and max(w, h) > cap:
+            scale = cap / max(w, h)
+            w, h = max(2, round(w * scale)), max(2, round(h * scale))
+        return (w - (w % 2), h - (h % 2))
+
+    def _request_target(self, pw: int, ph: int, ratio: float) -> None:
+        """Record a viewer's requested render size (``match_client`` only). Debounced: the
+        value surfaces through :attr:`target_size` after it has been stable for
+        ``resize_debounce`` seconds, so a drag-resize doesn't storm the encoder rebuild."""
+        size = self._clamp_render_size(pw, ph)
+        if size != self._pending_target:
+            self._pending_target = size
+            self._pending_ratio = float(ratio)
+            self._pending_at = self._clock()
+
+    def _settle_target(self) -> None:
+        if self._pending_target is not None and (self._clock() - self._pending_at) >= self._resize_debounce:
+            self._committed_target = self._pending_target
+            self._committed_ratio = self._pending_ratio
+            self._pending_target = None
+
+    @property
+    def target_size(self) -> tuple[int, int] | None:
+        """Latest client-requested render size under ``resize_policy="match_client"`` (debounced,
+        clamped, even dims), or ``None`` before any viewport arrives / in ``"publisher"`` mode.
+
+        Read it in your render loop to follow the viewer::
+
+            w, h = display.target_size or (display.width, display.height)
+            display.publish(render(state, w, h), pixel_ratio=display.target_ratio)
+        """
+        self._settle_target()
+        return self._committed_target
+
+    @property
+    def target_ratio(self) -> float:
+        """The client DPR that accompanies :attr:`target_size` (``1.0`` until one arrives)."""
+        self._settle_target()
+        return self._committed_ratio
 
     @property
     def port(self) -> int | None:
@@ -493,12 +613,14 @@ class _ClientFeed:
 
     async def handle_event(self, event: EventDict) -> None:
         if event.get("type") in ("resize", "set_viewport"):
-            # Informational only in a shared display: the publisher owns the
-            # render resolution. We record the viewport (physical/render-buffer
-            # size + ratio) for future per-client use. Renderview carries physical
-            # dims as pwidth/pheight; fall back to width/height for older clients.
-            pw = event.get("pwidth", event.get("width"))
-            ph = event.get("pheight", event.get("height"))
-            ratio = event.get("ratio", event.get("pixel_ratio", 1))
-            self.viewport = (int(pw), int(ph), float(ratio))
+            # Record the viewport (physical/render-buffer size + ratio). Renderview carries
+            # physical dims as pwidth/pheight; fall back to width/height for older clients.
+            pw = int(event.get("pwidth", event.get("width")))
+            ph = int(event.get("pheight", event.get("height")))
+            ratio = float(event.get("ratio", event.get("pixel_ratio", 1)))
+            self.viewport = (pw, ph, ratio)
+            # Under "publisher" (default) this stays informational — the publisher owns the
+            # render size. Under "match_client" it becomes the target the render loop follows.
+            if self._display.resize_policy == "match_client":
+                self._display._request_target(pw, ph, ratio)
         self._display._enqueue_event(self.client_id, self.principal, event)

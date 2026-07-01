@@ -45,15 +45,15 @@ nav:
           - NVENC SDK evaluation: proposals/completed/nvenc_sdk_evaluation.md
           - Pipelined encode — NVENC: proposals/completed/pipelined_encode_nvenc_impl.md
           - rendercanvas backend: proposals/completed/rendercanvas_backend.md
+          - Sizing, DPR & color: proposals/completed/sizing_dpr_color.md
       - In progress (not yet built):
-          - Sizing, DPR & color: proposals/active/sizing_dpr_color.md
           - Zero-copy wgpu→NVENC package: proposals/active/wgpu_nvenc_zerocopy.md
 
 # If you'd like to specify a separate docs directory, you can do so here
 docs_dir: docs
 
 # Markdown extensions — LaTeX (arithmatex + MathJax) and mermaid/admonitions for
-# the concept guides (docs/video_encoding_guide.md, docs/proposals/active/sizing_dpr_color.md).
+# the concept guides (docs/video_encoding_guide.md, docs/proposals/completed/sizing_dpr_color.md).
 markdown_extensions:
   - admonition
   - attr_list

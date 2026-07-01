@@ -1,12 +1,24 @@
-import { RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
+import { RemoteFramebufferView, type ConnectionState, type FitMode, type Stats } from "../src/index";
 
 const params = new URLSearchParams(location.search);
 // Defaults to the `pdum.rfb.server` CLI default port; override with ?ws=...
 const wsUrl = params.get("ws") ?? `ws://${location.hostname}:8765`;
 const transport = params.get("transport") ?? "auto";
+const fit = (params.get("fit") as FitMode | null) ?? undefined;
 
 const stage = document.getElementById("stage") as HTMLElement;
 const statsEl = document.getElementById("stats") as HTMLElement;
+
+// The e2e fit matrix drives a deliberate aspect-ratio mismatch by resizing the stage
+// (the stream stays 640x480); ?stage=WxH overrides the CSS box for those specs.
+const stageParam = params.get("stage");
+if (stageParam) {
+  const [sw, sh] = stageParam.split("x").map(Number);
+  if (sw > 0 && sh > 0) {
+    stage.style.width = `${sw}px`;
+    stage.style.height = `${sh}px`;
+  }
+}
 
 // A small live HUD built entirely from `onStats` — the worked example in
 // docs/metrics_adaptive.md. The `server*` / `target*` rows show "—" until the
@@ -36,6 +48,7 @@ function renderHud(s: Stats): void {
 const view = new RemoteFramebufferView(stage, {
   url: wsUrl,
   imageOnly: transport === "image",
+  fit,
   onStats: renderHud,
   onState: (st) => {
     connState = st;

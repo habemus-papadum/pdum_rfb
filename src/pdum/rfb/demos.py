@@ -74,15 +74,16 @@ class _Plasma:
 class _Paint:
     """Draw with the mouse — demonstrates the browser→server input round-trip.
 
-    Pointer-down + drag paints; any key clears. Browser coordinates are *logical CSS*
-    pixels; we scale them to framebuffer pixels using the canvas CSS size carried by
-    ``resize`` events (falling back to the framebuffer size before the first resize).
+    Pointer-down + drag paints; any key clears. Under the frame-pixel coordinate
+    contract the browser already sends ``x``/``y`` in framebuffer pixels (mapped
+    client-side through the viewport fit), so the server just clamps/rounds them — no
+    CSS→pixel scaling needed. Clicks that land in letterbox padding arrive with
+    ``inside=False`` and are ignored.
     """
 
     def __init__(self) -> None:
         self._canvas: np.ndarray | None = None
         self._fb = (0, 0)  # framebuffer size, refreshed each frame()
-        self._css: tuple[float, float] | None = None  # logical canvas size from resize
         self._down = False
         self._last: tuple[int, int] | None = None
         self._hue = 0.0
@@ -94,17 +95,16 @@ class _Paint:
         return self._canvas
 
     def _to_pixels(self, ex: float, ey: float) -> tuple[int, int]:
+        """Clamp+round the incoming frame-pixel coordinate to a valid index."""
         w, h = self._fb
-        cw, ch = self._css or (w, h)
-        x = int(np.clip(ex * w / max(cw, 1), 0, max(w - 1, 0)))
-        y = int(np.clip(ey * h / max(ch, 1), 0, max(h - 1, 0)))
+        x = int(np.clip(round(ex), 0, max(w - 1, 0)))
+        y = int(np.clip(round(ey), 0, max(h - 1, 0)))
         return x, y
 
     def on_event(self, event: dict) -> None:
         et = event.get("type")
         if et == "resize":
-            self._css = (float(event.get("width", 0) or 0), float(event.get("height", 0) or 0))
-            return
+            return  # informational; the publisher owns the render size
         if et == "key_down":
             if self._canvas is not None:
                 self._canvas[:] = (18, 18, 24)
@@ -116,6 +116,8 @@ class _Paint:
             self._down = False
             self._last = None
         elif et == "pointer_move" and self._down and self._canvas is not None:
+            if event.get("inside") is False:
+                return  # a drag that left the frame (letterbox / crop) — skip
             x, y = self._to_pixels(event.get("x", 0), event.get("y", 0))
             self._hue = (self._hue + 0.01) % 1.0
             color = (np.array(_hsv(self._hue)) * 255).astype(np.uint8)

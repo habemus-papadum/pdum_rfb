@@ -11,6 +11,7 @@ export type {
   BinaryHeader,
   ImageFrameHeader,
   VideoChunkHeader,
+  ColorDescriptor,
   UnpackedMessage,
   ClientControl,
   ServerControl,
@@ -30,6 +31,9 @@ export {
 export type { Capabilities } from "./capabilities";
 
 export { BackpressureController, KeyframeGate } from "./backpressure";
+
+export { frameDestRect, backingToFrame, fitScales } from "./viewport";
+export type { FitMode, ViewportState, DestRect } from "./viewport";
 
 export {
   normalizePointerEvent,

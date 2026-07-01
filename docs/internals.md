@@ -42,8 +42,9 @@ Three concerns stay independent so one API can negotiate the best backend:
 Two kinds of messages share one WebSocket.
 
 **Control (JSON text).** Client → server: `hello`, `ack`, `request_keyframe`,
-`set_viewport`, `event`. Server → client: `config` (sent right after `hello`),
-plus optional `set_quality` / `stats`.
+`set_viewport`, `event`. Server → client: `config` (sent right after `hello`; carries
+`coords:"frame-pixels"` and, when non-default, `pixel_ratio` / `color`), plus optional
+`set_quality` / `stats`.
 
 **Payloads (binary).** Each image or encoded video access unit is **one** binary
 message with a self-describing envelope:
@@ -73,7 +74,11 @@ asserted in Vitest.
 
 Image header: `{type:"image_frame", seq, timestamp_us, width, height, mime}`.
 Video header: `{type:"video_chunk", seq, timestamp_us, duration_us, width, height,
-codec, bitstream:"annexb", keyframe}`.
+codec, bitstream:"annexb", keyframe}`. Both gain optional `pixel_ratio` (render DPR) and
+`color` (descriptor) fields, **emitted only when non-default** so committed fixtures and
+older clients are unaffected; the session stamps them from the source `RawFrame` after
+encode (so no encoder needs to know they exist). See
+[Sizing, DPR & color](proposals/completed/sizing_dpr_color.md).
 
 ## Capability negotiation
 
@@ -216,17 +221,27 @@ Main → worker: `init` (transfers the canvas + url + options), `event`, `resize
 `capture`, `dispose`. Worker → main: `ready`, `state`, `stats`, `capture-result`
 (carries the `ImageData`/`Blob` and the `lastDisplayedSeq` it measured), `error`.
 
-### Event normalization (main thread)
+### Event normalization + the coordinate contract
 
-`events.ts` maps DOM events to the [renderview vocabulary](https://github.com/pygfx/renderview)
-(shared by jupyter_rfb / pygfx / fastplotlib). Coordinates go through
-`pointerToCanvas(cssX, cssY, rect)` = logical canvas pixels (`clientX − rect.left`,
-top-left origin) — the publisher maps logical → its framebuffer using the `ratio`
-carried on resize. `mapButton`/`mapButtons` translate DOM button enums/bitmask to
-renderview's `0=none,1=left,2=right,3=middle` (button) and pressed-button tuple
-(buttons). `computeBackingSize` derives the backing store and the effective ratio
-reported in `set_viewport` (logical `width`/`height` + physical `pwidth`/`pheight` +
-`ratio`).
+`events.ts` (main thread) maps DOM events to the
+[renderview vocabulary](https://github.com/pygfx/renderview) (shared by jupyter_rfb /
+pygfx / fastplotlib) in CSS canvas coordinates, then posts them to the worker.
+`mapButton`/`mapButtons` translate DOM button enums/bitmask to renderview's
+`0=none,1=left,2=right,3=middle` (button) and pressed-button tuple (buttons).
+`computeBackingSize` derives the backing store and the effective ratio reported in
+`set_viewport` (logical `width`/`height` + physical `pwidth`/`pheight` + `ratio`).
+
+**The frame-pixel contract.** All frame↔canvas geometry lives in one pure, unit-tested
+module, `viewport.ts` (`frameDestRect` / `backingToFrame`, for `fill`/`contain`/`cover`) —
+used by **both** the renderer (drawing, letterboxed per fit) and the worker's event path.
+Before sending, the worker remaps each pointer/wheel event CSS → backing (× DPR) → **frame
+pixels** through the current fit, adding `inside` (false in letterbox padding) and
+`pixel_ratio` (the frame's render DPR). So the publisher receives coordinates that index
+its framebuffer directly, correct under any fit or DPR — this is the invariant the original
+HiDPI off-by-DPR bug violated, and the reason drawing and hit-testing share one transform.
+The frame's render DPR *cancels* out of the geometry (it scales frame and backing
+symmetrically), so it rides only as the event echo. `config.coords` advertises the space
+(`"frame-pixels"`, unconditional in this version).
 
 ## Module map
 
@@ -274,7 +289,8 @@ src/pdum/rfb/
 
 widgets/src/
   index.ts                public exports
-  RemoteFramebufferView.ts main-thread controller (canvas, events, resize, capture)
+  RemoteFramebufferView.ts main-thread controller (canvas, events, resize, capture, setFit)
+  viewport.ts             pure frame<->canvas geometry (frameDestRect / backingToFrame; fit modes)
   protocol.ts  events.ts  eventTypes.ts  capabilities.ts  backpressure.ts  types.ts
   workerFactory.ts        inline worker (?worker&inline)
   worker/{entry,renderer,imageDecode,videoDecode}.ts

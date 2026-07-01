@@ -39,7 +39,9 @@ export class VideoPipeline {
     this.decoder = new VideoDecoder({
       output: (frame) => {
         try {
-          this.renderer.draw(frame);
+          // Use the frame's *display* size (the intended pixels), not its coded size
+          // (which is padded up to the codec's macroblock grid).
+          this.renderer.draw(frame, frame.displayWidth || frame.codedWidth, frame.displayHeight || frame.codedHeight);
         } finally {
           frame.close(); // VideoFrame holds GPU/decoder resources; close promptly
         }

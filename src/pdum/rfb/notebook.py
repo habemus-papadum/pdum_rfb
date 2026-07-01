@@ -61,6 +61,10 @@ class RfbCanvas(anywidget.AnyWidget):
     stream = traitlets.Unicode("default").tag(sync=True)
     token = traitlets.Unicode("").tag(sync=True)
     image_only = traitlets.Bool(False).tag(sync=True)
+    # Fit mode when the frame AR differs from the canvas AR ("contain" | "cover" | "fill";
+    # default "contain" client-side); background is the letterbox fill for "contain".
+    fit = traitlets.Unicode("").tag(sync=True)
+    background = traitlets.Unicode("").tag(sync=True)
     height = traitlets.Int(480).tag(sync=True)
 
     # --- chrome (off in the bare tier) ---

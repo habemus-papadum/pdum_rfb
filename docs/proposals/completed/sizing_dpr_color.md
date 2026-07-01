@@ -1,6 +1,21 @@
 # Sizing, Scaling, DPR & Color — design
 
-Status: **proposal** (no code yet). Scope decided with the maintainer:
+> **Status: shipped & tested (P1–P4).** All four features landed additively and
+> opt-in: **fit modes** + the **frame-pixel coordinate contract** (`widgets/src/viewport.ts`,
+> `RfbViewOptions.fit`/`background`, `view.setFit`), **frame `pixel_ratio`**
+> (`publish(pixel_ratio=)` + header/config), **match-client resize**
+> (`serve(resize_policy="match_client")` → `display.target_size`/`target_ratio`), and the
+> **color descriptor** (`ColorSpace` / `SRGB` / `DISPLAY_P3`, `publish(color=)`, H.264 VUI
+> tagging on the PyAV libx264/NVENC paths, `display-p3` client canvas). Verified by
+> `widgets/tests/unit/viewport.test.ts` (geometry: letterbox/crop/inside/DPR/round-trip),
+> `widgets/tests/e2e/fit.spec.ts` (dpr × fit matrix), and `tests/test_sizing.py` (wire
+> contract + P3 VUI decode-back). User docs: [Sizing, DPR & color](../../guide_python.md#sizing-dpr--color).
+>
+> **Deferred (designed-for, as noted below):** client zoom/pan; HDR / 10-bit; 4:4:4;
+> per-client render sizes; and P3-primaries tagging on the image path + VideoToolbox /
+> NVENC-SDK backends (the descriptor flows; those backends carry BT.601 VUI for now).
+
+The original design, as decided with the maintainer:
 
 1. **Aspect-ratio-aware fit modes** on the client (default letterbox), with the
    coordinate contract corrected so clicks stay accurate under any fit.

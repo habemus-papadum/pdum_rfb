@@ -247,7 +247,16 @@ class _StreamHost:
             factory = self._make_factory(selection)
             encoder = factory(width, height, self.bitrate, self.fps)
             transport = "webcodecs" if selection.transport == "h264" else "image"
-            await conn.send(config_message(transport=transport, width=width, height=height, codec=selection.codec))
+            await conn.send(
+                config_message(
+                    transport=transport,
+                    width=width,
+                    height=height,
+                    codec=selection.codec,
+                    pixel_ratio=self.display.pixel_ratio,
+                    color=self.display.color,
+                )
+            )
 
             controller = (
                 AdaptiveQualityController(
@@ -299,6 +308,7 @@ class _StreamHost:
                 bitrate=bitrate,
                 video_encoder=self.video_encoder,
                 pipeline_depth=self.encode_pipeline_depth,
+                color=self.display.color,
             )
             # In GPU mode the publisher pushes GPU-resident frames; an image-transport
             # viewer's host encoder is wrapped so those frames are downloaded first —
@@ -448,6 +458,8 @@ class Server:
         event_log: str | Path | None = None,
         event_queue_size: int = 4096,
         own_frames: bool = False,
+        resize_policy: str = "publisher",
+        max_render_dimension: int | None = None,
         encode_pipeline_depth: int = 0,
     ) -> Display:
         """Register a new named stream and return its :class:`Display`.
@@ -455,8 +467,8 @@ class Server:
         Streams are independent: each carries its own encoder config (one GPU, one
         image; per-stream bitrate; per-stream ``authenticate``). Safe to call before
         or after :meth:`start` — clients reach it at ``ws://host/<name>`` either way.
-        Raises if ``name`` is already taken. ``own_frames`` is forwarded to the
-        stream's :class:`Display` (see :meth:`Display.publish`).
+        Raises if ``name`` is already taken. ``own_frames`` / ``resize_policy`` /
+        ``max_render_dimension`` are forwarded to the stream's :class:`Display`.
         """
         if name in self._streams:
             raise ValueError(f"stream {name!r} already exists")
@@ -468,6 +480,8 @@ class Server:
             event_log=event_log,
             event_queue_size=event_queue_size,
             own_frames=own_frames,
+            resize_policy=resize_policy,
+            max_render_dimension=max_render_dimension,
         )
         host = _StreamHost(
             display,
@@ -610,6 +624,8 @@ async def serve(
     event_log: str | Path | None = None,
     event_queue_size: int = 4096,
     own_frames: bool = False,
+    resize_policy: str = "publisher",
+    max_render_dimension: int | None = None,
     encode_pipeline_depth: int = 0,
 ) -> Display:
     """Start the RFB WebSocket server in the background and return a :class:`Display`.
@@ -660,6 +676,11 @@ async def serve(
         it returns (no reallocation, no "released" callback). Default ``False`` keeps the
         zero-copy borrow (publish a fresh buffer each call). ``cpu``/``cuda`` only;
         ``metal`` raises. See :meth:`Display.publish`.
+    resize_policy, max_render_dimension:
+        Opt in to **match-client resize**: ``resize_policy="match_client"`` makes a viewer's
+        ``set_viewport`` authoritative — the render stream follows the viewport via
+        ``display.target_size`` (default ``"publisher"`` keeps you in charge of size).
+        ``max_render_dimension`` caps the followed size. See :attr:`Display.target_size`.
     encode_pipeline_depth:
         Encoder pipeline depth. ``0`` (default) is synchronous 1-in-1-out — lowest
         latency, optimal for the interactive latest-frame-wins model. ``> 0`` opts into
@@ -694,6 +715,8 @@ async def serve(
         event_log=event_log,
         event_queue_size=event_queue_size,
         own_frames=own_frames,
+        resize_policy=resize_policy,
+        max_render_dimension=max_render_dimension,
         encode_pipeline_depth=encode_pipeline_depth,
     )
     await server.start()
@@ -744,6 +767,9 @@ async def serve_server(
 
 async def _amain(args: argparse.Namespace) -> None:
     from .testing import render_pattern
+    from .types import DISPLAY_P3, SRGB
+
+    stream_color = DISPLAY_P3 if args.color == "display-p3" else (SRGB if args.color == "srgb" else None)
 
     w = args.width - (args.width % 2)
     h = args.height - (args.height % 2)
@@ -762,6 +788,8 @@ async def _amain(args: argparse.Namespace) -> None:
         stats_interval=args.stats_interval,
         record_events=args.record_events,
         event_log=args.event_log,
+        resize_policy=args.resize_policy,
+        max_render_dimension=args.max_render_dimension,
     )
 
     # In --gpu mode the demo uploads each pattern frame to the GPU so the
@@ -789,8 +817,15 @@ async def _amain(args: argparse.Namespace) -> None:
         while args.max_frames is None or seq < args.max_frames:
             for _ev in display.poll_events():
                 pass  # the demo ignores input; --record-events captures it via the Display log
-            frame = render_pattern(args.pattern, seq, w, h)
-            display.publish(to_device(frame) if to_device is not None else frame)
+            # Under --resize-policy match_client, follow the viewer's (debounced, clamped)
+            # backing size and tag the frame's render DPR so the client displays it crisp.
+            rw, rh = display.target_size or (w, h)
+            frame = render_pattern(args.pattern, seq, rw, rh)
+            display.publish(
+                to_device(frame) if to_device is not None else frame,
+                pixel_ratio=display.target_ratio,
+                color=stream_color,
+            )
             seq += 1
             await asyncio.sleep(1 / args.fps)
     finally:
@@ -832,6 +867,25 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         metavar="SECONDS",
         help="send a lossless PNG / clean IDR still this many seconds after frames settle (e.g. 0.15)",
+    )
+    parser.add_argument(
+        "--resize-policy",
+        choices=["publisher", "match_client"],
+        default="publisher",
+        help="match_client: follow the viewer's viewport (render stream resizes to the client)",
+    )
+    parser.add_argument(
+        "--max-render-dimension",
+        type=int,
+        default=None,
+        metavar="PX",
+        help="cap either dimension of a match_client render size (AR-preserving)",
+    )
+    parser.add_argument(
+        "--color",
+        choices=["srgb", "display-p3"],
+        default=None,
+        help="tag the stream's color space (display-p3 = Apple wide-gamut SDR); default untagged sRGB",
     )
     parser.add_argument("--record-events", action="store_true")
     parser.add_argument("--event-log", default=None)

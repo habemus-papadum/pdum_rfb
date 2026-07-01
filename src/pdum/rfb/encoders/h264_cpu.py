@@ -31,6 +31,30 @@ def h264_available() -> bool:
     return importlib.util.find_spec("av") is not None
 
 
+# ffmpeg AVColor* enum codes for the VUI we signal. The luma/chroma **matrix** is fixed
+# to BT.601 limited-range (SMPTE170M / MPEG) to match the library's RGB→NV12/YUV420 color
+# conversion (swscale default + pdum.rfb.gpu/metal use BT.601 limited); only primaries and
+# transfer vary by descriptor, so the browser reconstructs RGB correctly and then interprets
+# it in the declared gamut. See docs/proposals/completed/sizing_dpr_color.md §7.2.
+_AV_PRIMARIES = {"bt709": 1, "display-p3": 12, "bt2020": 9}
+_AV_TRANSFER = {"srgb": 13, "bt709": 1, "linear": 8, "pq": 16, "hlg": 18}
+_AV_MATRIX_BT601 = 6
+_AV_RANGE_LIMITED = 1
+
+
+def h264_color_vui(color: dict | None) -> tuple[int, int, int, int] | None:
+    """Map a color descriptor to ``(primaries, transfer, matrix, range)`` ffmpeg codes.
+
+    Returns ``None`` for the default (``color is None``) so no VUI is written and existing
+    sRGB streams are bitstream-unchanged.
+    """
+    if not color:
+        return None
+    primaries = _AV_PRIMARIES.get(color.get("primaries", "bt709"), 1)
+    transfer = _AV_TRANSFER.get(color.get("transfer", "srgb"), 13)
+    return (primaries, transfer, _AV_MATRIX_BT601, _AV_RANGE_LIMITED)
+
+
 def h264_cpu_available() -> bool:
     """True if PyAV is importable and exposes the libx264 encoder."""
     if not h264_available():
@@ -58,15 +82,18 @@ class H264CpuEncoder:
         fps: int = 30,
         bitrate: int = 12_000_000,
         codec_string: str | None = None,
+        color: dict | None = None,
     ) -> None:
         self.width = width
         self.height = height
         self.fps = fps
         self.bitrate = bitrate
         self.codec_string = codec_string or DEFAULT_H264_CODEC
+        self.color = color
         self.frame_index = 0
         self._duration_us = int(1_000_000 / fps)
         self.ctx = self._make_context()
+        self._apply_color_vui(self.ctx)
 
     def _make_context(self):
         """Build the libx264 :class:`av.CodecContext` (overridden by NVENC)."""
@@ -88,6 +115,18 @@ class H264CpuEncoder:
             "x264-params": (f"keyint={self.fps}:min-keyint={self.fps}:scenecut=0:bframes=0:annexb=1:repeat-headers=1"),
         }
         return ctx
+
+    def _apply_color_vui(self, ctx) -> None:
+        """Signal color primaries/transfer/matrix/range on the codec context (→ H.264 VUI),
+        shared by the libx264 and NVENC contexts. No-op for the default sRGB stream."""
+        codes = h264_color_vui(self.color)
+        if codes is None:
+            return
+        primaries, transfer, matrix, color_range = codes
+        ctx.color_primaries = primaries
+        ctx.color_trc = transfer
+        ctx.colorspace = matrix
+        ctx.color_range = color_range
 
     def encode(self, frame: RawFrame, *, force_keyframe: bool = False) -> list[EncodedPayload]:
         import av

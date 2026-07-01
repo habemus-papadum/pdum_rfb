@@ -35,7 +35,7 @@ from .protocol import (
 )
 from .session import RfbSession
 from .transport import Channel, WebSocketTransport
-from .types import EncodedPayload, EncoderBackend, InputEvent, RawFrame
+from .types import DISPLAY_P3, SRGB, ColorSpace, EncodedPayload, EncoderBackend, InputEvent, RawFrame
 
 __version__ = "0.1.0-alpha"
 
@@ -46,6 +46,9 @@ __all__ = [
     "Authenticator",
     "BackendSelection",
     "Channel",
+    "ColorSpace",
+    "DISPLAY_P3",
+    "SRGB",
     "NvencGpuPyavEncoder",  # lazy
     "Display",
     "EncodedPayload",

@@ -55,6 +55,7 @@ def _nvenc_gpu_pyav_factory(**kwargs) -> EncoderBackend:
     from .nvenc_gpu_pyav import NvencGpuPyavEncoder
 
     kwargs.pop("pipeline_depth", None)  # PyAV path is synchronous 1-in-1-out
+    kwargs.pop("color", None)  # color VUI on the zero-copy GPU path is a follow-up (see sizing_dpr_color §7.2)
     return NvencGpuPyavEncoder(**kwargs)
 
 
@@ -65,6 +66,7 @@ def _nvenc_gpu_pdum_factory(**kwargs) -> EncoderBackend:
     # *forwards* the kwarg (unlike the PyAV backends). See docs/pipelined_encode.md.
     from .nvenc_gpu_pdum import NvencGpuPdumEncoder
 
+    kwargs.pop("color", None)  # SDK VUI tagging is a native-binding follow-up (see sizing_dpr_color §7.2)
     return NvencGpuPdumEncoder(**kwargs)
 
 
@@ -74,6 +76,7 @@ def _vtenc_factory(**kwargs) -> EncoderBackend:
     # not faster on VT — see docs/pipelined_encode.md).
     from .vtenc import VideoToolboxEncoder
 
+    kwargs.pop("color", None)  # VideoToolbox emits BT.601 VUI; P3 primaries tagging is a binding follow-up
     return VideoToolboxEncoder(**kwargs)
 
 
@@ -106,6 +109,7 @@ def build_encoder(
     bitrate: int = 12_000_000,
     video_encoder: str = "h264_cpu",
     pipeline_depth: int = 0,
+    color: dict | None = None,
 ) -> EncoderBackend:
     """Build the encoder backend described by ``selection``.
 
@@ -122,6 +126,10 @@ def build_encoder(
         seq attribution trivially correct). ``> 0`` opts into the token-based pipelined path
         on backends that implement it (NVENC; on VideoToolbox it is correct but not faster).
         See :doc:`pipelined_encode`.
+    color:
+        Optional stream color descriptor (``dict`` form of a
+        :class:`~pdum.rfb.types.ColorSpace`). The PyAV H.264 backends tag the bitstream VUI
+        with it; the GPU-SDK / VideoToolbox backends currently ignore it (native follow-up).
     """
     if selection.transport == "image":
         return ImageEncoder(mode=selection.image_mode or "jpeg")
@@ -140,6 +148,7 @@ def build_encoder(
             bitrate=bitrate,
             codec_string=selection.codec,
             pipeline_depth=pipeline_depth,
+            color=color,
         )
 
     raise ValueError(f"unsupported transport: {selection.transport!r}")

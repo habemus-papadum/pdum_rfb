@@ -249,6 +249,7 @@ class RfbSession:
         self.force_keyframe = False
 
         for payload in payloads:
+            self._stamp_render_descriptors(payload, frame)
             await self.send_payload(payload)
         await self._maybe_adapt()
         return "sent"
@@ -293,7 +294,16 @@ class RfbSession:
         payloads = await asyncio.to_thread(self.encoder.encode_still, still)  # type: ignore[attr-defined]
         self.metrics.record_encode((self._clock() - t0) * 1000, now=self._clock())
         for payload in payloads:
+            self._stamp_render_descriptors(payload, still)
             await self.send_payload(payload)
+
+    @staticmethod
+    def _stamp_render_descriptors(payload: EncodedPayload, frame: RawFrame) -> None:
+        """Carry the source frame's render-side descriptors (``pixel_ratio`` / ``color``)
+        onto the outgoing payload, so ``header_for`` can emit them without any encoder
+        needing to know they exist. The session is the single frame→payload seam."""
+        payload.pixel_ratio = frame.pixel_ratio
+        payload.color = frame.color
 
     def _snapshot_still(self, frame: RawFrame) -> RawFrame:
         """Copy the resting ``frame`` into a server-owned, reused buffer for the still encode.

@@ -38,12 +38,23 @@ interface RfbViewOptions {
   maxBackingDimension?: number;      // cap backing pixels (decoder/GPU limits)
   imageOnly?: boolean;               // force the image transport (skip H.264)
   maxInflight?: number;              // client-side decode backpressure ceiling
+  fit?: "contain" | "cover" | "fill"; // frame-vs-canvas AR handling (default "contain")
+  background?: string;               // letterbox fill for "contain" (CSS color; default "#000")
   token?: string;                    // auth credential sent in `hello` (e.g. a Google ID token)
   onState?: (s: ConnectionState) => void;
   onStats?: (s: Stats) => void;
   onError?: (e: Error) => void;
 }
 ```
+
+**Fit modes.** When the stream's aspect ratio differs from the canvas, `fit` decides:
+`"contain"` (default) letterboxes with `background`, `"cover"` crops, `"fill"` stretches
+each axis (the pre-fit-modes behavior). Change it live with `view.setFit(fit, background?)`.
+The client owns a single frame↔canvas transform (`viewport.ts`), so it maps every
+pointer/wheel event to **framebuffer pixels** through the current fit before sending — the
+publisher receives coordinates that index its frame directly, correct under any fit / DPR
+(see [Input events](#input-events)). Wide-gamut streams (the server tagged
+`color=DISPLAY_P3`) render on a matching `display-p3` canvas automatically.
 
 `ConnectionState` is `connecting | open | negotiated | closed | error`. `Stats`
 reports the local decode side — `framesDisplayed`, `framesDropped`,
@@ -196,8 +207,12 @@ event vocabulary shared by jupyter_rfb / pygfx / fastplotlib — so events feed 
 consumers without translation. It forwards `pointermove/down/up`, `wheel`, and
 `keydown/keyup`, and:
 
-- sends **logical** (canvas-relative CSS) coordinates, top-left origin; the
-  publisher maps logical → its own framebuffer using the `ratio` carried on resize;
+- sends pointer/wheel `x`/`y` as **physical framebuffer pixels** (top-left origin):
+  the worker maps CSS → backing → frame through the current fit (`viewport.ts`), so the
+  publisher receives coordinates that index its frame directly — correct under any fit
+  mode or DPR. It also adds `inside` (false in letterbox padding / a `cover` crop) and
+  `pixel_ratio` (the frame's render DPR echo), so a publisher rendering in logical
+  coordinates can divide it out;
 - reports `button` as renderview's `0=none, 1=left, 2=right, 3=middle` and `buttons`
   as the **tuple** of currently-pressed buttons (not a DOM bitmask);
 - capitalizes modifiers: `"Shift"`, `"Control"`, `"Alt"`, `"Meta"`;

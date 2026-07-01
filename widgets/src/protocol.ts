@@ -5,6 +5,15 @@
 
 import type { NormalizedEvent } from "./eventTypes";
 
+/** A stream color descriptor (mirrors WebCodecs `VideoColorSpace` + range/depth). */
+export interface ColorDescriptor {
+  primaries?: "bt709" | "display-p3" | "bt2020";
+  transfer?: "srgb" | "bt709" | "pq" | "hlg" | "linear";
+  matrix?: "rgb" | "bt709" | "bt2020-ncl";
+  full_range?: boolean;
+  bit_depth?: number;
+}
+
 export interface ImageFrameHeader {
   type: "image_frame";
   seq: number;
@@ -12,6 +21,10 @@ export interface ImageFrameHeader {
   width: number;
   height: number;
   mime: string;
+  /** Render-side DPR of this frame (device px per logical px); absent ⇒ 1. */
+  pixel_ratio?: number;
+  /** Color descriptor; absent ⇒ sRGB. */
+  color?: ColorDescriptor;
 }
 
 export interface VideoChunkHeader {
@@ -24,6 +37,10 @@ export interface VideoChunkHeader {
   codec: string;
   bitstream: "annexb" | "avcc";
   keyframe: boolean;
+  /** Render-side DPR of this frame (device px per logical px); absent ⇒ 1. */
+  pixel_ratio?: number;
+  /** Color descriptor; absent ⇒ sRGB. */
+  color?: ColorDescriptor;
 }
 
 export type BinaryHeader = ImageFrameHeader | VideoChunkHeader;
@@ -103,6 +120,12 @@ export interface ConfigMsg {
   codec?: string;
   width: number;
   height: number;
+  /** Event coordinate space the client sends; always `"frame-pixels"` in this version. */
+  coords?: "frame-pixels";
+  /** Initial render-side DPR hint (per-frame headers keep it current); absent ⇒ 1. */
+  pixel_ratio?: number;
+  /** Stream color descriptor; absent ⇒ sRGB. */
+  color?: ColorDescriptor;
 }
 export interface SetQualityMsg {
   type: "set_quality";

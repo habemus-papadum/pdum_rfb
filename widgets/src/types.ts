@@ -2,6 +2,7 @@
 // available in both DOM and WebWorker libs are referenced here.
 
 import type { NormalizedEvent } from "./eventTypes";
+import type { FitMode } from "./viewport";
 
 export type ConnectionState = "connecting" | "open" | "negotiated" | "closed" | "error";
 
@@ -12,6 +13,10 @@ export interface WorkerInitOptions {
   imageOnly?: boolean;
   /** Auth credential forwarded in the `hello` message. */
   token?: string;
+  /** Fit mode when frame AR differs from canvas AR (default `"contain"`). */
+  fit?: FitMode;
+  /** Letterbox fill for `contain` (any CSS color; default `"#000"`). */
+  background?: string;
 }
 
 export type MainToWorker =
@@ -36,6 +41,7 @@ export type MainToWorker =
       pixelRatio: number;
     }
   | { type: "capture"; id: number; format: "imagedata" | "blob" }
+  | { type: "set_fit"; fit?: FitMode; background?: string }
   | { type: "dispose" };
 
 export interface Stats {
