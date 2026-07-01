@@ -22,7 +22,8 @@
     "build": "tsc --emitDeclarationOnly -p tsconfig.json && vite build",
     "demo:build": "vite build --config vite.demo.config.ts",
     "demo:preview": "vite preview --config vite.demo.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
+    "build:anywidget": "vite build --config vite.anywidget.config.ts && node -e \"require('fs').copyFileSync('packages/rfb-ui/src/rfb.css','../src/pdum/rfb/static/widget.css')\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.anywidget.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
@@ -30,6 +31,7 @@
     "gen:fixtures": "cd .. && uv run python -m pdum.rfb.testing widgets/tests/fixtures/protocol"
   },
   "devDependencies": {
+    "@habemus-papadum/rfb-ui": "workspace:*",
     "@playwright/test": "^1.48.0",
     "@vitest/coverage-v8": "^3.0.0",
     "happy-dom": "^15.7.0",

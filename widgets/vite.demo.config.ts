@@ -7,6 +7,13 @@ export default defineConfig({
   build: {
     outDir: "dist/demo",
     emptyOutDir: true,
+    rollupOptions: {
+      // Multi-page: the demo + the anywidget e2e harness.
+      input: {
+        index: "index.html",
+        anywidget: "anywidget-harness.html",
+      },
+    },
   },
   preview: {
     host: "127.0.0.1",

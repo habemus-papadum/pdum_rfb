@@ -70,55 +70,123 @@ current canvas pixels), and `view.dispose()`.
 
 ## Framework integration
 
-The core has no framework dependency — instantiate in a mount hook, dispose on
-cleanup.
+The core (`@habemus-papadum/rfb-widgets`) has no framework dependency, and there are thin
+idiomatic wrappers for the big three. Each ships **two tiers**:
+
+- **Tier 1 — headless.** A hook / action / primitive that owns the view lifecycle and
+  exposes reactive `state` / `stats` / `error` + `capture` / `reconnect`. No markup, no
+  CSS — you render and style everything.
+- **Tier 2 — batteries.** A `<RemoteFramebuffer>` component with a status pill, a compact
+  latency badge, a toggleable stats HUD, an error banner, and a toolbar
+  (screenshot / fullscreen / transport toggle / HUD toggle). Opt-in stylesheet, fully
+  themeable (see [Theming](#theming-the-batteries-component)).
+
+| Framework | Package | Tier 1 | Tier 2 |
+| --- | --- | --- | --- |
+| React (≥18) | `@habemus-papadum/rfb-react` | `useRemoteFramebuffer` / `useRemoteFramebufferStats` | `<RemoteFramebuffer>` |
+| Svelte (5) | `@habemus-papadum/rfb-svelte` | `createRemoteFramebuffer` (`use:` action + stores) | `<RemoteFramebuffer>` |
+| Solid (≥1.8) | `@habemus-papadum/rfb-solid` | `createRemoteFramebuffer` (ref + signals) | `<RemoteFramebuffer>` |
+
+Each wrapper peer-depends the core, so you install both (e.g.
+`pnpm add @habemus-papadum/rfb-react @habemus-papadum/rfb-widgets react react-dom`). The
+Web Worker is inlined in the core, so no extra bundler config is needed.
+
+> **Recreate-on-change:** the core has no setters, so changing a connect-critical option
+> (`url`, `token`, `imageOnly`, dpr, `maxBackingDimension`, `maxInflight`, `autoResize`)
+> disposes and rebuilds the connection — the remote stream genuinely restarts. Cosmetic
+> props and fresh callback closures do **not** recreate it.
 
 ### React
 
 ```tsx
-import { useEffect, useRef } from "react";
-import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
+import { RemoteFramebuffer, useRemoteFramebuffer, useRemoteFramebufferStats } from "@habemus-papadum/rfb-react";
+import "@habemus-papadum/rfb-react/styles.css"; // only needed for the batteries component
 
-export function Framebuffer({ url }: { url: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const view = new RemoteFramebufferView(ref.current!, { url });
-    return () => view.dispose();
-  }, [url]);
-  return <div ref={ref} style={{ width: 640, height: 480 }} />;
+// Batteries:
+<RemoteFramebuffer url="ws://localhost:8765" style={{ width: 640, height: 480 }} />;
+
+// Headless: build your own UI on the hook.
+function MyView({ url }: { url: string }) {
+  const { containerRef, state, view } = useRemoteFramebuffer({ url });
+  const stats = useRemoteFramebufferStats(view); // opt-in; no re-render storm at frame rate
+  return (
+    <div style={{ width: 640, height: 480 }}>
+      <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+      <span>{state} · {stats.transport}</span>
+    </div>
+  );
 }
 ```
 
-### Vue
-
-```vue
-<script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from "vue";
-import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
-
-const el = ref<HTMLElement>();
-let view: RemoteFramebufferView | undefined;
-onMounted(() => { view = new RemoteFramebufferView(el.value!, { url: "ws://localhost:8765" }); });
-onBeforeUnmount(() => view?.dispose());
-</script>
-
-<template><div ref="el" style="width:640px;height:480px" /></template>
-```
-
-### Svelte / vanilla
+### Svelte
 
 ```svelte
-<script>
-  import { onMount } from "svelte";
-  import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
-  let el;
-  onMount(() => {
-    const view = new RemoteFramebufferView(el, { url: "ws://localhost:8765" });
-    return () => view.dispose();
-  });
+<script lang="ts">
+  import { RemoteFramebuffer, createRemoteFramebuffer } from "@habemus-papadum/rfb-svelte";
+  import "@habemus-papadum/rfb-svelte/styles.css";
+
+  // Headless: `use:` action + stores.
+  const fb = createRemoteFramebuffer({ url: "ws://localhost:8765" });
+  const { state, stats } = fb;
 </script>
-<div bind:this={el} style="width:640px;height:480px"></div>
+
+<!-- Batteries -->
+<RemoteFramebuffer url="ws://localhost:8765" style="width:640px;height:480px" />
+
+<!-- Headless -->
+<div class="viewport" use:fb.action={{ url: "ws://localhost:8765" }}></div>
+<p>{$state} · {$stats.transport}</p>
 ```
+
+### Solid
+
+```tsx
+import { RemoteFramebuffer, createRemoteFramebuffer } from "@habemus-papadum/rfb-solid";
+import "@habemus-papadum/rfb-solid/styles.css";
+
+// Batteries:
+<RemoteFramebuffer url="ws://localhost:8765" style={{ width: "640px", height: "480px" }} />;
+
+// Headless: ref + signals (pass an accessor for reactive connect params).
+function MyView(props: { url: string }) {
+  const fb = createRemoteFramebuffer(() => ({ url: props.url }));
+  return (
+    <div style={{ width: "640px", height: "480px" }}>
+      <div ref={fb.ref} style={{ width: "100%", height: "100%" }} />
+      <span>{fb.state()} · {fb.stats().transport}</span>
+    </div>
+  );
+}
+```
+
+### Theming the batteries component
+
+Tier 1 ships **no CSS**. Tier 2's stylesheet is opt-in and restyleable three ways, without
+forking:
+
+1. **CSS custom properties** on `.rfb-root` — `--rfb-accent`, `--rfb-bg`, `--rfb-fg`,
+   `--rfb-overlay-bg`, `--rfb-status-{connecting,open,closed,error}`, `--rfb-radius`,
+   `--rfb-font`, … Override on any ancestor to reskin.
+2. **Stable part classes** — `.rfb-root[data-state]`, `.rfb-viewport`, `.rfb-toolbar`,
+   `.rfb-button`, `.rfb-status`, `.rfb-badge`, `.rfb-hud`, `.rfb-banner` — for precise CSS.
+3. **Structural replacement** — React/Solid `renderStatus` / `renderToolbar` / `renderHud`
+   / `renderError` render-props (each given the reactive chrome context) and `children`;
+   Svelte named slots. Drop regions entirely with `toolbar={false}` / `hud={false}` /
+   `status={false}` / `badge={false}`.
+
+### Other frameworks / vanilla
+
+The core class works anywhere — instantiate in a mount hook, `dispose()` on cleanup:
+
+```ts
+import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";
+const view = new RemoteFramebufferView(el, { url: "ws://localhost:8765" });
+// … later …
+view.dispose();
+```
+
+For example, in Vue: `onMounted(() => (view = new RemoteFramebufferView(el.value!, { url })))`
+and `onBeforeUnmount(() => view?.dispose())`.
 
 ## Input events
 

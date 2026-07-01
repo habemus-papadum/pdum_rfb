@@ -90,6 +90,7 @@ hardware NVENC routes are available — see the
 pip install habemus-papadum-rfb              # image path (numpy, pillow, websockets)
 pip install 'habemus-papadum-rfb[h264]'      # + CPU/software H.264 (PyAV/libx264)
 pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'   # + GPU H.264 (NVIDIA, Linux) — fastest
+pip install 'habemus-papadum-rfb[anywidget]'       # + Jupyter/marimo notebook widget
 ```
 
 `import pdum.rfb` works without any extra. Not sure what your machine supports?

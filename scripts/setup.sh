@@ -138,6 +138,11 @@ if [ -d "widgets" ]; then
         echo "   ✓ node $(node --version) (≥${NODE_MIN}), pnpm $(pnpm --version)"
         (cd widgets && pnpm install --frozen-lockfile)
 
+        # Rebuild the committed anywidget bundle (src/pdum/rfb/static/widget.{js,css}) so a
+        # dev tree / the notebook test always has it in sync with the TS source.
+        echo "   Building the anywidget bundle..."
+        (cd widgets && pnpm run build:anywidget) || echo "   ⚠ anywidget bundle build failed"
+
         # Playwright's Chromium is required for the e2e tests (pnpm -C widgets e2e).
         # The download is idempotent (skipped if already present); it needs no sudo.
         echo "   Installing Playwright Chromium (for e2e tests)..."

@@ -1,0 +1,42 @@
+{
+  "name": "@habemus-papadum/rfb-svelte",
+  "version": "0.1.0-alpha",
+  "description": "Svelte action + component for the pdum.rfb remote framebuffer client.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": ["*.css"],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "svelte-package -i src -o dist && node -e \"require('fs').copyFileSync('../rfb-ui/src/rfb.css','dist/styles.css')\"",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@habemus-papadum/rfb-widgets": "workspace:^",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@habemus-papadum/rfb-widgets": "workspace:*",
+    "@habemus-papadum/rfb-ui": "workspace:*",
+    "@sveltejs/package": "^2.3.7",
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "happy-dom": "^15.7.0",
+    "svelte": "^5.15.0",
+    "svelte-check": "^4.1.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -22,6 +22,7 @@ first**, and the platform limits that apply to the GPU paths.
 | Software H.264 | `pip install 'habemus-papadum-rfb[h264]'` | anywhere PyAV has wheels | good |
 | **GPU H.264 (recommended)** | `pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'` | Linux · amd64 · NVIDIA | **fastest** |
 | GPU H.264 (PyAV route) | `[gpu-cuda13]` + **PyAV 18** | Linux · NVIDIA | fastest |
+| View in a notebook | `pip install 'habemus-papadum-rfb[anywidget]'` | Jupyter · marimo | — |
 
 The two GPU rows reach the same hardware NVENC speed; the **SDK path is easier to
 install** — one `pip install` of a prebuilt wheel (`habemus-papadum-nvenc`) straight
@@ -58,6 +59,19 @@ Starlette/FastAPI app (same origin, sharing its TLS and session cookie) instead 
 the standalone `serve()` listener. Pure Python, installs anywhere; it's a front-end
 choice, orthogonal to which encoder you pick. See the
 [ASGI / Starlette adapter](asgi.md) guide.
+
+## 2c. View in a Jupyter/marimo notebook — `[anywidget]`
+
+```bash
+pip install 'habemus-papadum-rfb[anywidget]'
+```
+
+Adds [anywidget](https://anywidget.dev) so `display.widget()` renders the framebuffer
+straight into a notebook cell. The widget's JS ships prebuilt in the wheel (no Node
+step); frames ride a plain WebSocket owned by the widget, not the kernel comm. Pure
+Python, installs anywhere, orthogonal to the encoder — pair it with `[gpu-nvenc-sdk]`
+for a hardware-encoded stream in the notebook. See the
+[notebook guide](notebook.md).
 
 ## 3. Host NVENC — `[nvenc]` + an NVIDIA GPU
 

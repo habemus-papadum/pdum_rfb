@@ -1,5 +1,12 @@
 # pnpm 11 reads settings from here (the `pnpm` field in package.json is no longer
 # honored). esbuild ships a postinstall that fetches its native binary; pnpm blocks
 # dependency build scripts by default, so allow it explicitly via `allowBuilds`.
+#
+# The directory holding this file (widgets/) stays the workspace ROOT project and the
+# core package `@habemus-papadum/rfb-widgets` (importer `.`). The `packages:` glob ADDS
+# the framework wrappers (rfb-react / rfb-svelte / rfb-solid) + the private rfb-ui shared
+# styles. Do NOT list `.` here — mixing root-as-member with packages/* changes `-r`.
+packages:
+  - "packages/*"
 allowBuilds:
   esbuild: true

@@ -43,6 +43,11 @@ jobs:
         run: uv run pytest --cov=src/pdum/rfb --cov-report=xml --cov-report=term
       - name: Build Documentation
         run: uv run mkdocs build
+      - name: Run demo notebooks (headless, no file modification)
+        # Executes every .ipynb listed in mkdocs.yml (currently docs/demos/anywidget.ipynb)
+        # via nbconvert. The committed anywidget bundle is checked out, so no Node step is
+        # needed here — this proves the notebook API + widget mimebundle work end to end.
+        run: ./scripts/test_notebooks.sh --no-inplace
       - name: Temporarily disable git hooks for coverage action
         run: |
           if [ -f .git/hooks/pre-commit ]; then
@@ -101,11 +106,28 @@ jobs:
       - name: Install widget dependencies
         run: pnpm -C widgets install --frozen-lockfile
 
+      - name: Build core package (framework wrappers typecheck/build against its dist)
+        run: pnpm -C widgets build
+
       - name: Typecheck
         run: pnpm -C widgets typecheck
 
       - name: Unit tests
         run: pnpm -C widgets test
+
+      - name: Framework wrappers — typecheck, test, build
+        run: |
+          pnpm -C widgets -r --filter './packages/*' run typecheck
+          pnpm -C widgets -r --filter './packages/*' run test
+          pnpm -C widgets -r --filter './packages/*' run build
+
+      - name: Anywidget bundle is up to date (committed artifact matches source)
+        # The wheel ships the prebuilt src/pdum/rfb/static/widget.{js,css}; rebuild from
+        # widgets/anywidget/ and fail if the tracked files drift from source.
+        run: |
+          pnpm -C widgets run build:anywidget
+          git diff --exit-code -- src/pdum/rfb/static/widget.js src/pdum/rfb/static/widget.css \
+            || { echo "::error::src/pdum/rfb/static/widget.{js,css} is stale — run 'pnpm -C widgets run build:anywidget' and commit the result."; exit 1; }
 
       - name: Install Playwright browser
         run: pnpm -C widgets exec playwright install --with-deps chromium

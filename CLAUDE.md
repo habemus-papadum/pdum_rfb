@@ -107,6 +107,10 @@ src/pdum/rfb/
   metrics.py      SessionMetrics (encode_ms, bytes, RTT, fps, bitrate, ...)
   adaptive.py     AdaptiveQualityController (opt-in via serve(adaptive=True))
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 w/ real PSNR
+  notebook.py     opt-in [anywidget] Jupyter/marimo widgets: RfbCanvas (bare) / RfbViewer (batteries)
+                  + publish_loop(); Display.widget() lazy-imports it (see docs/notebook.md)
+  static/         COMMITTED widget.{js,css} — prebuilt inlined-worker anywidget bundle (package data;
+                  built from widgets/anywidget/ via `pnpm -C widgets build:anywidget`; .map gitignored)
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
   cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo
@@ -114,12 +118,23 @@ src/pdum/rfb/
   demo_tui.py     `pdum-rfb demo` orchestration: serve + render loop + Vite launch + smoke() self-test
   demo_app.py     the Textual TUI (lazy `[demo]` import): live scene/backend switch, quality, stats
 
-widgets/src/
-  index.ts                  public exports
-  RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture)
-  protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
-  workerFactory.ts          inline worker (?worker&inline)
-  worker/{entry,renderer,imageDecode,videoDecode}.ts
+widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-widgets (importer ".")
+  src/
+    index.ts                  public exports
+    RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture)
+    protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
+    workerFactory.ts          inline worker (?worker&inline)
+    worker/{entry,renderer,imageDecode,videoDecode}.ts
+  anywidget/{entry,chrome}.ts vanilla-DOM anywidget front-end (2nd Vite build via
+                              vite.anywidget.config.ts -> src/pdum/rfb/static/widget.js, NOT an npm pkg)
+  packages/                   framework wrappers (separate npm packages, workspace members)
+    rfb-ui/                   PRIVATE: shared rfb.css + pure helpers (bundled into wrappers, never published)
+    react/                    @habemus-papadum/rfb-react  (useRemoteFramebuffer hook + <RemoteFramebuffer>)
+    svelte/                   @habemus-papadum/rfb-svelte  (createRemoteFramebuffer action/stores + component; Svelte 5)
+    solid/                    @habemus-papadum/rfb-solid   (createRemoteFramebuffer ref/signals + component)
+  # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>
+  # (opt-in styles.css, themeable via CSS vars + slots/render-props). Each peer-deps the
+  # core; build externalizes framework+core; release.sh version-syncs all 4 npm packages.
 
 packages/nvenc/             habemus-papadum-nvenc (import pdum.nvenc) — uv workspace member
   src/cpp/nvenc_ext.cpp     OURS: thin pybind11 binding over NVIDIA NvEncoderCuda (+ NVTX)
@@ -241,8 +256,10 @@ after interaction settles" (`serve(still_after=)`, `docs/still_after_settle.md`)
 opt-in **ASGI/Starlette** front-end (`docs/asgi.md`), and **§1** adaptive/metrics
 polish (fps lever + opt-in server→client `stats` push surfaced in the client
 `Stats`). Done earlier: per-session metrics + `GET /metrics`, offline PSNR benchmark,
-adaptive quality, the NVENC backends. **Skipped by request:** framework/notebook
-adapters (§4). Tabled: AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
+adaptive quality, the NVENC backends. **§4 framework & notebook adapters — done:**
+React/Svelte/Solid npm wrappers (`widgets/packages/*`) and the Jupyter/marimo
+**anywidget** (`pdum.rfb.notebook`, `[anywidget]` extra, `docs/notebook.md`). Tabled:
+AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 
 ## Hard rules (from AGENTS.md — do not violate)
 
@@ -264,6 +281,9 @@ adapters (§4). Tabled: AV1/HEVC (§5), codec/rendering upgrades (§6), WebTrans
   options, framework integration, CSP/worker packaging).
 - `docs/demo.md` — the `pdum-rfb demo` harness (Textual TUI + Vite client): live scene /
   backend switching, quality retune, stats, the `--smoke` headless self-test.
+- `docs/notebook.md` — Jupyter/marimo anywidget (`display.widget()`, `RfbCanvas`/
+  `RfbViewer` tiers, `publish_loop`, local vs remote/HTTPS same-origin ASGI, multi-stream,
+  theming, CSP/mixed-content).
 - `docs/gpu_zerocopy.md` — zero-copy CUDA→NVENC (CuPy/DLPack NV12 → `h264_nvenc`):
   `serve(gpu=True)`, the helpers, NV12, the PyAV-18 requirement + why no pure-Python
   monkey-patch, the from-source recipe, the NVENC-SDK alternative, benchmarks.

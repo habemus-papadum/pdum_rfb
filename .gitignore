@@ -88,6 +88,11 @@ widgets/coverage/
 widgets/test-results/
 widgets/playwright-report/
 widgets/.vite/
+
+# anywidget bundle: commit widget.js + widget.css (they ship in the wheel as package
+# data); ignore the generated sourcemaps and the inlined-worker sourcemap assets.
+src/pdum/rfb/static/*.map
+src/pdum/rfb/static/assets/
 badges/
 
 # IPython

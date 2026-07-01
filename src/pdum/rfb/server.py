@@ -459,6 +459,7 @@ class Server:
         )
         self._streams[name] = host
         display._owner_server = self
+        display._stream_name = name
         display._server = self._listener  # None until start(); back-filled there
         return display
 

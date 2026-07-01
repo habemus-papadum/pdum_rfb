@@ -29,9 +29,9 @@ All four planned items are done. Remaining open ideas live in their sections bel
 (notably §5 AV1/HEVC, §6 codec upgrades, and the WebTransport half of §3), tabled
 until prioritized.
 
-**Skipped** (by request): **§4** framework & notebook adapters. **Tabled** (revisit
-later): **§5** remaining (AV1 / HEVC / zero-copy interop) and **§6** (rendering &
-codec upgrades). **Done:** §1, §2, §3, §7, §8.
+**Done:** §1, §2, §3, §4, §7, §8 (§4 = React/Svelte/Solid npm wrappers + the
+Jupyter/marimo anywidget). **Tabled** (revisit later): **§5** remaining
+(AV1 / HEVC / zero-copy interop) and **§6** (rendering & codec upgrades).
 
 ## 1. Measure & adapt the software encoder ✅ _(done)_
 
@@ -96,13 +96,21 @@ WebTransportTransport: real QUIC streams for channels, datagrams for latest-wins
                        events/acks (reduces head-of-line blocking)
 ```
 
-## 4. Framework & notebook adapters — **⏸ skipped (by request)**
+## 4. Framework & notebook adapters — **✅ done (React/Svelte/Solid wrappers + anywidget)**
 
-The core is framework-agnostic by design; add thin, optional wrappers:
+The core is framework-agnostic by design; thin, optional wrappers ride on it:
 
-- a `useRemoteFramebuffer` React hook (`@habemus-papadum/rfb-widgets/react`);
-- a Jupyter/marimo widget (anywidget) — the repo already reserves `widgets/` and
-  has notebook conventions. Makes the library usable from a notebook in one line.
+- **✅ Framework wrappers** — separate npm packages `@habemus-papadum/rfb-react`,
+  `-svelte`, `-solid`, each with a **headless** primitive (`useRemoteFramebuffer` /
+  `createRemoteFramebuffer`) and a **batteries** `<RemoteFramebuffer>` component
+  (status/HUD/latency badge/toolbar; themeable via CSS vars + slots/render-props). They
+  live under `widgets/packages/*` (pnpm workspace), peer-dep the core, and release in
+  version lockstep. See `docs/guide_javascript.md#framework-integration`.
+- **✅ Jupyter/marimo widget (anywidget)** — a single inlined-worker ESM built into the
+  wheel (`src/pdum/rfb/static/widget.js`, from `widgets/anywidget/`) + `pdum.rfb.notebook`
+  (`RfbCanvas`/`RfbViewer` + `publish_loop`) + `Display.widget()`. Works both locally
+  (`ws://` port) and remote/HTTPS (same-origin `wss://` via the `asgi.py` hub endpoint +
+  `base_path`). One line from a notebook; `[anywidget]` extra. See `docs/notebook.md`.
 
 ## 5. NVIDIA NVENC backend ✅ _(host-memory, zero-copy CUDA, and PyAV-free SDK paths done)_ · **⏸ remaining tabled**
 

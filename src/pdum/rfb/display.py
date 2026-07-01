@@ -113,6 +113,8 @@ class Display:
         self._server_cm: Any = None
         # Set by Server.add_stream() so display.server.add_stream(...) works.
         self._owner_server: Any = None
+        # The URL path segment this stream is reached at (set by Server.add_stream()).
+        self._stream_name: str = "default"
 
     # --- publishing --------------------------------------------------------
 
@@ -212,6 +214,53 @@ class Display:
         for a bare ``Display`` constructed directly.
         """
         return self._owner_server
+
+    @property
+    def ws_url(self) -> str:
+        """Browser-reachable WebSocket URL for this stream (e.g. ``ws://host:port/name``).
+
+        Raises if the server is not bound yet (call ``await rfb.serve(...)`` first). A
+        wildcard bind host (``0.0.0.0``/``::``) is reported as ``127.0.0.1``.
+        """
+        if self.port is None:
+            raise RuntimeError("Display is not serving yet; call await rfb.serve(...) first")
+        host = getattr(self._owner_server, "host", None) or "127.0.0.1"
+        if host in ("0.0.0.0", "", "::"):
+            host = "127.0.0.1"
+        return f"ws://{host}:{self.port}/{self._stream_name}"
+
+    def widget(
+        self,
+        *,
+        batteries: bool = True,
+        base_path: str | None = None,
+        host: str | None = None,
+        **chrome: Any,
+    ) -> Any:
+        """Return an anywidget viewer bound to this stream (needs the ``[anywidget]`` extra).
+
+        In a notebook: ``display.widget()`` renders the batteries viewer;
+        ``display.widget(batteries=False)`` the bare canvas. One widget = one Web Worker +
+        one WebSocket; the server multiplexes many streams on one port. For remote/HTTPS
+        notebooks, mount ``pdum.rfb.asgi.rfb_hub_endpoint`` same-origin and pass
+        ``base_path=`` (the widget then uses a same-origin ``wss://`` URL). Extra keyword
+        args (e.g. ``show_toolbar=False``) become widget traits.
+
+        Raises if the server is not bound yet.
+        """
+        from .notebook import RfbCanvas, RfbViewer
+
+        if self.port is None:
+            raise RuntimeError("Display is not serving yet; call await rfb.serve(...) first")
+        resolved_host = host if host is not None else (getattr(self._owner_server, "host", None) or "127.0.0.1")
+        if resolved_host in ("0.0.0.0", "", "::"):
+            # Let the browser use the page's own hostname (correct for remote notebooks).
+            resolved_host = "auto"
+        cls = RfbViewer if batteries else RfbCanvas
+        kwargs: dict[str, Any] = {"port": self.port, "stream": self._stream_name, "host": resolved_host, **chrome}
+        if base_path is not None:
+            kwargs["base_path"] = base_path
+        return cls(**kwargs)
 
     # --- lifecycle ---------------------------------------------------------
 

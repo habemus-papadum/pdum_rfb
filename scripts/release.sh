@@ -6,20 +6,27 @@ This script automates the release process:
 2. Validates version has -alpha suffix
 3. Calculates release version (strips -alpha)
 4. Runs validation (lint, Python tests, widget tests, docs build)
-5. Updates version files (pyproject.toml, __init__.py, widgets/package.json,
-   packages/nvenc/pyproject.toml, packages/vtenc/pyproject.toml) — all in lockstep
+5. Updates the version in EVERY package, discovered dynamically (see
+   ``discover_version_files``): each pyproject.toml (root + packages/*),
+   src/pdum/rfb/__init__.py, and each widgets package.json (core + widgets/packages/*),
+   all in lockstep
 6. Updates uv.lock with new version
 7. Creates release commit and tag
 8. Pushes tag to origin
-9. Publishes the Python packages to PyPI (habemus-papadum-rfb + -nvenc + -vtenc, via publish.sh)
-10. Builds and publishes the widgets to npm (@habemus-papadum/rfb-widgets)
+9. Publishes the Python packages to PyPI (habemus-papadum-rfb + -nvenc, via publish.sh)
+10. Builds and publishes the npm packages (core widgets + framework wrappers)
 11. Creates GitHub release (triggers docs deployment)
 12. Bumps to next development version with -alpha
 13. Updates uv.lock with new dev version
 14. Commits and pushes development version
+
+Adding a new package (a new packages/<x> or widgets/packages/<x>) needs no edits here:
+version bump/validation and the npm publish pick it up automatically. New *native* PyPI
+packages must still be taught to scripts/publish.sh (their build recipe differs).
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -40,17 +47,14 @@ from rich.table import Table
 # Initialize Rich console
 console = Console()
 
-# File paths
+# File paths. Individual package locations are discovered dynamically at import time
+# (see ``discover_version_files`` / ``VERSION_FILES``) rather than hardcoded, so adding a
+# uv-workspace member (packages/*) or a widgets wrapper (widgets/packages/*) needs no edit.
 REPO_ROOT = Path(__file__).parent.parent  # Go up from scripts/ to repo root
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 INIT_PY = REPO_ROOT / "src" / "pdum" / "rfb" / "__init__.py"
 WIDGETS_DIR = REPO_ROOT / "widgets"
 PACKAGE_JSON = WIDGETS_DIR / "package.json"
-# Sibling workspace packages habemus-papadum-nvenc (import pdum.nvenc) and
-# habemus-papadum-vtenc (import pdum.vtenc); both released in lockstep with the rfb
-# package, so their versions are bumped alongside the others.
-NVENC_PYPROJECT = REPO_ROOT / "packages" / "nvenc" / "pyproject.toml"
-VTENC_PYPROJECT = REPO_ROOT / "packages" / "vtenc" / "pyproject.toml"
 
 class StepCategory(Enum):
     """Categories of release steps."""
@@ -194,49 +198,115 @@ def write_version_to_file(file_path: Path, pattern: str, new_version: str) -> No
 
 def read_package_json_version(file_path: Path) -> str:
     """Read version from package.json."""
-    import json
     data = json.loads(file_path.read_text())
     return data.get("version", "")
 
 
 def write_package_json_version(file_path: Path, new_version: str) -> None:
     """Write new version to package.json."""
-    import json
     data = json.loads(file_path.read_text())
     data["version"] = new_version
     file_path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Dynamic package discovery — every file that carries the shared release version
+# ---------------------------------------------------------------------------
+
+_TOML_VERSION_RE = r'^(version = ")([^"]+)(")'
+_INIT_VERSION_RE = r'(__version__ = ")([^"]+)(")'
+
+
+@dataclass(frozen=True)
+class VersionFile:
+    """A file whose version is bumped in lockstep with every release.
+
+    ``kind`` selects the read/write strategy; ``ecosystem`` is where the package
+    ships (``pypi``/``npm``, or ``python`` for the __init__.py version mirror);
+    ``published`` is False for a version mirror or a ``"private": true`` npm package
+    (bumped for lockstep hygiene, but never uploaded).
+    """
+
+    path: Path
+    kind: str  # "toml" | "init_py" | "package_json"
+    name: str  # display/package name
+    ecosystem: str  # "pypi" | "npm" | "python"
+    published: bool
+
+
+def _toml_name(path: Path) -> str:
+    """Best-effort project name from a pyproject.toml (falls back to the dir name)."""
+    match = re.search(r'^name = "([^"]+)"', path.read_text(), flags=re.MULTILINE)
+    return match.group(1) if match else path.parent.name
+
+
+def discover_version_files() -> list[VersionFile]:
+    """Find every version-bearing file across the workspace, dynamically.
+
+    - **PyPI:** the root pyproject.toml plus every uv-workspace member under
+      ``packages/*/pyproject.toml``. The rfb package also mirrors its version in
+      ``src/pdum/rfb/__init__.py`` (kept in sync, not itself published).
+    - **npm:** the core ``widgets/package.json`` plus every wrapper under
+      ``widgets/packages/*/package.json``. ``"private": true`` packages (e.g. the
+      bundled ``@habemus-papadum/rfb-ui``) are still version-synced but not published.
+    """
+    files: list[VersionFile] = [
+        VersionFile(PYPROJECT_TOML, "toml", _toml_name(PYPROJECT_TOML), "pypi", True),
+        VersionFile(INIT_PY, "init_py", "pdum.rfb.__version__", "python", False),
+    ]
+    for pyproject in sorted((REPO_ROOT / "packages").glob("*/pyproject.toml")):
+        files.append(VersionFile(pyproject, "toml", _toml_name(pyproject), "pypi", True))
+
+    for package_json in [PACKAGE_JSON, *sorted((WIDGETS_DIR / "packages").glob("*/package.json"))]:
+        data = json.loads(package_json.read_text())
+        name = data.get("name", package_json.parent.name)
+        published = not bool(data.get("private", False))
+        files.append(VersionFile(package_json, "package_json", name, "npm", published))
+    return files
+
+
+def read_version_of(vf: VersionFile) -> str:
+    """Read the current version out of a discovered file."""
+    if vf.kind == "package_json":
+        return read_package_json_version(vf.path)
+    return read_version_from_file(vf.path, _INIT_VERSION_RE if vf.kind == "init_py" else _TOML_VERSION_RE)
+
+
+def write_version_of(vf: VersionFile, new_version: str) -> None:
+    """Write a new version into a discovered file."""
+    if vf.kind == "package_json":
+        write_package_json_version(vf.path, new_version)
+    else:
+        write_version_to_file(vf.path, _INIT_VERSION_RE if vf.kind == "init_py" else _TOML_VERSION_RE, new_version)
+
+
+# Discovered once at import; all bump/validate/commit steps iterate over this.
+VERSION_FILES: list[VersionFile] = discover_version_files()
+
+
 def read_current_version() -> None:
-    """Read current version from version-controlled files."""
+    """Read the current version from every discovered package and require agreement."""
     console.rule("[bold blue]Reading Current Version")
 
-    pyproject_version = read_version_from_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")')
-    console.print(f"  [cyan]pyproject.toml:[/cyan] {pyproject_version}")
+    versions = {vf: read_version_of(vf) for vf in VERSION_FILES}
+    for vf, version in versions.items():
+        rel = vf.path.relative_to(REPO_ROOT)
+        note = "" if vf.published else " [dim](synced, not published)[/dim]"
+        console.print(f"  [cyan]{vf.name}[/cyan] [dim]{rel}[/dim]: {version}{note}")
 
-    init_version = read_version_from_file(INIT_PY, r'(__version__ = ")([^"]+)(")')
-    console.print(f"  [cyan]__init__.py:[/cyan] {init_version}")
-
-    package_json_version = read_package_json_version(PACKAGE_JSON)
-    console.print(f"  [cyan]widgets/package.json:[/cyan] {package_json_version}")
-
-    nvenc_version = read_version_from_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")')
-    console.print(f"  [cyan]packages/nvenc/pyproject.toml:[/cyan] {nvenc_version}")
-
-    vtenc_version = read_version_from_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")')
-    console.print(f"  [cyan]packages/vtenc/pyproject.toml:[/cyan] {vtenc_version}")
-
-    if not (pyproject_version == init_version == package_json_version == nvenc_version == vtenc_version):
-        console.print("[red]✗ ERROR:[/red] Version mismatch!")
-        console.print(f"  [yellow]pyproject.toml:[/yellow] {pyproject_version}")
-        console.print(f"  [yellow]__init__.py:[/yellow] {init_version}")
-        console.print(f"  [yellow]widgets/package.json:[/yellow] {package_json_version}")
-        console.print(f"  [yellow]packages/nvenc/pyproject.toml:[/yellow] {nvenc_version}")
-        console.print(f"  [yellow]packages/vtenc/pyproject.toml:[/yellow] {vtenc_version}")
+    unique = set(versions.values())
+    if len(unique) != 1:
+        console.print("[red]✗ ERROR:[/red] Version mismatch across packages!")
+        for vf, version in versions.items():
+            console.print(f"  [yellow]{vf.path.relative_to(REPO_ROOT)}:[/yellow] {version}")
         sys.exit(1)
 
-    ctx.current_version = pyproject_version
-    console.print(f"\n[green]✓[/green] Current version: [bold]{ctx.current_version}[/bold]")
+    ctx.current_version = next(iter(unique))
+    ecosystems = sorted({vf.ecosystem for vf in VERSION_FILES if vf.published})
+    console.print(
+        f"\n[green]✓[/green] Current version: [bold]{ctx.current_version}[/bold] "
+        f"[dim]({len(VERSION_FILES)} files · {'/'.join(ecosystems)})[/dim]"
+    )
 
 def validate_alpha_version() -> None:
     """Validate that version ends with -alpha."""
@@ -304,13 +374,11 @@ def update_version_files() -> None:
         console.print("[yellow]Hint:[/yellow] Make sure 'Calculate Release Version' step is selected")
         sys.exit(1)
 
-    write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.release_version)
-    write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.release_version)
-    write_package_json_version(PACKAGE_JSON, ctx.release_version)
-    write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.release_version)
-    write_version_to_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.release_version)
+    for vf in VERSION_FILES:
+        write_version_of(vf, ctx.release_version)
     console.print(
-        f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] in all files"
+        f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] "
+        f"in all {len(VERSION_FILES)} files"
     )
 
 
@@ -325,16 +393,7 @@ def create_release_commit() -> None:
     console.rule(f"[bold blue]Creating Release Commit: {ctx.release_version}")
 
     run_command(
-        [
-            "git",
-            "add",
-            str(PYPROJECT_TOML),
-            str(INIT_PY),
-            str(PACKAGE_JSON),
-            str(NVENC_PYPROJECT),
-            str(VTENC_PYPROJECT),
-            "uv.lock",
-        ],
+        ["git", "add", *[str(vf.path) for vf in VERSION_FILES], "uv.lock"],
         "Staging version files and lockfile",
     )
 
@@ -396,7 +455,11 @@ def publish_to_npm() -> None:
         ["pnpm", "--dir", "widgets", "install", "--frozen-lockfile"],
         "Installing widget dependencies",
     )
-    run_command(["pnpm", "--dir", "widgets", "build"], "Building widget bundle")
+    run_command(["pnpm", "--dir", "widgets", "build"], "Building the core widget bundle")
+    run_command(
+        ["pnpm", "--dir", "widgets", "-r", "--filter", "./packages/*", "run", "build"],
+        "Building the npm wrapper packages (widgets/packages/*)",
+    )
 
     token = os.environ.get("NPM_TOKEN")
     if not token:
@@ -412,7 +475,14 @@ def publish_to_npm() -> None:
         try:
             run_command(
                 ["pnpm", "--dir", "widgets", "publish", "--no-git-checks"],
-                "Publishing @habemus-papadum/rfb-widgets to npm",
+                "Publishing the core @habemus-papadum/rfb-widgets to npm",
+            )
+            # `-r publish` auto-discovers widgets/packages/*, skips any `"private": true`
+            # package (e.g. rfb-ui), and rewrites each wrapper's `workspace:^` core dep to
+            # the concrete release version (lockstep) — no wrapper list to maintain here.
+            run_command(
+                ["pnpm", "--dir", "widgets", "-r", "--filter", "./packages/*", "publish", "--no-git-checks"],
+                "Publishing the npm wrapper packages (widgets/packages/*) to npm",
             )
         finally:
             if prev is None:
@@ -484,13 +554,11 @@ def update_to_dev_version() -> None:
         console.print("[yellow]Hint:[/yellow] Make sure 'Calculate Next Dev Version' step is selected")
         sys.exit(1)
 
-    write_version_to_file(PYPROJECT_TOML, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
-    write_version_to_file(INIT_PY, r'(__version__ = ")([^"]+)(")', ctx.next_dev_version)
-    write_package_json_version(PACKAGE_JSON, ctx.next_dev_version)
-    write_version_to_file(NVENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
-    write_version_to_file(VTENC_PYPROJECT, r'^(version = ")([^"]+)(")', ctx.next_dev_version)
+    for vf in VERSION_FILES:
+        write_version_of(vf, ctx.next_dev_version)
     console.print(
-        f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] in all files"
+        f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] "
+        f"in all {len(VERSION_FILES)} files"
     )
 
 
@@ -505,16 +573,7 @@ def create_dev_commit() -> None:
     console.rule(f"[bold blue]Creating Development Version Commit: {ctx.next_dev_version}")
 
     run_command(
-        [
-            "git",
-            "add",
-            str(PYPROJECT_TOML),
-            str(INIT_PY),
-            str(PACKAGE_JSON),
-            str(NVENC_PYPROJECT),
-            str(VTENC_PYPROJECT),
-            "uv.lock",
-        ],
+        ["git", "add", *[str(vf.path) for vf in VERSION_FILES], "uv.lock"],
         "Staging version files and lockfile",
     )
 
@@ -830,12 +889,18 @@ def main() -> None:
 
     # Success!
     console.print()
+    pypi_names = [vf.name for vf in VERSION_FILES if vf.ecosystem == "pypi" and vf.published]
+    npm_names = [vf.name for vf in VERSION_FILES if vf.ecosystem == "npm" and vf.published]
+    published_lines = "".join(
+        f"Published to PyPI: [cyan]{name}@{ctx.release_version}[/cyan]\n" for name in pypi_names
+    ) + "".join(
+        f"Published to npm: [cyan]{name}@{ctx.release_version}[/cyan]\n" for name in npm_names
+    )
     success_panel = Panel.fit(
         f"[bold green]✓ Release Complete![/bold green]\n\n"
         f"Released: [cyan]{ctx.release_version}[/cyan]\n"
         f"Tagged and pushed: [cyan]v{ctx.release_version}[/cyan]\n"
-        f"Published to PyPI: [cyan]{ctx.release_version}[/cyan]\n"
-        f"Published to npm: [cyan]@habemus-papadum/rfb-widgets@{ctx.release_version}[/cyan]\n"
+        f"{published_lines}"
         f"Created GitHub release: [cyan]v{ctx.release_version}[/cyan]\n"
         f"Next development version: [cyan]{ctx.next_dev_version}[/cyan]\n\n"
         "[dim]The GitHub release will trigger documentation deployment to GitHub Pages.[/dim]",

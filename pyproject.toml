@@ -99,6 +99,12 @@ demo = [
     "rich>=13.7",
     "textual>=1.0",
 ]
+# Jupyter/marimo notebook widget (pdum.rfb.notebook). The prebuilt, inlined-worker ESM
+# bundle ships in the wheel (src/pdum/rfb/static/widget.{js,css}); this pulls the Python
+# runtime. See docs/notebook.md.
+anywidget = [
+    "anywidget>=0.9",
+]
 
 
 [build-system]
@@ -109,6 +115,12 @@ build-backend = "hatchling.build"
 # pdum is a PEP 420 namespace (no src/pdum/__init__.py) shared with the sibling
 # habemus-papadum-nvenc package, which contributes pdum.nvenc.
 packages = ["src/pdum"]
+
+# The anywidget bundle (committed, built from widgets/anywidget/) is package data. Tracked
+# files under src/pdum ship by default (like py.typed); this makes it explicit.
+[tool.hatch.build.targets.wheel.force-include]
+"src/pdum/rfb/static/widget.js" = "pdum/rfb/static/widget.js"
+"src/pdum/rfb/static/widget.css" = "pdum/rfb/static/widget.css"
 
 [tool.uv]
 # Groups installed automatically by a bare `uv sync` (including `--frozen`). `viz` pulls
@@ -142,6 +154,7 @@ dev = [
     "pre-commit>=3.7.0",
     "watchdog>=3.0.0",
     "av>=17.1.0",
+    "anywidget>=0.9",
     "pytest-asyncio>=1.4.0",
     "typer>=0.12",
     "starlette>=0.37",  # exercises the [asgi] adapter in tests (TestClient WS)

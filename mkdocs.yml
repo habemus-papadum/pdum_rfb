@@ -15,6 +15,9 @@ nav:
   - Installation: installation.md
   - Python Guide: guide_python.md
   - JavaScript Guide: guide_javascript.md
+  - Notebook (Jupyter/marimo):
+      - Guide: notebook.md
+      - Demo (anywidget): demos/anywidget.ipynb
   - Internals: internals.md
   - Demo harness (pdum-rfb demo): demo.md
   - Features:
