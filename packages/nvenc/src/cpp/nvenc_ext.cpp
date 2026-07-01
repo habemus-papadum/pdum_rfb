@@ -144,6 +144,20 @@ public:
         }
         // pdum.rfb invariant: no B-frames (output order == input order).
         cfg.frameIntervalP = 1;
+
+        // Zero reordering delay. Tell decoders there is *no* frame reordering
+        // (num_reorder_frames=0) so they emit each frame immediately. Without this, NVENC
+        // leaves the SPS VUI bitstream_restriction absent, so a browser's *hardware* H.264
+        // decoder must assume worst-case reordering and buffers up to the level's DPB size
+        // (~5 frames at 720p / L3.1) before its first output. Under the session's small
+        // max_inflight that starves — the decoder never gets enough frames to emit, so the
+        // canvas silently freezes with no error. libx264's zerolatency sets exactly this
+        // (bitstream_restriction_flag=1, max_num_reorder_frames=0), which is why the CPU
+        // path works live and NVENC did not. Both are needed: zeroReorderDelay sets the
+        // value, bitstreamRestrictionFlag makes it (and max_dec_frame_buffering) land in
+        // the SPS so the decoder actually reads it.
+        cfg.rcParams.zeroReorderDelay = 1;
+
         if (gop > 0) cfg.gopLength = (uint32_t)gop;
 
         // Target a bitrate (VBR) so benchmarks are comparable to the PyAV paths;
@@ -159,9 +173,11 @@ public:
         // Browser WebCodecs wants in-band SPS/PPS (VPS) repeated on every IDR.
         if (is_hevc) {
             cfg.encodeCodecConfig.hevcConfig.repeatSPSPPS = 1;
+            cfg.encodeCodecConfig.hevcConfig.hevcVUIParameters.bitstreamRestrictionFlag = 1;
             if (gop > 0) cfg.encodeCodecConfig.hevcConfig.idrPeriod = (uint32_t)gop;
         } else {
             cfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
+            cfg.encodeCodecConfig.h264Config.h264VUIParameters.bitstreamRestrictionFlag = 1;
             if (gop > 0) cfg.encodeCodecConfig.h264Config.idrPeriod = (uint32_t)gop;
         }
 

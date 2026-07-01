@@ -122,6 +122,32 @@ def test_binding_profile_selects_h264_profile():
     assert profile_idc("high") == 100  # NVENC's default, for contrast
 
 
+def test_binding_signals_zero_reorder_in_sps():
+    """Regression for the ``pdum-rfb demo`` nvenc freeze.
+
+    The SPS must carry ``bitstream_restriction`` with ``max_num_reorder_frames == 0``. Without
+    it, a browser's *hardware* WebCodecs ``VideoDecoder`` assumes worst-case reordering and
+    buffers up to the level's DPB size (~5 frames at 720p) before its first output. Under the
+    session's small ``max_inflight`` the decoder starves — the canvas silently freezes with no
+    error (the exact demo symptom). libx264's zerolatency signals this; NVENC does not unless we
+    set ``zeroReorderDelay`` + the VUI ``bitstreamRestrictionFlag`` (see ``nvenc_ext.cpp``)."""
+    import cupy as cp
+    from pdum.nvenc import NvencEncoder
+
+    from pdum.rfb.testing import h264_sps_reorder_info
+
+    enc = NvencEncoder(1280, 720, codec="h264", fps=30, gop=30, bitrate=6_000_000, profile="baseline")
+    nv12 = cp.zeros((720 + 360, 1280), cp.uint8)
+    nv12[720:] = 128
+    cp.cuda.runtime.deviceSynchronize()
+    data = enc.encode(nv12, force_idr=True)
+    enc.close()
+
+    info = h264_sps_reorder_info(data)
+    assert info["bitstream_restriction_flag"] is True, f"SPS lacks bitstream_restriction: {info}"
+    assert info["max_num_reorder_frames"] == 0, f"decoder will buffer the DPB before output: {info}"
+
+
 # --- rfb wrapper level (NvencGpuPdumEncoder) -----------------------------------------
 
 

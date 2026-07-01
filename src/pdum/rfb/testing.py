@@ -286,6 +286,162 @@ def starts_with_start_code(data: bytes) -> bool:
     return data[:4] == b"\x00\x00\x00\x01" or data[:3] == b"\x00\x00\x01"
 
 
+class _BitReader:
+    """Minimal MSB-first bit reader with Exp-Golomb decoding for SPS parsing."""
+
+    def __init__(self, data: bytes):
+        self._d = data
+        self._p = 0
+
+    def u1(self) -> int:
+        bit = (self._d[self._p >> 3] >> (7 - (self._p & 7))) & 1
+        self._p += 1
+        return bit
+
+    def u(self, n: int) -> int:
+        v = 0
+        for _ in range(n):
+            v = (v << 1) | self.u1()
+        return v
+
+    def ue(self) -> int:
+        zeros = 0
+        while self.u1() == 0:
+            zeros += 1
+            if zeros > 40:
+                raise ValueError("Exp-Golomb runaway (malformed SPS?)")
+        return (1 << zeros) - 1 + (self.u(zeros) if zeros else 0)
+
+    def se(self) -> int:
+        k = self.ue()
+        return (k + 1) // 2 if k & 1 else -(k // 2)
+
+
+def _unescape_rbsp(rbsp: bytes) -> bytes:
+    """Strip emulation-prevention bytes (00 00 03 -> 00 00) from a NAL body."""
+    out = bytearray()
+    i = 0
+    while i < len(rbsp):
+        if i + 2 < len(rbsp) and rbsp[i] == 0 and rbsp[i + 1] == 0 and rbsp[i + 2] == 3:
+            out += rbsp[i : i + 2]
+            i += 3
+        else:
+            out.append(rbsp[i])
+            i += 1
+    return bytes(out)
+
+
+def h264_sps_reorder_info(annexb: bytes) -> dict:
+    """Parse the SPS of an Annex B stream and return its reorder-relevant fields.
+
+    Keys: ``profile_idc``, ``level_idc``, ``vui_present``, ``bitstream_restriction_flag``,
+    ``max_num_reorder_frames`` (``None`` unless the restriction is present),
+    ``max_dec_frame_buffering``.
+
+    Why this matters: a WebCodecs **hardware** ``VideoDecoder`` that does not see
+    ``max_num_reorder_frames=0`` assumes worst-case reordering and buffers up to the level's
+    DPB size before its first output. Under the session's small ``max_inflight`` that starves
+    and the canvas silently freezes (no error). So the encoder must signal zero reordering.
+    """
+    sps = next((body for t, body in parse_nal_units(annexb) if t == 7), None)
+    if sps is None:
+        raise ValueError("no SPS (NAL type 7) in stream")
+    b = _BitReader(_unescape_rbsp(sps[1:]))  # drop the NAL header byte
+    profile_idc = b.u(8)
+    b.u(8)  # constraint_set flags + reserved
+    level_idc = b.u(8)
+    b.ue()  # seq_parameter_set_id
+    if profile_idc in (100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135):
+        if b.ue() == 3:  # chroma_format_idc
+            b.u1()  # separate_colour_plane
+        b.ue()  # bit_depth_luma_minus8
+        b.ue()  # bit_depth_chroma_minus8
+        b.u1()  # qpprime_y_zero_transform_bypass
+        if b.u1():  # seq_scaling_matrix_present (not emitted by baseline/main/high here)
+            raise ValueError("scaling matrix present; parser not needed for this path")
+    b.ue()  # log2_max_frame_num_minus4
+    poc_type = b.ue()
+    if poc_type == 0:
+        b.ue()  # log2_max_pic_order_cnt_lsb_minus4
+    elif poc_type == 1:
+        b.u1()
+        b.se()
+        b.se()
+        for _ in range(b.ue()):
+            b.se()
+    b.ue()  # max_num_ref_frames
+    b.u1()  # gaps_in_frame_num_value_allowed
+    b.ue()  # pic_width_in_mbs_minus1
+    b.ue()  # pic_height_in_map_units_minus1
+    if not b.u1():  # frame_mbs_only_flag
+        b.u1()  # mb_adaptive_frame_field
+    b.u1()  # direct_8x8_inference
+    if b.u1():  # frame_cropping
+        b.ue()
+        b.ue()
+        b.ue()
+        b.ue()
+    info = {
+        "profile_idc": profile_idc,
+        "level_idc": level_idc,
+        "vui_present": bool(b.u1()),
+        "bitstream_restriction_flag": None,
+        "max_num_reorder_frames": None,
+        "max_dec_frame_buffering": None,
+    }
+    if not info["vui_present"]:
+        return info
+    if b.u1() and b.u(8) == 255:  # aspect_ratio_info_present, Extended_SAR
+        b.u(16)
+        b.u(16)
+    if b.u1():  # overscan_info_present
+        b.u1()
+    if b.u1():  # video_signal_type_present
+        b.u(3)
+        b.u1()
+        if b.u1():  # colour_description_present
+            b.u(24)
+    if b.u1():  # chroma_loc_info_present
+        b.ue()
+        b.ue()
+    if b.u1():  # timing_info_present
+        b.u(32)
+        b.u(32)
+        b.u1()
+    nal_hrd = b.u1()
+    if nal_hrd:
+        _skip_hrd(b)
+    vcl_hrd = b.u1()
+    if vcl_hrd:
+        _skip_hrd(b)
+    if nal_hrd or vcl_hrd:
+        b.u1()  # low_delay_hrd
+    b.u1()  # pic_struct_present
+    if b.u1():  # bitstream_restriction_flag
+        info["bitstream_restriction_flag"] = True
+        b.u1()  # motion_vectors_over_pic_boundaries
+        b.ue()  # max_bytes_per_pic_denom
+        b.ue()  # max_bits_per_mb_denom
+        b.ue()  # log2_max_mv_length_horizontal
+        b.ue()  # log2_max_mv_length_vertical
+        info["max_num_reorder_frames"] = b.ue()
+        info["max_dec_frame_buffering"] = b.ue()
+    else:
+        info["bitstream_restriction_flag"] = False
+    return info
+
+
+def _skip_hrd(b: _BitReader) -> None:
+    cpb_cnt = b.ue() + 1
+    b.u(4)  # bit_rate_scale
+    b.u(4)  # cpb_size_scale
+    for _ in range(cpb_cnt):
+        b.ue()  # bit_rate_value_minus1
+        b.ue()  # cpb_size_value_minus1
+        b.u1()  # cbr_flag
+    b.u(20)  # 4x 5-bit HRD delay-length fields
+
+
 def decode_annexb(data: bytes) -> list:
     """Decode an H.264 Annex B byte stream back to frames using PyAV.
 
@@ -388,6 +544,7 @@ __all__ = [
     "decode_annexb",
     "expected_quadrant_color",
     "gen_fixtures",
+    "h264_sps_reorder_info",
     "has_sps_pps_idr",
     "loopback_server",
     "nal_types",
