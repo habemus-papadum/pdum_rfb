@@ -103,6 +103,25 @@ def test_binding_encodes_host_nv12_numpy():
     assert len(frames) >= 7 and all(f.width == W and f.height == H for f in frames)
 
 
+def test_binding_profile_selects_h264_profile():
+    """The binding's `profile` arg controls the emitted H.264 profile_idc (SPS byte 1)."""
+    import cupy as cp
+    from pdum.nvenc import NvencEncoder
+
+    def profile_idc(profile: str) -> int:
+        enc = NvencEncoder(W, H, codec="h264", fps=20, gop=20, bitrate=4_000_000, profile=profile)
+        nv12 = cp.zeros((H + H // 2, W), cp.uint8)
+        nv12[H:] = 128
+        cp.cuda.runtime.deviceSynchronize()
+        data = enc.encode(nv12, force_idr=True)
+        enc.close()
+        sps = next(n for n in data.split(b"\x00\x00\x01")[1:] if n and (n[0] & 0x1F) == 7)
+        return sps[1]
+
+    assert profile_idc("baseline") == 66  # what the rfb wrapper requests
+    assert profile_idc("high") == 100  # NVENC's default, for contrast
+
+
 # --- rfb wrapper level (NvencGpuPdumEncoder) -----------------------------------------
 
 
@@ -112,13 +131,14 @@ def _cuda_frame(seq: int):
     return cuda_frame(_nv12(seq), pixel_format="nv12", height=H, seq=seq)
 
 
-def test_wrapper_codec_string_matches_bitstream_profile():
-    """Regression: the payload's codec string must match the SPS the SDK actually emits.
+def test_wrapper_emits_baseline_with_truthful_codec_string():
+    """Regression for the ``pdum-rfb demo`` nvenc breakage.
 
-    NVENC defaults to **High** profile, so a hardcoded ``avc1.42E01F`` (Baseline) is a lie:
-    PyAV ignores the codec string and decodes fine (so ``smoke()`` stayed green), but the
-    browser configures its ``VideoDecoder`` from the per-chunk codec and fails on the wrong
-    profile — the ``pdum-rfb demo`` nvenc breakage."""
+    Two things must hold: (1) we request **Baseline** profile (profile_idc 66, ``avc1.42…``),
+    because hardware WebCodecs H.264 decoders — the browser's real path — can silently fail on
+    NVENC's default High profile (software decoders and PyAV don't, which is why ``smoke()``
+    stayed green); and (2) the advertised codec string matches the SPS the encoder actually
+    emits, since the browser configures its ``VideoDecoder`` from the per-chunk codec."""
     from pdum.rfb.encoders.nvenc_gpu_pdum import NvencGpuPdumEncoder, _codec_string_from_annexb
 
     enc = NvencGpuPdumEncoder(width=W, height=H, fps=20, bitrate=6_000_000)
@@ -129,8 +149,8 @@ def test_wrapper_codec_string_matches_bitstream_profile():
     actual = _codec_string_from_annexb(payloads[0].payload)
     assert actual is not None, "keyframe carried no SPS to derive a codec string from"
     assert advertised == actual, f"advertised codec {advertised!r} != bitstream SPS {actual!r}"
-    # And it must no longer be the hardcoded Baseline placeholder (SDK emits High).
-    assert advertised != "avc1.42E01F", "codec string is still the placeholder, not the real profile"
+    # profile_idc 66 (0x42) == Baseline — the browser/hardware-compatible profile.
+    assert advertised.startswith("avc1.42"), f"expected Baseline profile, got {advertised!r}"
 
 
 def test_wrapper_pipeline_depth_recovers_seq():

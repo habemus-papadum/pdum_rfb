@@ -120,6 +120,11 @@ class NvencGpuPdumEncoder:
         self._nv12 = cp.empty((height + height // 2, width), cp.uint8)
         # cuda_context=0 -> retain the device *primary* context (the one CuPy uses), so
         # CuPy device pointers are valid to NVENC with no cross-context copy.
+        # profile="baseline": NVENC defaults to High, but hardware WebCodecs H.264 decoders
+        # (the browser's real decode path) are stricter than software ones and can silently
+        # fail on High — so we emit Constrained/Baseline (profile_idc 66) to match the libx264
+        # and PyAV-NVENC backends, which the browser decodes reliably. The codec string is then
+        # derived from the actual SPS (see _refresh_codec_string), so it stays truthful.
         self._enc = NvencEncoder(
             width,
             height,
@@ -130,6 +135,7 @@ class NvencGpuPdumEncoder:
             gop=fps,
             bitrate=bitrate,
             extra_output_delay=self.pipeline_depth,
+            profile="baseline",
         )
 
     def _packed_nv12(self, frame: RawFrame):

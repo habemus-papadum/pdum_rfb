@@ -105,7 +105,7 @@ class NvencEncoder {
 public:
     NvencEncoder(int width, int height, const std::string &codec, const std::string &preset,
                const std::string &tuning, int fps, int gop, int bitrate, int gpu_id, size_t cuda_context,
-               int extra_output_delay)
+               int extra_output_delay, const std::string &profile)
         : m_width(width), m_height(height) {
         if (width <= 0 || height <= 0 || (width & 1) || (height & 1))
             throw std::invalid_argument("width/height must be positive and even");
@@ -163,6 +163,21 @@ public:
         } else {
             cfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
             if (gop > 0) cfg.encodeCodecConfig.h264Config.idrPeriod = (uint32_t)gop;
+        }
+
+        // H.264 profile. Default "auto" keeps NVENC's choice (High). Callers that target
+        // browser WebCodecs should request "baseline": hardware H.264 decoders are stricter
+        // than software ones and can silently fail on High profile, so Baseline (profile_idc
+        // 66) is the compatible choice — matching the libx264 / PyAV-NVENC backends.
+        if (!is_hevc && !profile.empty() && profile != "auto") {
+            if (profile == "baseline")
+                cfg.profileGUID = NV_ENC_H264_PROFILE_BASELINE_GUID;
+            else if (profile == "main")
+                cfg.profileGUID = NV_ENC_H264_PROFILE_MAIN_GUID;
+            else if (profile == "high")
+                cfg.profileGUID = NV_ENC_H264_PROFILE_HIGH_GUID;
+            else
+                throw std::invalid_argument("unknown h264 profile (want auto/baseline/main/high): " + profile);
         }
 
         m_enc->CreateEncoder(&init);
@@ -351,14 +366,17 @@ PYBIND11_MODULE(_nvenc, m) {
           "True if the host NVIDIA driver supports this build's NVENC API version "
           "(used by the loader to pick the 12.1 vs 13.0 ABI).");
     py::class_<NvencEncoder>(m, "NvencEncoder")
-        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, int, size_t, int>(),
+        .def(py::init<int, int, std::string, std::string, std::string, int, int, int, int, size_t, int, std::string>(),
              py::arg("width"), py::arg("height"), py::arg("codec") = "h264", py::arg("preset") = "p3",
              py::arg("tuning") = "ll", py::arg("fps") = 30, py::arg("gop") = 30, py::arg("bitrate") = 0,
              py::arg("gpu_id") = 0, py::arg("cuda_context") = 0, py::arg("extra_output_delay") = 0,
+             py::arg("profile") = "auto",
              "Create an NV12->H.264/HEVC Annex B encoder. Pass cuda_context=0 to retain "
              "the device primary context (shared with CuPy/PyTorch). extra_output_delay=0 "
              "(default) is zero-latency (each encode() returns its own frame); raise it "
-             "to overlap encode with rendering for throughput, at a latency cost.")
+             "to overlap encode with rendering for throughput, at a latency cost. profile "
+             "(H.264): 'auto' (NVENC default, High) | 'baseline' | 'main' | 'high' — use "
+             "'baseline' for maximum browser/hardware-decoder compatibility.")
         .def("encode", &NvencEncoder::encode, py::arg("frame"), py::arg("force_idr") = false,
              "Encode one NV12 frame of shape (H*3//2, W) uint8 -- either a GPU tensor "
              "(__cuda_array_interface__, zero-copy) or a host array (__array_interface__, e.g. "
