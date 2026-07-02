@@ -509,18 +509,17 @@ def publish_to_npm() -> None:
         prev = os.environ.get("NPM_CONFIG_USERCONFIG")
         os.environ["NPM_CONFIG_USERCONFIG"] = npmrc_path
         try:
+            # ONE recursive publish covers the core (workspace root) + all three wrappers and
+            # auto-skips the `"private": true` packages (rfb-ui, demo-app), rewriting each
+            # wrapper's `workspace:^` core dep to the concrete release version (lockstep).
+            #
+            # Do NOT split the core out as `pnpm --dir widgets publish` (non-recursive): pnpm's
+            # non-recursive publish delegates to `npm publish` and leaks the `--dir` value + the
+            # `publish` command as extra positional args, which npm >= 11 rejects with EUSAGE
+            # ("too many package-specs"). The `-r` form builds a clean `npm publish` per package.
             run_command(
-                ["pnpm", "--dir", "widgets", "publish", "--no-git-checks"],
-                "Publishing the core @habemus-papadum/rfb-widgets to npm",
-            )
-            # `-r publish` auto-discovers widgets/packages/*, skips any `"private": true`
-            # package (e.g. rfb-ui), and rewrites each wrapper's `workspace:^` core dep to
-            # the concrete release version (lockstep) — no wrapper list to maintain here.
-            # Filter anchored at the repo root (see the build step above): a `./packages/*`
-            # filter resolves against REPO_ROOT and would publish nothing (silent exit 0).
-            run_command(
-                ["pnpm", "--dir", "widgets", "-r", "--filter", "./widgets/packages/*", "publish", "--no-git-checks"],
-                "Publishing the npm wrapper packages (widgets/packages/*) to npm",
+                ["pnpm", "--dir", "widgets", "-r", "publish", "--no-git-checks"],
+                "Publishing @habemus-papadum/rfb-widgets + wrappers to npm",
             )
         finally:
             if prev is None:

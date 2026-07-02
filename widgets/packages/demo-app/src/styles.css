@@ -169,6 +169,7 @@ body {
 }
 
 .field {
+  position: relative;
   display: grid;
   grid-template-columns: 6.5rem 1fr;
   align-items: center;
@@ -190,7 +191,6 @@ body {
 
 /* inline help "?" — a small quiet glyph that reveals a styled popover on hover/focus */
 .help {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -214,11 +214,13 @@ body {
   border-color: var(--ink);
 }
 
-/* the popover — right-anchored (the rail is on the right) so it never overflows off-screen */
+/* the popover — anchored to the full-width `.field` row (not the narrow "?" icon) and
+   right-aligned to it, so it always fits inside the row's own width and never bleeds past
+   `.rail`'s left edge, where its scroll (`overflow-y: auto`) would otherwise clip it. */
 .help__tip {
   position: absolute;
   bottom: calc(100% + 0.4rem);
-  right: -0.2rem;
+  right: 0;
   z-index: 20;
   width: 15rem;
   max-width: 80vw;
@@ -238,7 +240,7 @@ body {
   pointer-events: none;
 }
 
-/* little downward tick pointing at the icon */
+/* little downward tick, near the tip's right edge */
 .help__tip::after {
   content: "";
   position: absolute;

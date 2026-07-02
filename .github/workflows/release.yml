@@ -76,8 +76,11 @@ jobs:
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc-publish"
           export NPM_CONFIG_USERCONFIG="$HOME/.npmrc-publish"
-          pnpm --dir widgets publish --provenance --no-git-checks
-          pnpm --dir widgets -r --filter "./widgets/packages/*" publish --provenance --no-git-checks
+          # ONE recursive publish: core (workspace root) + all 3 wrappers, skipping the private
+          # packages. Do NOT split the core into a non-recursive `pnpm --dir widgets publish` —
+          # pnpm leaks the --dir value + command as positional args and npm >= 11 rejects it
+          # (EUSAGE). See scripts/release.sh publish_to_npm for the same fix.
+          pnpm --dir widgets -r publish --provenance --no-git-checks
           rm -f "$HOME/.npmrc-publish"
 
   pypi-publish:
