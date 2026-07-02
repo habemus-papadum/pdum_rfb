@@ -48,6 +48,7 @@ The tag is cut **by CI** (the `prepare` job), not pushed by hand — so recovery
 
 | Where it failed | State | Do this |
 | --- | --- | --- |
+| **`gate`** (CI not green / not run / timed out) | Nothing done | This is a pre-flight — the commit's `ci.yml` isn't green. Fix CI and re-dispatch, wait for CI then re-dispatch, or (if you accept the risk) re-dispatch with `skip_ci_check=true`. |
 | **A build job** (`build-rfb`/`nvenc`/`vtenc`) | Nothing published | Fix the cause, then **Re-run failed jobs** (transient), or dispatch a fresh release (a code fix needs a new version). Safe — no artifacts are out. |
 | **`npm-publish`** | Maybe some npm packages out | Re-run failed jobs. Already-published packages error (npm has no `skip-existing`) — publish only the missing ones by hand: `pnpm --dir widgets --filter "@habemus-papadum/rfb-<pkg>" publish --provenance --no-git-checks`. PyPI hasn't run yet (it's gated on npm), so nothing to undo there. |
 | **`pypi-publish`** (e.g. rfb ok, nvenc failed) | Some PyPI files out (immutable) | **Re-run failed jobs.** `skip-existing` skips the uploaded files and completes the rest. **Never** rebuild-and-overwrite an existing file. |

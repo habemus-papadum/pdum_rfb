@@ -153,10 +153,11 @@ tag trigger. The `build-*` workflows also run standalone as build-only validatio
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | push / PR to `main` | Two jobs. **test**: `setup.sh`, ruff, install Mesa lavapipe, pytest + coverage (comment + badge — incl. the lavapipe `rendercanvas` render test), `mkdocs build`. **widgets**: pnpm typecheck, Vitest, and Playwright e2e (`uv sync --frozen --no-group viz` to boot the e2e test server). |
-| `release.yml` | **manual** (`workflow_dispatch`: `bump`/`run_tests`/`dry_run`) | The whole release pipeline: 3.12–3.14 test matrix → compute version from the last tag → bump+tag+push → build the wheel matrix (`build-rfb` + reusable nvenc/vtenc) from the tag → publish npm (provenance) then PyPI (token, `skip-existing`) → GitHub Release → return `main` to `+dev`. Run by a human; no tag trigger. |
+| `ci.yml` | push / PR to `main` (+ manual) | **The per-commit gate the release requires green.** **test** (Python 3.14): `setup.sh`, ruff, pytest + coverage (incl. the lavapipe `rendercanvas` render test), `mkdocs build`, demo notebooks. **pytest-versions**: re-runs pytest on 3.12 + 3.13 (enforces `requires-python`). **widgets**: pnpm typecheck, Vitest, Playwright e2e. |
+| `release.yml` | **manual** (`workflow_dispatch`: `bump`/`skip_ci_check`/`dry_run`) | The whole release pipeline: **require the commit's `ci.yml` green (gate)** → compute version from the last tag → bump+tag+push → build the wheel matrix (`build-rfb` + reusable nvenc/vtenc) from the tag → publish npm (provenance) then PyPI (token, `skip-existing`) → GitHub Release → return `main` to `+dev`. Run by a human; no tag trigger. |
 | `docs.yml` | on release published / push `main` / manual | Build the MkDocs site and deploy to GitHub Pages. |
 | `gpu-tests.yml` | weekly (Mon) / manual | The **only** place GPU paths run in CI. Needs a self-hosted runner labelled `gpu`; runs `tests/test_gpu.py`, `pdum-rfb doctor`, and the benchmark. Stays queued if no such runner exists. |
+| `macos-probe.yml` | weekly (Mon) / manual | Informational, non-blocking macOS **VideoToolbox** capability probe (arm64 runner) — off the per-push path (macOS minutes bill 10×). The MLX/Metal tests were dropped: hosted runners don't expose a working Metal GPU, so those only ever stalled. |
 | `build-nvenc-sdk-wheel.yml` · `build-vtenc-wheel.yml` | manual / `workflow_call` | Build the native `habemus-papadum-nvenc` (manylinux_2_28 + CUDA container) / `habemus-papadum-vtenc` (macOS arm64) wheels across CPython versions. Reused by `release.yml`; standalone runs are build-only (no GPU/Mac-runtime needed to *build*). |
 | `build-pyav-cuda-wheel.yml` | manual / tag `gpu-av18-*` | Build the self-contained PyAV-18 (CUDA/NVENC) wheel; on a tag it attaches the wheels to a GitHub Release (LGPL ffmpeg — kept off PyPI). |
 
@@ -175,14 +176,16 @@ This solves the cross-platform reality — no single machine can build all three
 only) — by having CI build the matrix. Inputs:
 
 - **`bump`** = `patch` / `minor` / `major` — the release **size relative to the last release**.
-- **`run_tests`** (default true) — run the 3.12–3.14 test matrix first; skip when you already
-  know `main` is green.
+- **`skip_ci_check`** (default false) — override the gate and release even if the commit's CI
+  isn't green (or hasn't run). Normally leave it off.
 - **`dry_run`** (default false) — compute the version and print the file diff, then **stop**
   (no commit, tag, build, or publish). A rehearsal.
 
-One dispatch runs, in order:
+The release **does not re-run tests** — it trusts CI. One dispatch runs, in order:
 
-1. **`test`** (skippable) — ruff + pytest on CPython 3.12/3.13/3.14.
+1. **`gate`** (unless `skip_ci_check`) — require the commit's `ci.yml` run (Linux `test` +
+   `pytest-versions` + `widgets`) to be green; **waits out** an in-progress run (up to 30 min),
+   so dispatching right after a push is fine. A red or missing CI run blocks the release.
 2. **`prepare`** — `version = bump(last vX.Y.Z tag, bump)` (tag-as-truth), writes it across all
    10 version files + repins the native extras (lockstep, `scripts/_versioning.py`), `uv lock`,
    commits, tags `vX.Y.Z`, and pushes the commit + tag to `main`.

@@ -1,0 +1,55 @@
+# Weekly macOS capability probe — is Apple VideoToolbox H.264 usable on GitHub-hosted macOS
+# runners? Informational + non-blocking, and OFF the per-push path (hosted macOS minutes bill 10x).
+#
+# The MLX / Apple Metal tests were removed on purpose: hosted macOS runners are virtualized and
+# don't expose a working Metal GPU (actions/runner-images#7085) — `mlx_available()` passes because
+# `default_device()` reports a "gpu", but a kernel `mx.eval()` HANGS, so those tests only ever
+# stalled here. Real Metal/MLX coverage belongs on a self-hosted Apple-silicon runner (cf.
+# gpu-tests.yml for the CUDA analog). This probe keeps just the VideoToolbox path.
+name: macOS probe (weekly)
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC (matches gpu-tests.yml)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  vtenc:
+    name: macOS VideoToolbox probe
+    runs-on: macos-latest # Apple Silicon (arm64)
+    continue-on-error: true # informational; never blocks
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the VideoToolbox extra (builds native pdum.vtenc)
+        # mac-vt builds pdum.vtenc via clang / Xcode CLT (present on the runner). Deliberately not
+        # ./scripts/setup.sh — no pnpm / Playwright; this is a focused capability probe. No MLX:
+        # test_vtenc.py's one MLX-path test self-skips when mlx isn't installed.
+        run: uv sync --frozen --extra mac-vt
+
+      - name: Probe VideoToolbox
+        shell: bash
+        run: |
+          echo "## host"; uname -sm; sw_vers || true; echo
+          echo "## VideoToolbox"
+          uv run python - <<'PY'
+          try:
+              from pdum.vtenc import supported
+              print("pdum.vtenc import: OK | supported() =", supported())
+          except Exception as e:
+              print("pdum.vtenc raised:", type(e).__name__, e)
+          PY
+
+      - name: VideoToolbox tests (tests/test_vtenc.py)
+        # Exception-safe gate (a real one-frame VT encode) -> cleanly skips if VT can't open.
+        timeout-minutes: 8
+        run: uv run pytest tests/test_vtenc.py -ra

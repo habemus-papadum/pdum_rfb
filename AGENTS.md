@@ -170,9 +170,10 @@ Documentation is deployed to GitHub Pages (`.github/workflows/docs.yml`):
 
 ### Release Process
 Releasing is a single CI workflow — `.github/workflows/release.yml`, a `workflow_dispatch` a
-HUMAN runs from the Actions UI (inputs: `bump` = patch/minor/major, `run_tests`, `dry_run`). In
-one run it:
-1. Runs the 3.12–3.14 test matrix (skippable via `run_tests`)
+HUMAN runs from the Actions UI (inputs: `bump` = patch/minor/major, `skip_ci_check`, `dry_run`). It
+does **not** re-run tests — it trusts CI. In one run it:
+1. Requires the commit's `ci.yml` run (Linux tests + widgets) to be green — waiting out an
+   in-progress run; `skip_ci_check` overrides the gate
 2. Computes the release version = `bump(last vX.Y.Z tag, bump)` — the size is decided **at
    release**, against the last real release (tag-as-truth), never guessed a release ahead
 3. Writes the version across every file, commits, tags `vX.Y.Z`, pushes

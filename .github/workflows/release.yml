@@ -13,7 +13,9 @@
 #   * PyPI + npm publish with TOKEN secrets (TEMPORARY — the maintainer is locked out of PyPI
 #     2FA; see docs/proposals/active/trusted_publishing_migration.md).
 #
-# Flow: test matrix (skippable) -> bump+tag -> build rfb/nvenc/vtenc from the tag -> npm then
+# Gate: the release does NOT re-run tests — it REQUIRES the commit's own `ci.yml` run (Linux
+# test + pytest-versions + widgets) to be green, waiting out an in-progress run. `skip_ci_check`
+# overrides it. Flow: CI-green gate -> bump+tag -> build rfb/nvenc/vtenc from the tag -> npm then
 # PyPI (npm first: fail fast on the immutable side) -> GitHub release + back-to-dev.
 # `dry_run` computes the version and prints the diff, then stops before committing/publishing.
 name: release
@@ -26,10 +28,10 @@ on:
         type: choice
         options: [patch, minor, major]
         default: minor
-      run_tests:
-        description: "Run the 3.12-3.14 test matrix before releasing"
+      skip_ci_check:
+        description: "Override: release even if the commit's CI isn't green (skip the gate)"
         type: boolean
-        default: true
+        default: false
       dry_run:
         description: "Compute the version + show the diff, but do NOT commit/tag/publish"
         type: boolean
@@ -39,30 +41,46 @@ permissions:
   contents: read
 
 jobs:
-  # --- gate: full test matrix (skippable when you know main is green) --------
-  test:
-    name: test (py ${{ matrix.python }})
-    if: ${{ inputs.run_tests }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12", "3.13", "3.14"]
+  # --- gate: require the commit's CI (Linux tests + widgets) to be green ------
+  gate:
+    name: require CI green on this commit
+    if: ${{ !inputs.skip_ci_check }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # read ci.yml run status
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync --frozen --no-group viz --python ${{ matrix.python }}
-      - run: uv run --python ${{ matrix.python }} ruff check .
-      - run: uv run --python ${{ matrix.python }} pytest -q
+      - name: Wait for ci.yml and require success on ${{ github.sha }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # ci.yml's per-push run is exactly {test, pytest-versions, widgets} (the macOS probe is a
+          # separate weekly workflow). None are continue-on-error, so a run-level `success` means
+          # all Linux tests + widgets are green. Wait out an in-progress run, then require success.
+          jq_row='if length>0 then (.[0] | [.status, (.conclusion // ""), .url] | @tsv) else "" end'
+          for i in $(seq 1 60); do # up to ~30 min (60 × 30s)
+            ROW=$(gh run list -w ci.yml -c "$SHA" -e push -L 1 --json status,conclusion,url --jq "$jq_row")
+            if [ -z "$ROW" ]; then echo "no ci.yml push run for $SHA yet… ($i/60)"; sleep 30; continue; fi
+            IFS=$'\t' read -r STATUS CONCL URL <<<"$ROW"
+            echo "ci.yml: status=$STATUS conclusion=${CONCL:-<pending>}  $URL"
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCL" = "success" ]; then echo "::notice::CI green on $SHA ✓"; exit 0; fi
+              echo "::error::ci.yml concluded '$CONCL' on $SHA — fix CI, or re-dispatch with skip_ci_check=true."
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "::error::Timed out (30 min) waiting for ci.yml on $SHA. Re-dispatch when CI is green, or use skip_ci_check=true."
+          exit 1
 
   # --- decide the version + cut the tag -------------------------------------
   prepare:
     name: bump + tag (last release + bump)
-    needs: [test]
-    # Runs when tests passed OR were skipped (run_tests=false); blocks on a red matrix.
-    if: ${{ !cancelled() && needs.test.result != 'failure' }}
+    needs: [gate]
+    # Runs when the gate passed OR was skipped (skip_ci_check=true); blocks if CI wasn't green.
+    if: ${{ !cancelled() && needs.gate.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the release commit + tag to main
@@ -157,7 +175,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: widgets/pnpm-lock.yaml
       - run: pnpm --dir widgets install --frozen-lockfile

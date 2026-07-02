@@ -22,6 +22,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 35 # backstop > the deploy-pages timeout below
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,3 +45,9 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # The build+upload is fast; the time is spent polling GitHub's Pages backend while the
+          # deployment sits in `deployment_queued`. The action's default timeout is 10 min (600000
+          # ms) — recent runs crept 6m -> 9m53s -> 10m46s(fail) as the backend queued. Give it
+          # room so transient Pages-backend slowness doesn't fail an otherwise-good deploy.
+          timeout: 1800000 # 30 min (ms)

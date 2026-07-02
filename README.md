@@ -205,7 +205,8 @@ Releasing is a **single CI workflow** — `release` (`.github/workflows/release.
 `workflow_dispatch` a maintainer runs from the GitHub Actions UI (or `gh workflow run
 release.yml -f bump=minor`). There is no local release script. In one run it:
 
-1. runs the 3.12–3.14 test matrix (skippable);
+1. requires the commit's CI (`ci.yml`: Linux tests + widgets) to be green — waiting out an
+   in-progress run; `skip_ci_check` overrides;
 2. computes the version = `bump(last vX.Y.Z tag, bump)` — the size (patch/minor/major) is
    decided **at release**, against the last real release (tag-as-truth), not guessed ahead;
 3. writes it across **every** version file in lockstep (`pyproject.toml`,
