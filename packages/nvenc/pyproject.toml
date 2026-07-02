@@ -11,7 +11,7 @@ build-backend = "scikit_build_core.build"
 name = "habemus-papadum-nvenc"
 # Kept in lockstep with habemus-papadum-rfb by scripts/release.sh (the "-alpha" dev
 # suffix is the release script's convention; PEP 440 canonicalizes it to 0.1.0a0).
-version = "0.1.0"
+version = "0.2.0-alpha"
 description = "Zero-PyAV GPU H.264/HEVC encode (NVIDIA Video Codec SDK / NVENC) for pdum.rfb"
 readme = "README.md"
 license = { text = "MIT" }

@@ -12,7 +12,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "habemus-papadum-vtenc"
 # Kept in lockstep with habemus-papadum-rfb by scripts/release.sh.
-version = "0.1.0"
+version = "0.2.0-alpha"
 description = "Zero-PyAV macOS H.264 encode (Apple VideoToolbox) for pdum.rfb"
 readme = "README.md"
 license = { text = "MIT" }
