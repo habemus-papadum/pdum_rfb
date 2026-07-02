@@ -8,6 +8,7 @@ import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
 import type { FitMode } from "@habemus-papadum/rfb-widgets";
 import { api, wsUrl, type BackendCap, type Capabilities, type SceneCap, type StreamState } from "./api";
 import { clear, el, field } from "./dom";
+import { createStatsOverlay, type StatsOverlay } from "./overlay";
 import { FRAMEWORKS, mountViewer, type Framework, type ViewerHandle } from "./viewer";
 import "./styles.css";
 
@@ -25,11 +26,16 @@ const viewerOpts = {
   fit: "contain" as FitMode,
   debug:
     new URLSearchParams(location.search).get("debug") === "1" || localStorage.getItem("rfb-debug") === "1",
+  // Stats overlay defaults ON; a stored "0" (user toggled off before) opts out.
+  overlay: localStorage.getItem("rfb-overlay") !== "0",
 };
 
 // --- persistent DOM (created once) -----------------------------------------
 
 const viewportEl = el("div", { class: "viewport" });
+// The stats overlay is mounted on the `.demo__view` wrapper as a sibling of `viewportEl`, so it
+// survives `remountViewer()` (which only clears `viewportEl`'s children).
+const overlay: StatsOverlay = createStatsOverlay();
 const controlsEl = el("div", {});
 const pillEl = el("span", { class: "pill", "data-tone": "connecting", text: "connecting" });
 const clientsEl = el("dd", { text: "—" });
@@ -77,7 +83,8 @@ function buildShell(): void {
     el("div", { class: "demo__spacer" }),
     pillEl,
   ]);
-  const view = el("div", { class: "demo__view" }, [viewportEl]);
+  const view = el("div", { class: "demo__view" }, [viewportEl, overlay.el]);
+  overlay.setVisible(viewerOpts.overlay);
   const status = el("div", { class: "group" }, [
     el("div", { class: "group__title", text: "Session" }),
     (() => {
@@ -121,6 +128,7 @@ function onViewerState(state: ConnectionState): void {
 }
 
 function onViewerStats(stats: Stats): void {
+  overlay.update(stats);
   clear(statsDl);
   for (const [k, v] of formatStatsRows("negotiated", stats)) {
     if (k === "state") continue; // shown by the pill
@@ -335,11 +343,26 @@ function viewerGroup(): HTMLElement {
     })(),
     el("span", { text: "console logging" }),
   ]);
+  const overlayToggle = el("label", { class: "toggle" }, [
+    (() => {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.dataset.testid = "overlay";
+      cb.checked = viewerOpts.overlay;
+      cb.addEventListener("change", () => {
+        viewerOpts.overlay = cb.checked;
+        localStorage.setItem("rfb-overlay", cb.checked ? "1" : "0");
+        overlay.setVisible(cb.checked); // live, no reconnect
+      });
+      return cb;
+    })(),
+    el("span", { text: "on-canvas stats" }),
+  ]);
   return el("div", { class: "group" }, [
     el("div", { class: "group__title", text: "Viewer" }),
     field("Framework", frameworkSeg, "Which wrapper renders the viewer, live-swapped. Vanilla = the core view; React = the same view inside a React component."),
     field("Fit", fitSeg, "How the frame maps into the viewport when aspect ratios differ."),
     field("Debug", debugToggle, "Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode). Errors surface either way."),
+    field("Overlay", overlayToggle, "Toggle the on-canvas stats overlay (fps · rtt · measured bitrate + sparklines), pinned to the viewport's bottom-left corner."),
     el("div", { class: "btn-row" }, [
       el("button", { type: "button", text: "capture PNG", onclick: () => void capture() }),
       el("button", { type: "button", text: "fullscreen", onclick: () => void viewportEl.requestFullscreen?.() }),

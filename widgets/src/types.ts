@@ -66,6 +66,14 @@ export interface Stats {
   serverDropped?: number;
   targetBitrate?: number;
   targetFps?: number;
+  // Server-declared stream metadata — WHAT the server is sending (from the `config` message
+  // and per-frame headers), as opposed to the measured metrics above. Populated from the first
+  // `config`; kept current by frame headers (e.g. a resize or codec change).
+  codec?: string; // e.g. "avc1.42E01F"; absent on the image transport
+  colorSpace?: string; // color primaries: "bt709" (sRGB) | "display-p3" | "bt2020"
+  frameWidth?: number; // server render resolution (device px)
+  frameHeight?: number;
+  renderPixelRatio?: number; // device px per CSS px the server renders at
 }
 
 export type WorkerToMain =

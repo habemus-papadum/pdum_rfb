@@ -57,6 +57,36 @@ test("help tooltips reveal their text on hover (CSS popover, not the native titl
   await expect(tip).toHaveCSS("opacity", "1");
 });
 
+test("the viewer streams under every framework (React / Svelte / Solid / Vanilla)", async ({ page }) => {
+  await page.goto("/");
+  const pill = page.locator(".pill");
+  await expect(pill).toHaveText("live", { timeout: 20_000 });
+
+  // Each framework path mounts the same core view via its own runtime; switching remounts the
+  // viewer, which must tear down and re-negotiate back to "live". If a Svelte/Solid mount threw,
+  // the pill would never return to "live" here.
+  for (const fw of ["React", "Svelte", "Solid", "Vanilla"]) {
+    const btn = page.getByRole("button", { name: fw, exact: true });
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-pressed", "true"); // toggle registered + re-rendered
+    await expect(pill).toHaveText("live", { timeout: 20_000 });
+    await expect(page.locator(".viewport canvas")).toBeVisible();
+  }
+});
+
+test("the stats overlay renders over the canvas and toggles off", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
+  const overlay = page.locator(".stats-overlay");
+  await expect(overlay).toBeVisible(); // default on
+  // Server-declared metadata is surfaced from the `config` message: the "server" section shows
+  // codec/color/size — the demo renders at 320×240, so that resolution must appear.
+  await expect(overlay).toContainText("server");
+  await expect(overlay).toContainText("320");
+  await page.locator("[data-testid=overlay]").uncheck();
+  await expect(overlay).toBeHidden();
+});
+
 test("debug toggle lights up the console play-by-play", async ({ page }) => {
   const logs: string[] = [];
   page.on("console", (m) => {

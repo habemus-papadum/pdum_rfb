@@ -1,12 +1,15 @@
-"""``pdum-rfb`` command-line diagnostics.
+"""``pdum-rfb`` command-line entry point.
 
-Two commands, both optional (install with ``pip install habemus-papadum-rfb[cli]``):
+Commands (all optional — install with ``pip install habemus-papadum-rfb[cli]`` or ``[demo]``):
 
 * ``pdum-rfb doctor`` — probe this box and show, as a table, which encode paths
   work (image, CPU H.264, host NVENC, zero-copy CUDA→NVENC, NVENC SDK, and — on
   macOS/Apple Silicon — Apple VideoToolbox + MLX) and which one to prefer.
 * ``pdum-rfb benchmark`` — measure per-frame encode latency / size / PSNR for every
   available path (a Rich-rendered wrapper over :mod:`pdum.rfb.benchmark`).
+* ``pdum-rfb demo`` — the self-contained web app (``[demo]`` extra).
+* ``pdum-rfb jupyter-demo`` / ``marimo-demo`` — copy the bundled "renderer + viewer in one
+  kernel" notebook to a working dir and launch JupyterLab / marimo on it (``[demo]`` extra).
 
 The module imports cleanly without Typer/Rich; the console-script entry point then
 prints an install hint instead of crashing.
@@ -15,9 +18,11 @@ prints an install hint instead of crashing.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import platform
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import typer
@@ -400,6 +405,82 @@ else:
             )
         except KeyboardInterrupt:
             pass
+
+    def _notebook_asset(name: str) -> Path | None:
+        """Locate a bundled demo notebook: wheel package data first, then a dev checkout."""
+        try:
+            from importlib.resources import files
+
+            packaged = Path(str(files("pdum.rfb").joinpath("notebooks", name)))
+            if packaged.is_file():
+                return packaged
+        except (ModuleNotFoundError, TypeError, OSError):
+            pass
+        # Dev / editable checkout: the source of truth in docs/demos/ (not shipped there).
+        dev = Path(__file__).resolve().parents[3] / "docs" / "demos" / name
+        return dev if dev.is_file() else None
+
+    def _run_notebook_demo(kind: str, work_dir: str, open_browser: bool) -> None:
+        """Copy the bundled demo notebook to a working dir and launch its notebook tool."""
+        import shutil
+        import subprocess
+        import tempfile
+
+        fname = "jupyter-demo.ipynb" if kind == "jupyter" else "marimo-demo.py"
+        launcher_mod = "jupyterlab" if kind == "jupyter" else "marimo"
+        src = _notebook_asset(fname)
+        if src is None:
+            sys.stderr.write(f"Bundled {fname} not found (the demo notebooks are missing).\n")
+            raise SystemExit(1)
+        if importlib.util.find_spec(launcher_mod) is None:
+            sys.stderr.write(
+                f"pdum-rfb {kind}-demo needs {launcher_mod}.\n"
+                f"  uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb {kind}-demo\n"
+                "  (or: pip install 'habemus-papadum-rfb[demo]')\n"
+            )
+            raise SystemExit(1)
+        dest_dir = Path(work_dir).expanduser().resolve() if work_dir else Path(tempfile.mkdtemp(prefix="pdum-rfb-"))
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / fname
+        shutil.copyfile(src, dest)  # copy out of (read-only) site-packages so the notebook is editable
+        print(f"pdum-rfb {kind}-demo → {dest}\nRun the cells top-to-bottom; Ctrl-C here stops the server.")
+        if kind == "jupyter":
+            cmd = ["jupyter", "lab", str(dest)] + ([] if open_browser else ["--no-browser"])
+        else:
+            cmd = ["marimo", "edit", str(dest)] + ([] if open_browser else ["--headless"])
+        try:
+            raise SystemExit(subprocess.call(cmd))
+        except KeyboardInterrupt:
+            pass
+
+    @app.command("jupyter-demo")
+    def jupyter_demo(
+        dir: str = typer.Option("", "--dir", help="working dir for the notebook copy (default: a temp dir)"),
+        open_browser: bool = typer.Option(True, "--open/--no-open", help="open the browser (JupyterLab default)"),
+    ) -> None:
+        """Launch JupyterLab on the bundled 'renderer + viewer in one kernel' demo notebook.
+
+        Copies ``jupyter-demo.ipynb`` to a working dir and starts JupyterLab there::
+
+            uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb jupyter-demo
+
+        The viewer connects to a WebSocket opened by the kernel — fine on a local notebook; in a
+        hosted environment that port must be browser-reachable (see docs/notebook.md).
+        """
+        _run_notebook_demo("jupyter", dir, open_browser)
+
+    @app.command("marimo-demo")
+    def marimo_demo(
+        dir: str = typer.Option("", "--dir", help="working dir for the notebook copy (default: a temp dir)"),
+        open_browser: bool = typer.Option(True, "--open/--no-open", help="open the browser (marimo default)"),
+    ) -> None:
+        """Launch marimo on the bundled 'renderer + viewer in one process' demo notebook.
+
+        Same wiring as the Jupyter demo, in marimo's reactive editor::
+
+            uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb marimo-demo
+        """
+        _run_notebook_demo("marimo", dir, open_browser)
 
 
 if __name__ == "__main__":

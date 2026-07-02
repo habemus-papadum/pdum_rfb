@@ -27,7 +27,7 @@ soft and editorial. Everything the old terminal panel did now lives here, beside
 | **Stream** | Pick the shared stream or **mint a private one** (see below). |
 | **Scene & backend** | Pick a scene; pick an encode backend — switched **live on the same socket** (the browser follows on the next keyframe). Backends/scenes that can't run on this box are **greyed out** with a reason. |
 | **Quality** | Retune bitrate + fps (encoder rebuild), change render size (publishing a new size rebuilds encoders + keyframes), tag the color space (sRGB / Display-P3). |
-| **Viewer** | Client-only: swap the **framework** rendering the viewer (Vanilla ⇄ React), the **fit** mode (contain/cover/fill), the **debug** console toggle, plus capture-PNG / fullscreen / reconnect. |
+| **Viewer** | Client-only: swap the **framework** rendering the viewer (Vanilla / React / Svelte / Solid), the **fit** mode (contain/cover/fill), the **debug** console toggle, the on-canvas **stats overlay** (fps/rtt/bitrate + sparklines), plus capture-PNG / fullscreen / reconnect. |
 | **Structural** | The per-stream knobs fixed at birth (adaptive, still-after-settle, stats interval, pipeline depth, resize policy). Read-only here — **create a private stream to explore them**. |
 | **Session** | Live per-viewer stats (fps / bitrate / encode-ms / RTT / decode queue / dropped) from the server's `stats` push, plus the connection state and any scene error. |
 

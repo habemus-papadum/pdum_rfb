@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
 
 // The `pdum-rfb demo` SPA. Builds a minified, self-contained bundle straight into the
@@ -12,6 +13,10 @@ const api = process.env.RFB_DEMO_API; // e.g. "http://127.0.0.1:53187" (set by -
 
 export default defineConfig({
   base: "./",
+  // Svelte compiler for the demo's one local `SvelteViewer.svelte` (the "Svelte" framework
+  // path). React uses createElement (no plugin) and Solid rides its pre-compiled runtime via
+  // solid-js/web `render` (no JSX), so this is the only framework compiler the demo needs.
+  plugins: [svelte()],
   // Under `pdum-rfb demo --dev` (RFB_DEMO_API set) Vite shares the terminal with the Python
   // process — disable its screen-clearing so uvicorn / server logs stay visible instead of
   // being wiped on every HMR update. A standalone `pnpm dev` keeps Vite's default.

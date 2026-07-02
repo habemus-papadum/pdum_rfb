@@ -485,3 +485,82 @@ a {
     animation: octocat-wave 560ms ease-in-out;
   }
 }
+
+/* --- stats overlay -------------------------------------------------------- */
+/* On-canvas HUD: a dark-transparent monospace panel pinned to the viewport's bottom-left,
+   legible over any rendered frame. `pointer-events: none` so it never blocks canvas input. */
+.stats-overlay {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 10;
+  pointer-events: none;
+  min-width: 12.5rem;
+  padding: 0.4rem 0.55rem 0.45rem;
+  background: rgba(0, 0, 0, 0.62);
+  color: #f2f0ec;
+  border-radius: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(1.5px);
+}
+
+.stats-overlay__title {
+  color: #9fb4ae;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 9px;
+  margin-bottom: 0.25rem;
+}
+
+.stats-overlay__grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 0.9rem;
+}
+
+.stats-overlay__k {
+  color: #b7b2a8;
+}
+
+.stats-overlay__v {
+  color: #fff;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-overlay__sparks {
+  margin-top: 0.35rem;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.stats-overlay__sparkrow {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr auto;
+  align-items: center;
+  gap: 0 0.4rem;
+}
+
+.stats-overlay__sparksvg {
+  display: flex;
+  align-items: center;
+}
+
+.stats-overlay__spark {
+  display: block;
+  width: 100%;
+  height: 18px;
+  opacity: 0.9;
+}
+
+/* stats overlay: the second section title ("stats") sits under the "server" metadata block */
+.stats-overlay > .stats-overlay__title:not(:first-child) {
+  margin-top: 0.4rem;
+}
+.stats-overlay__meta .stats-overlay__v {
+  color: #d7d2c8; /* metadata reads a touch softer than the live numbers */
+}

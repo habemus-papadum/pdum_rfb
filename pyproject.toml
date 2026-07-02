@@ -105,17 +105,22 @@ mac-vt = [
     "habemus-papadum-vtenc~=0.2.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 # `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
-# (committed under src/pdum/rfb/static/demo/), a REST control plane, and the framebuffer
-# WebSocket(s) over one uvicorn origin; the browser holds the viewer + all controls. No
+# (built under src/pdum/rfb/static/demo/ via `pnpm -C widgets build:demo`; a git-ignored
+# build artifact force-included into the wheel, not committed), a REST control plane, and the
+# framebuffer WebSocket(s) over one uvicorn origin; the browser holds the viewer + all controls. No
 # Node/Vite at runtime. Meant for `uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo`.
 # A dev/eval harness, not a runtime dep. Compound/self-referencing: pulls the CLI, the CPU
 # H.264 (av) + native HW encoders (each markered to its platform, so one spec works on
-# macOS and Linux), the ASGI server, and httpx (Starlette TestClient, used by --smoke).
+# macOS and Linux), the ASGI server, httpx (Starlette TestClient, used by --smoke), the
+# anywidget viewer, and Jupyter + marimo so the notebook demos (docs/demos/{jupyter,marimo}-demo)
+# run out of the box.
 demo = [
-    "habemus-papadum-rfb[cli,h264,mac-vt,gpu-nvenc-sdk]",
+    "habemus-papadum-rfb[cli,h264,mac-vt,gpu-nvenc-sdk,anywidget]",
     "starlette>=0.37",
     "uvicorn>=0.30",
     "httpx>=0.27",
+    "jupyter>=1.1",
+    "marimo>=0.9",
 ]
 # Jupyter/marimo notebook widget (pdum.rfb.notebook). The prebuilt, inlined-worker ESM
 # bundle ships in the wheel (src/pdum/rfb/static/widget.{js,css}); this pulls the Python
@@ -135,10 +140,15 @@ build-backend = "hatchling.build"
 packages = ["src/pdum"]
 
 # The anywidget bundle (committed, built from widgets/anywidget/) is package data. Tracked
-# files under src/pdum ship by default (like py.typed); this makes it explicit.
+# files under src/pdum ship by default (like py.typed); this makes it explicit. The demo
+# notebooks (source of truth in docs/demos/) also ride into the wheel here as package data so
+# `pdum-rfb jupyter-demo` / `marimo-demo` can find + launch them from an installed wheel
+# (`cli._notebook_asset` falls back to docs/demos/ in a dev checkout).
 [tool.hatch.build.targets.wheel.force-include]
 "src/pdum/rfb/static/widget.js" = "pdum/rfb/static/widget.js"
 "src/pdum/rfb/static/widget.css" = "pdum/rfb/static/widget.css"
+"docs/demos/jupyter-demo.ipynb" = "pdum/rfb/notebooks/jupyter-demo.ipynb"
+"docs/demos/marimo-demo.py" = "pdum/rfb/notebooks/marimo-demo.py"
 
 # The `pdum-rfb demo` SPA is NO LONGER committed — it's git-ignored and built on demand
 # (`pnpm -C widgets build:demo`, which the release workflow runs before building the wheel

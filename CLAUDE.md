@@ -127,7 +127,10 @@ src/pdum/rfb/
                   wheel; .map gitignored. Missing demo/ → `pdum-rfb demo` serves a placeholder
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
-  cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo
+  cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo, jupyter-demo,
+                  marimo-demo (the last two copy the bundled notebook out of the wheel —
+                  force-included from docs/demos/, dev-fallback in cli._notebook_asset — and
+                  launch JupyterLab / marimo on it)
   demos.py        Demo registry: CPU pattern scenes + paint (interactive) + mlx_shader (Metal)
   demo_server.py  `pdum-rfb demo` = one self-contained web app (opt-in [demo]: starlette+uvicorn).
                   Starlette ASGI app: prebuilt SPA (static/demo/) + REST control plane
@@ -154,7 +157,9 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
     svelte/                   @habemus-papadum/rfb-svelte  (createRemoteFramebuffer action/stores + component; Svelte 5)
     solid/                    @habemus-papadum/rfb-solid   (createRemoteFramebuffer ref/signals + component)
     demo-app/                 PRIVATE: the `pdum-rfb demo` SPA (vanilla shell + faicanteen styling +
-                              REST control rail + framework toggle: Vanilla⇄React). Builds via the root
+                              REST control rail + framework toggle: Vanilla/React/Svelte/Solid, each
+                              lazy-loaded, mounting the same core view (inline, like reactViewer.ts —
+                              no wrapper-pkg build) + an on-canvas stats overlay). Builds via the root
                               `build:demo` script -> src/pdum/rfb/static/demo/ (git-ignored build
                               artifact, force-included into the wheel; not committed). Not published.
   # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>

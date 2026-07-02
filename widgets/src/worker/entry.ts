@@ -85,6 +85,17 @@ function canvasColorSpace(color: unknown): PredefinedColorSpace {
   return primaries === "display-p3" ? "display-p3" : "srgb";
 }
 
+/** Fold server-declared stream metadata (codec / color / resolution / render DPR) from a
+ *  `config` message or a frame header into `stats`, so the UI can show WHAT the server sends. */
+function applyStreamInfo(h: { codec?: unknown; color?: unknown; width?: unknown; height?: unknown; pixel_ratio?: unknown }): void {
+  if (typeof h.codec === "string") stats.codec = h.codec;
+  const primaries = h.color && typeof h.color === "object" ? (h.color as { primaries?: string }).primaries : undefined;
+  stats.colorSpace = primaries ?? stats.colorSpace ?? "bt709";
+  if (typeof h.width === "number") stats.frameWidth = h.width;
+  if (typeof h.height === "number") stats.frameHeight = h.height;
+  if (typeof h.pixel_ratio === "number") stats.renderPixelRatio = h.pixel_ratio;
+}
+
 /** Map a browser event (CSS canvas coords) to the wire event. Pointer/wheel get their
  *  position remapped CSS -> backing -> frame pixels (via the shared viewport geometry)
  *  plus an `inside` flag and the frame `pixel_ratio` echo; other events pass through. */
@@ -116,7 +127,9 @@ function handleControl(control: { type: string; [k: string]: unknown }): void {
     });
     if (typeof control.pixel_ratio === "number") frameDpr = control.pixel_ratio;
     if (control.color) renderer?.setColorSpace(canvasColorSpace(control.color));
+    applyStreamInfo(control as Parameters<typeof applyStreamInfo>[0]);
     post({ type: "state", state: "negotiated" });
+    post({ type: "stats", stats: { ...stats } }); // surface the stream metadata right after negotiation
   } else if (control.type === "set_quality") {
     stats = applySetQuality(stats, control as never);
     post({ type: "stats", stats: { ...stats } });
@@ -131,6 +144,7 @@ async function handleBinary(buf: ArrayBuffer): Promise<void> {
   // Frame headers may carry a per-frame render DPR (P2); keep the echo current.
   const framePixelRatio = (header as { pixel_ratio?: unknown }).pixel_ratio;
   if (typeof framePixelRatio === "number") frameDpr = framePixelRatio;
+  applyStreamInfo(header as Parameters<typeof applyStreamInfo>[0]); // keep codec/color/resolution current
   if (header.type === "image_frame") {
     const h = header as ImageFrameHeader;
     stats.transport = "image";

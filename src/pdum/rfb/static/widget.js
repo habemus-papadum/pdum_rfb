@@ -88,19 +88,19 @@ function Q(t, e) {
     error: (s, ...i) => console.error(`${n} ${s}`, ...i)
   };
 }
-const L = `var O = Object.defineProperty;
-var B = (t, e, i) => e in t ? O(t, e, { enumerable: !0, configurable: !0, writable: !0, value: i }) : t[e] = i;
-var r = (t, e, i) => B(t, typeof e != "symbol" ? e + "" : e, i);
-const T = {
+const L = `var B = Object.defineProperty;
+var T = (t, e, i) => e in t ? B(t, e, { enumerable: !0, configurable: !0, writable: !0, value: i }) : t[e] = i;
+var a = (t, e, i) => T(t, typeof e != "symbol" ? e + "" : e, i);
+const z = {
   maxInflight: 3,
   slowDownQueue: 3,
   keyframeOnDropQueue: 6
 };
-class z {
+class F {
   constructor(e = {}) {
-    r(this, "cfg");
-    r(this, "queued", []);
-    this.cfg = { ...T, ...e };
+    a(this, "cfg");
+    a(this, "queued", []);
+    this.cfg = { ...z, ...e };
   }
   onQueued(e) {
     this.queued.push(e);
@@ -125,9 +125,9 @@ class z {
     this.queued = [];
   }
 }
-class F {
+class N {
   constructor() {
-    r(this, "armed", !0);
+    a(this, "armed", !0);
   }
   // true => still waiting for a keyframe
   needsKeyframe() {
@@ -145,8 +145,8 @@ class F {
     this.armed = !0;
   }
 }
-const N = "image/jpeg", L = "image/png", I = "webcodecs/h264-annexb", K = "avc1.42E01F";
-async function $(t, e = 1280, i = 720) {
+const I = "image/jpeg", L = "image/png", K = "webcodecs/h264-annexb", $ = "avc1.42E01F";
+async function U(t, e = 1280, i = 720) {
   const s = globalThis.VideoDecoder;
   if (!s || typeof s.isConfigSupported != "function") return !1;
   try {
@@ -155,49 +155,49 @@ async function $(t, e = 1280, i = 720) {
     return !1;
   }
 }
-async function U(t = {}) {
-  const e = [N, L];
-  return !t.imageOnly && await $(K, t.width, t.height) && e.push(I), { supported: e, devicePixelRatio: t.devicePixelRatio ?? 1 };
+async function V(t = {}) {
+  const e = [I, L];
+  return !t.imageOnly && await U($, t.width, t.height) && e.push(K), { supported: e, devicePixelRatio: t.devicePixelRatio ?? 1 };
 }
-const V = () => {
+const X = () => {
 };
 function P(t, e) {
   const i = \`[rfb:\${e}]\`;
   return {
     enabled: t,
-    log: t ? (s, ...o) => console.debug(\`\${i} \${s}\`, ...o) : V,
+    log: t ? (s, ...o) => console.debug(\`\${i} \${s}\`, ...o) : X,
     error: (s, ...o) => console.error(\`\${i} \${s}\`, ...o)
   };
 }
-const X = new TextDecoder("utf-8");
+const J = new TextDecoder("utf-8");
 new TextEncoder();
-function J(t) {
+function Y(t) {
   const e = t instanceof Uint8Array ? t : new Uint8Array(t);
   if (e.byteLength < 4)
     throw new Error("buffer too small to contain a header length prefix");
   const s = new DataView(e.buffer, e.byteOffset, e.byteLength).getUint32(0, !0);
   if (e.byteLength < 4 + s)
     throw new Error(\`buffer truncated: need \${4 + s} bytes, have \${e.byteLength}\`);
-  const o = JSON.parse(X.decode(e.subarray(4, 4 + s))), n = e.subarray(4 + s);
-  return { header: o, payload: n };
+  const o = JSON.parse(J.decode(e.subarray(4, 4 + s))), c = e.subarray(4 + s);
+  return { header: o, payload: c };
 }
-const Y = 500, G = 1e4;
-function j(t, e = Math.random) {
-  const i = Math.min(G, Y * 2 ** Math.max(0, t));
+const j = 500, G = 1e4;
+function Z(t, e = Math.random) {
+  const i = Math.min(G, j * 2 ** Math.max(0, t));
   return Math.round(i * (0.5 + 0.5 * e()));
 }
-function Z(t) {
+function ee(t) {
   return t === 4401 || t === 4404;
-}
-function ee(t, e) {
-  const i = { ...t };
-  return e.rtt_ms !== void 0 && (i.serverRttMs = e.rtt_ms), e.fps_sent !== void 0 && (i.serverFpsSent = e.fps_sent), e.bitrate_bps !== void 0 && (i.serverBitrateBps = e.bitrate_bps), e.encode_ms !== void 0 && (i.serverEncodeMs = e.encode_ms), e.dropped !== void 0 && (i.serverDropped = e.dropped), e.target_bitrate !== void 0 && (i.targetBitrate = e.target_bitrate), e.target_fps !== void 0 && (i.targetFps = e.target_fps), i;
 }
 function te(t, e) {
   const i = { ...t };
+  return e.rtt_ms !== void 0 && (i.serverRttMs = e.rtt_ms), e.fps_sent !== void 0 && (i.serverFpsSent = e.fps_sent), e.bitrate_bps !== void 0 && (i.serverBitrateBps = e.bitrate_bps), e.encode_ms !== void 0 && (i.serverEncodeMs = e.encode_ms), e.dropped !== void 0 && (i.serverDropped = e.dropped), e.target_bitrate !== void 0 && (i.targetBitrate = e.target_bitrate), e.target_fps !== void 0 && (i.targetFps = e.target_fps), i;
+}
+function ie(t, e) {
+  const i = { ...t };
   return e.bitrate !== void 0 && (i.targetBitrate = e.bitrate), e.fps !== void 0 && (i.targetFps = e.fps), i;
 }
-function ie(t) {
+function se(t) {
   const e = t.frameW > 0 ? t.backingW / t.frameW : 1, i = t.frameH > 0 ? t.backingH / t.frameH : 1;
   switch (t.fit) {
     case "contain": {
@@ -213,14 +213,14 @@ function ie(t) {
   }
 }
 function A(t) {
-  const { scaleX: e, scaleY: i } = ie(t), s = t.frameW * e, o = t.frameH * i, n = (t.backingW - s) / 2, g = (t.backingH - o) / 2;
-  return { dx: n, dy: g, dw: s, dh: o };
+  const { scaleX: e, scaleY: i } = se(t), s = t.frameW * e, o = t.frameH * i, c = (t.backingW - s) / 2, g = (t.backingH - o) / 2;
+  return { dx: c, dy: g, dw: s, dh: o };
 }
-function se(t, e, i) {
-  const { dx: s, dy: o, dw: n, dh: g } = A(t), f = n > 0 ? (e - s) / n * t.frameW : 0, y = g > 0 ? (i - o) / g * t.frameH : 0, M = f >= 0 && f < t.frameW && y >= 0 && y < t.frameH;
-  return { x: f, y, inside: M };
+function oe(t, e, i) {
+  const { dx: s, dy: o, dw: c, dh: g } = A(t), f = c > 0 ? (e - s) / c * t.frameW : 0, y = g > 0 ? (i - o) / g * t.frameH : 0, O = f >= 0 && f < t.frameW && y >= 0 && y < t.frameH;
+  return { x: f, y, inside: O };
 }
-async function oe(t, e, i) {
+async function re(t, e, i) {
   const s = new Blob([new Uint8Array(i)], { type: e.mime }), o = await createImageBitmap(s);
   try {
     t.draw(o, o.width, o.height);
@@ -228,20 +228,20 @@ async function oe(t, e, i) {
     o.close();
   }
 }
-class re {
+class ae {
   constructor(e) {
     // Lazily created so the color space (from the server \`config\`, which arrives before
     // the first frame) can be chosen at getContext time — a 2D context's colorSpace is
     // fixed at creation and cannot be changed afterwards.
-    r(this, "ctx", null);
-    r(this, "colorSpace", "srgb");
+    a(this, "ctx", null);
+    a(this, "colorSpace", "srgb");
     /** Fit mode when the frame AR differs from the canvas AR (default letterbox). */
-    r(this, "fit", "contain");
+    a(this, "fit", "contain");
     /** Letterbox fill for \`contain\` (any CSS color; default black). */
-    r(this, "background", "#000");
+    a(this, "background", "#000");
     /** Current decoded frame size (device px), updated on each draw. */
-    r(this, "frameW", 0);
-    r(this, "frameH", 0);
+    a(this, "frameW", 0);
+    a(this, "frameH", 0);
     this.canvas = e;
   }
   context() {
@@ -275,8 +275,8 @@ class re {
     this.frameW = i, this.frameH = s;
     const o = this.context();
     o.fillStyle = this.background, o.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const { dx: n, dy: g, dw: f, dh: y } = A(this.viewportState());
-    o.drawImage(e, n, g, f, y);
+    const { dx: c, dy: g, dw: f, dh: y } = A(this.viewportState());
+    o.drawImage(e, c, g, f, y);
   }
   readPixels() {
     return this.context().getImageData(0, 0, this.canvas.width, this.canvas.height, {
@@ -287,19 +287,19 @@ class re {
     return this.canvas.convertToBlob({ type: e });
   }
 }
-class ae {
+class ne {
   /**
    * @param stallMs  how long a backlog may sit with zero new output before it's a stall.
    * @param now      monotonic clock in ms (inject \`performance.now\`; overridable for tests).
    * @param onStall  fired once per stall edge (check() also returns true on that edge).
    */
   constructor(e, i, s) {
-    r(this, "queued", 0);
-    r(this, "displayed", 0);
+    a(this, "queued", 0);
+    a(this, "displayed", 0);
     /** Wall-clock when the current outstanding backlog began (\`null\` = nothing pending).
      *  A nullable — not a 0 sentinel — so a legitimate timestamp of 0 isn't read as "idle". */
-    r(this, "oldestPendingAt", null);
-    r(this, "stalled", !1);
+    a(this, "oldestPendingAt", null);
+    a(this, "stalled", !1);
     this.stallMs = e, this.now = i, this.onStall = s;
   }
   /** A chunk was handed to the decoder. Starts the stall timer if we were caught up. */
@@ -324,20 +324,20 @@ class ae {
     return this.queued - this.displayed;
   }
 }
-const ne = { enabled: !1, log: () => {
+const ce = { enabled: !1, log: () => {
 }, error: () => {
-} }, ce = () => typeof performance < "u" ? performance.now() : Date.now();
-class de {
-  constructor(e, i, s, o, n, g = ne, f = {}) {
-    r(this, "decoder", null);
-    r(this, "codec", "");
-    r(this, "codedWidth", 0);
-    r(this, "codedHeight", 0);
-    r(this, "lastHeader", null);
-    r(this, "watchdog");
-    r(this, "hooks");
-    this.renderer = e, this.bp = i, this.gate = s, this.onRequestKeyframe = o, this.onDisplayed = n, this.log = g;
-    const y = f.now ?? ce;
+} }, de = () => typeof performance < "u" ? performance.now() : Date.now();
+class le {
+  constructor(e, i, s, o, c, g = ce, f = {}) {
+    a(this, "decoder", null);
+    a(this, "codec", "");
+    a(this, "codedWidth", 0);
+    a(this, "codedHeight", 0);
+    a(this, "lastHeader", null);
+    a(this, "watchdog");
+    a(this, "hooks");
+    this.renderer = e, this.bp = i, this.gate = s, this.onRequestKeyframe = o, this.onDisplayed = c, this.log = g;
+    const y = f.now ?? de;
     this.hooks = {
       onDecoderReset: f.onDecoderReset ?? (() => {
       }),
@@ -346,7 +346,7 @@ class de {
       onFatal: f.onFatal ?? (() => {
       }),
       now: y
-    }, this.watchdog = new ae(f.stallMs ?? 1200, y, () => this.recover());
+    }, this.watchdog = new ne(f.stallMs ?? 1200, y, () => this.recover());
   }
   get decodeQueueSize() {
     var e;
@@ -426,157 +426,162 @@ class de {
     }
   }
 }
-let h = null, a = null, c = null, H = null, w = 0, b = 0, _ = 0, S = 0, W = 1, C = 1, p = {}, l = P(!1, "worker"), v = null, D = null, q = !1, k = null, x = 0, d = {
+let u = null, n = null, d = null, H = null, b = 0, m = 0, _ = 0, D = 0, W = 1, C = 1, p = {}, l = P(!1, "worker"), v = null, S = null, q = !1, k = null, x = 0, r = {
   framesDisplayed: 0,
   framesDropped: 0,
   lastDisplayedSeq: -1,
   decodeQueueSize: 0,
   transport: "none"
 };
-function u(t, e = []) {
+function h(t, e = []) {
   self.postMessage(t, e);
 }
-function m(t) {
-  h && h.readyState === WebSocket.OPEN && h.send(JSON.stringify(t));
+function w(t) {
+  u && u.readyState === WebSocket.OPEN && u.send(JSON.stringify(t));
 }
 function R(t) {
-  l.log("keyframe", "request:", t), m({ type: "request_keyframe", reason: t });
+  l.log("keyframe", "request:", t), w({ type: "request_keyframe", reason: t });
 }
 function E(t, e) {
-  d.framesDisplayed += 1, d.lastDisplayedSeq = t, d.decodeQueueSize = e, m({ type: "ack", seq: t, decode_queue_size: e, displayed: !0 }), u({ type: "stats", stats: { ...d } });
-}
-function le(t) {
-  return (t && typeof t == "object" ? t.primaries : void 0) === "display-p3" ? "display-p3" : "srgb";
+  r.framesDisplayed += 1, r.lastDisplayedSeq = t, r.decodeQueueSize = e, w({ type: "ack", seq: t, decode_queue_size: e, displayed: !0 }), h({ type: "stats", stats: { ...r } });
 }
 function he(t) {
+  return (t && typeof t == "object" ? t.primaries : void 0) === "display-p3" ? "display-p3" : "srgb";
+}
+function Q(t) {
+  typeof t.codec == "string" && (r.codec = t.codec);
+  const e = t.color && typeof t.color == "object" ? t.color.primaries : void 0;
+  r.colorSpace = e ?? r.colorSpace ?? "bt709", typeof t.width == "number" && (r.frameWidth = t.width), typeof t.height == "number" && (r.frameHeight = t.height), typeof t.pixel_ratio == "number" && (r.renderPixelRatio = t.pixel_ratio);
+}
+function ue(t) {
   if (t.type === "pointer_move" || t.type === "pointer_down" || t.type === "pointer_up" || t.type === "wheel") {
-    const e = w > 0 ? _ / w : 1, i = b > 0 ? S / b : 1, { x: s, y: o, inside: n } = se(a.viewportState(), t.x * e, t.y * i);
-    return { ...t, x: s, y: o, inside: n, pixel_ratio: C };
+    const e = b > 0 ? _ / b : 1, i = m > 0 ? D / m : 1, { x: s, y: o, inside: c } = oe(n.viewportState(), t.x * e, t.y * i);
+    return { ...t, x: s, y: o, inside: c, pixel_ratio: C };
   }
   return t;
 }
-function ue(t) {
+function fe(t) {
   t.type === "config" ? (l.log("config", {
     transport: t.transport,
     codec: t.codec,
     pixel_ratio: t.pixel_ratio,
     color: t.color
-  }), typeof t.pixel_ratio == "number" && (C = t.pixel_ratio), t.color && (a == null || a.setColorSpace(le(t.color))), u({ type: "state", state: "negotiated" })) : t.type === "set_quality" ? (d = te(d, t), u({ type: "stats", stats: { ...d } })) : t.type === "stats" && (d = ee(d, t), u({ type: "stats", stats: { ...d } }));
+  }), typeof t.pixel_ratio == "number" && (C = t.pixel_ratio), t.color && (n == null || n.setColorSpace(he(t.color))), Q(t), h({ type: "state", state: "negotiated" }), h({ type: "stats", stats: { ...r } })) : t.type === "set_quality" ? (r = ie(r, t), h({ type: "stats", stats: { ...r } })) : t.type === "stats" && (r = te(r, t), h({ type: "stats", stats: { ...r } }));
 }
-async function fe(t) {
-  const { header: e, payload: i } = J(t), s = e.pixel_ratio;
-  if (typeof s == "number" && (C = s), e.type === "image_frame") {
+async function pe(t) {
+  const { header: e, payload: i } = Y(t), s = e.pixel_ratio;
+  if (typeof s == "number" && (C = s), Q(e), e.type === "image_frame") {
     const o = e;
-    d.transport = "image", l.log("frame", "image", { seq: o.seq, mime: o.mime, bytes: i.byteLength });
+    r.transport = "image", l.log("frame", "image", { seq: o.seq, mime: o.mime, bytes: i.byteLength });
     try {
-      await oe(a, o, i);
-    } catch (n) {
-      l.error("decode", "image decode failed", n);
+      await re(n, o, i);
+    } catch (c) {
+      l.error("decode", "image decode failed", c);
       return;
     }
     E(o.seq, 0);
   } else if (e.type === "video_chunk") {
     const o = e;
-    d.transport = "webcodecs", l.log("frame", "video", { seq: o.seq, keyframe: o.keyframe, bytes: i.byteLength }), c.handleChunk(o, i);
-    const n = c.decodeQueueSize;
-    H.shouldRequestKeyframe(n) && R("decode queue backlog");
+    r.transport = "webcodecs", l.log("frame", "video", { seq: o.seq, keyframe: o.keyframe, bytes: i.byteLength }), d.handleChunk(o, i);
+    const c = d.decodeQueueSize;
+    H.shouldRequestKeyframe(c) && R("decode queue backlog");
   }
 }
-async function Q(t) {
-  l.log("ws", "connecting", t), D = t, h = new WebSocket(t), h.binaryType = "arraybuffer", u({ type: "state", state: x > 0 ? "reconnecting" : "connecting" }), h.onopen = async () => {
-    l.log("ws", "open"), x = 0, u({ type: "state", state: "open" }), c == null || c.reset();
-    const e = await U({
-      width: w || void 0,
-      height: b || void 0,
+async function M(t) {
+  l.log("ws", "connecting", t), S = t, u = new WebSocket(t), u.binaryType = "arraybuffer", h({ type: "state", state: x > 0 ? "reconnecting" : "connecting" }), u.onopen = async () => {
+    l.log("ws", "open"), x = 0, h({ type: "state", state: "open" }), d == null || d.reset();
+    const e = await V({
+      width: b || void 0,
+      height: m || void 0,
       imageOnly: p.imageOnly
     });
-    l.log("hello", { supported: e.supported, dpr: e.devicePixelRatio }), m({
+    l.log("hello", { supported: e.supported, dpr: e.devicePixelRatio }), w({
       type: "hello",
       supported: e.supported,
       device_pixel_ratio: e.devicePixelRatio,
       token: p.token
       // undefined is dropped by JSON.stringify
-    }), w > 0 && b > 0 && m({
+    }), b > 0 && m > 0 && w({
       type: "set_viewport",
-      width: w,
-      height: b,
+      width: b,
+      height: m,
       pwidth: _,
-      pheight: S,
+      pheight: D,
       ratio: W
     });
-  }, h.onmessage = (e) => {
+  }, u.onmessage = (e) => {
     if (typeof e.data == "string") {
-      ue(JSON.parse(e.data));
+      fe(JSON.parse(e.data));
       return;
     }
-    fe(e.data);
-  }, h.onclose = (e) => {
-    if (l.log("ws", "closed", { code: e.code, reason: e.reason }), q || Z(e.code)) {
-      u({ type: "state", state: "closed" });
+    pe(e.data);
+  }, u.onclose = (e) => {
+    if (l.log("ws", "closed", { code: e.code, reason: e.reason }), q || ee(e.code)) {
+      h({ type: "state", state: "closed" });
       return;
     }
-    pe();
-  }, h.onerror = () => {
+    ge();
+  }, u.onerror = () => {
     l.error("ws", "websocket error");
   };
 }
-function pe() {
-  if (q || D === null || k !== null) return;
-  const t = j(x);
-  x += 1, l.log("ws", "reconnect scheduled", { attempt: x, delayMs: t }), u({ type: "state", state: "reconnecting" }), k = self.setTimeout(() => {
-    k = null, !(q || D === null) && Q(D);
+function ge() {
+  if (q || S === null || k !== null) return;
+  const t = Z(x);
+  x += 1, l.log("ws", "reconnect scheduled", { attempt: x, delayMs: t }), h({ type: "state", state: "reconnecting" }), k = self.setTimeout(() => {
+    k = null, !(q || S === null) && M(S);
   }, t);
 }
-function ge(t, e) {
-  const i = a, s = {
+function ye(t, e) {
+  const i = n, s = {
     type: "capture-result",
     id: t,
-    lastDisplayedSeq: d.lastDisplayedSeq,
+    lastDisplayedSeq: r.lastDisplayedSeq,
     width: i.canvas.width,
     height: i.canvas.height
   };
   if (e === "blob")
-    i.toBlob("image/png").then((o) => u({ ...s, blob: o }));
+    i.toBlob("image/png").then((o) => h({ ...s, blob: o }));
   else {
     const o = i.readPixels();
-    u({ ...s, imageData: o }, [o.data.buffer]);
+    h({ ...s, imageData: o }, [o.data.buffer]);
   }
 }
 self.onmessage = (t) => {
   const e = t.data;
   switch (e.type) {
     case "init": {
-      p = e.options ?? {}, l = P(!!p.debug, "worker"), l.log("init", { backing: [e.backingWidth, e.backingHeight], dpr: e.devicePixelRatio }), w = e.cssWidth, b = e.cssHeight, _ = e.backingWidth, S = e.backingHeight, W = e.devicePixelRatio, a = new re(e.canvas), p.fit && (a.fit = p.fit), p.background && (a.background = p.background), a.resize(e.backingWidth, e.backingHeight), H = new z({
+      p = e.options ?? {}, l = P(!!p.debug, "worker"), l.log("init", { backing: [e.backingWidth, e.backingHeight], dpr: e.devicePixelRatio }), b = e.cssWidth, m = e.cssHeight, _ = e.backingWidth, D = e.backingHeight, W = e.devicePixelRatio, n = new ae(e.canvas), p.fit && (n.fit = p.fit), p.background && (n.background = p.background), n.resize(e.backingWidth, e.backingHeight), H = new F({
         maxInflight: p.maxInflight,
         slowDownQueue: p.slowDownQueue,
         keyframeOnDropQueue: p.keyframeOnDropQueue
-      }), c = new de(
-        a,
+      }), d = new le(
+        n,
         H,
-        new F(),
+        new N(),
         R,
-        (i) => E(i, c.decodeQueueSize),
+        (i) => E(i, d.decodeQueueSize),
         l,
         {
           onDecoderReset: () => {
-            l.log("recover", "-> decoder_reset (asking server to clear inflight)"), m({ type: "decoder_reset" });
+            l.log("recover", "-> decoder_reset (asking server to clear inflight)"), w({ type: "decoder_reset" });
           },
           onRecovered: () => {
-            d.recoveries = (d.recoveries ?? 0) + 1, u({ type: "stats", stats: { ...d } });
+            r.recoveries = (r.recoveries ?? 0) + 1, h({ type: "stats", stats: { ...r } });
           },
-          onFatal: (i) => u({ type: "error", error: i })
+          onFatal: (i) => h({ type: "error", error: i })
         }
-      ), v = self.setInterval(() => c == null ? void 0 : c.checkStall(), 500), u({ type: "ready" }), Q(e.url);
+      ), v = self.setInterval(() => d == null ? void 0 : d.checkStall(), 500), h({ type: "ready" }), M(e.url);
       break;
     }
     case "event":
-      m({ type: "event", event: he(e.event) });
+      w({ type: "event", event: ue(e.event) });
       break;
     case "set_fit":
-      a && (e.fit && (a.fit = e.fit), e.background !== void 0 && (a.background = e.background));
+      n && (e.fit && (n.fit = e.fit), e.background !== void 0 && (n.background = e.background));
       break;
     case "resize":
-      w = e.cssWidth, b = e.cssHeight, _ = e.backingWidth, S = e.backingHeight, W = e.pixelRatio, a == null || a.resize(e.backingWidth, e.backingHeight), c == null || c.reset(), m({
+      b = e.cssWidth, m = e.cssHeight, _ = e.backingWidth, D = e.backingHeight, W = e.pixelRatio, n == null || n.resize(e.backingWidth, e.backingHeight), d == null || d.reset(), w({
         type: "set_viewport",
         width: e.cssWidth,
         height: e.cssHeight,
@@ -586,19 +591,19 @@ self.onmessage = (t) => {
       }), R("viewport resized");
       break;
     case "capture":
-      ge(e.id, e.format);
+      ye(e.id, e.format);
       break;
     case "dispose":
-      q = !0, k !== null && (clearTimeout(k), k = null), v !== null && (clearInterval(v), v = null), c == null || c.close();
+      q = !0, k !== null && (clearTimeout(k), k = null), v !== null && (clearInterval(v), v = null), d == null || d.close();
       try {
-        h == null || h.close();
+        u == null || u.close();
       } catch {
       }
-      h = null;
+      u = null;
       break;
   }
 };
-//# sourceMappingURL=entry-DsAVsN_D.js.map
+//# sourceMappingURL=entry-CbrHzFwT.js.map
 `, R = typeof self < "u" && self.Blob && new Blob(["URL.revokeObjectURL(import.meta.url);", L], { type: "text/javascript;charset=utf-8" });
 function B(t) {
   let e;
@@ -624,14 +629,14 @@ function B(t) {
 function U() {
   return new B();
 }
-const A = {
+const j = {
   framesDisplayed: 0,
   framesDropped: 0,
   lastDisplayedSeq: -1,
   decodeQueueSize: 0,
   transport: "none"
 };
-class j {
+class A {
   constructor(e, n) {
     d(this, "canvas");
     d(this, "worker");
@@ -645,7 +650,7 @@ class j {
     d(this, "_lastCaptureSeq", -1);
     d(this, "disposed", !1);
     d(this, "_state", "connecting");
-    d(this, "_stats", { ...A });
+    d(this, "_stats", { ...j });
     d(this, "log");
     d(this, "onPointer", (e) => {
       if (e.type === "pointerdown") {
@@ -773,7 +778,7 @@ class j {
 }
 new TextDecoder("utf-8");
 new TextEncoder();
-const W = (t) => t === void 0 ? "—" : `${(t / 1e6).toFixed(1)} Mbps`, D = (t) => t === void 0 ? "—" : `${t.toFixed(0)} ms`, H = (t) => t === void 0 ? "—" : t.toFixed(1);
+const W = (t) => t === void 0 ? "—" : `${(t / 1e6).toFixed(1)} Mbps`, H = (t) => t === void 0 ? "—" : `${t.toFixed(0)} ms`, D = (t) => t === void 0 ? "—" : t.toFixed(1);
 function M(t) {
   return t === "negotiated" ? "live" : t;
 }
@@ -783,12 +788,12 @@ function K(t, e) {
     ["transport", e.transport],
     ["displayed", `${e.framesDisplayed} (dropped ${e.framesDropped})`],
     ["decode queue", String(e.decodeQueueSize)],
-    ["rtt", D(e.serverRttMs)],
-    ["server fps", H(e.serverFpsSent)],
+    ["rtt", H(e.serverRttMs)],
+    ["server fps", D(e.serverFpsSent)],
     ["server bitrate", W(e.serverBitrateBps)],
-    ["encode", D(e.serverEncodeMs)],
+    ["encode", H(e.serverEncodeMs)],
     ["target bitrate", W(e.targetBitrate)],
-    ["target fps", H(e.targetFps)]
+    ["target fps", D(e.targetFps)]
   ];
 }
 function N(t) {
@@ -894,7 +899,7 @@ const J = {
       }), t.save_changes());
     }
     function u() {
-      i == null || i.dispose(), e.dataset.state = "connecting", i = new j(s, {
+      i == null || i.dispose(), e.dataset.state = "connecting", i = new A(s, {
         url: Y(t),
         token: t.get("token") || void 0,
         imageOnly: !!t.get("image_only"),

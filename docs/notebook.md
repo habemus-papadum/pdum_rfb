@@ -23,7 +23,21 @@ with the Web Worker inlined). There is no Node/npm step at install time and no r
 fetch.
 
 A runnable version of the quick start below lives in
-[`docs/demos/anywidget.ipynb`](demos/anywidget.ipynb).
+[`docs/demos/anywidget.ipynb`](demos/anywidget.ipynb). Two even smaller "wire it up in two
+cells" demos — one cell starts a CPU/NumPy `serve()`, the next drops in the viewer, one
+kernel hosting both — are [`docs/demos/jupyter-demo.ipynb`](demos/jupyter-demo.ipynb)
+(Jupyter) and [`docs/demos/marimo-demo.py`](https://github.com/habemus-papadum/pdum_rfb/blob/main/docs/demos/marimo-demo.py)
+(marimo). The quickest way to run either — no clone needed — is the bundled CLI launcher
+(`[demo]` extra), which copies the notebook to a working dir and opens the tool on it:
+
+```bash
+uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb jupyter-demo   # JupyterLab
+uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb marimo-demo    # marimo
+```
+
+Both need the widget to reach the kernel's WebSocket port — straightforward in a **deployed**
+notebook, but a sandboxed/remote-without-proxy setup may block it (see [Remote / HTTPS
+notebooks](#remote--https-notebooks-same-origin)).
 
 ## Quick start (local)
 

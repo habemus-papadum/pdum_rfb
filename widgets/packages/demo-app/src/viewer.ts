@@ -1,16 +1,19 @@
 // The framework-toggle seam. `mountViewer` mounts the framebuffer viewer under the chosen
-// framework and returns a uniform handle (setFit / capture / dispose). v1 ships Vanilla
-// (the core RemoteFramebufferView) and React (the core view inside a React component); the
-// seam is deliberately small so Svelte/Solid drop in the same way.
+// framework and returns a uniform handle (setFit / capture / dispose). Each path mounts the
+// SAME core RemoteFramebufferView, minimally replicating what that framework's headless
+// wrapper does — no wrapper-package build needed (mirrors reactViewer.ts). Every framework
+// runtime is lazy-loaded (dynamic import) so the initial bundle only pays for the one picked.
 
 import { RemoteFramebufferView, type RfbViewOptions } from "@habemus-papadum/rfb-widgets";
 import type { FitMode } from "@habemus-papadum/rfb-widgets";
 
-export type Framework = "vanilla" | "react";
+export type Framework = "vanilla" | "react" | "svelte" | "solid";
 
 export const FRAMEWORKS: { id: Framework; label: string }[] = [
   { id: "vanilla", label: "Vanilla" },
   { id: "react", label: "React" },
+  { id: "svelte", label: "Svelte" },
+  { id: "solid", label: "Solid" },
 ];
 
 export interface ViewerHandle {
@@ -39,6 +42,33 @@ export async function mountViewer(
       setFit: (fit, bg) => view?.setFit(fit, bg),
       capture: async () => (await view!.capture("blob")) as Blob,
       dispose: () => root.unmount(),
+    };
+  }
+  if (framework === "svelte") {
+    const [{ mount, unmount }, { default: SvelteViewer }] = await Promise.all([
+      import("svelte"),
+      import("./SvelteViewer.svelte"),
+    ]);
+    let view: RemoteFramebufferView | null = null;
+    const app = mount(SvelteViewer, {
+      target: container,
+      props: { options, onReady: (v: RemoteFramebufferView) => (view = v) },
+    });
+    return {
+      framework,
+      setFit: (fit, bg) => view?.setFit(fit, bg),
+      capture: async () => (await view!.capture("blob")) as Blob,
+      dispose: () => unmount(app),
+    };
+  }
+  if (framework === "solid") {
+    const { mountSolid } = await import("./solidViewer");
+    const handle = mountSolid(container, options);
+    return {
+      framework,
+      setFit: (fit, bg) => handle.view().setFit(fit, bg),
+      capture: async () => (await handle.view().capture("blob")) as Blob,
+      dispose: () => handle.dispose(),
     };
   }
   const view = new RemoteFramebufferView(container, options);

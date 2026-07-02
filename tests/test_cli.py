@@ -7,11 +7,53 @@ GPU-less CI as well as on a GPU box.
 
 from __future__ import annotations
 
+import subprocess
+
+import pytest
+
 from pdum.rfb import cli
 
 
 def test_app_constructed():
     assert cli.app is not None
+
+
+def test_notebook_assets_resolve():
+    # In a dev checkout these fall back to docs/demos/; in a wheel they're package data.
+    for name in ("jupyter-demo.ipynb", "marimo-demo.py"):
+        p = cli._notebook_asset(name)
+        assert p is not None and p.is_file(), name
+
+
+@pytest.mark.parametrize(
+    ("kind", "fname", "launcher"),
+    [("jupyter", "jupyter-demo.ipynb", ["jupyter", "lab"]), ("marimo", "marimo-demo.py", ["marimo", "edit"])],
+)
+def test_run_notebook_demo_copies_and_launches(tmp_path, monkeypatch, kind, fname, launcher):
+    # Pretend the launcher is installed and stub the blocking server call.
+    monkeypatch.setattr("importlib.util.find_spec", lambda _m: object())
+    captured: dict[str, list[str]] = {}
+
+    def fake_call(cmd: list[str]) -> int:
+        captured["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", fake_call)
+
+    with pytest.raises(SystemExit) as exc:
+        cli._run_notebook_demo(kind, str(tmp_path), open_browser=False)
+    assert exc.value.code == 0
+
+    assert (tmp_path / fname).is_file()  # copied out to the working dir
+    assert captured["cmd"][:2] == launcher and captured["cmd"][2].endswith(fname)
+    assert captured["cmd"][-1] in ("--no-browser", "--headless")  # --no-open honored
+
+
+def test_notebook_demo_missing_launcher_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr("importlib.util.find_spec", lambda _m: None)  # launcher not installed
+    with pytest.raises(SystemExit) as exc:
+        cli._run_notebook_demo("jupyter", str(tmp_path), open_browser=True)
+    assert exc.value.code == 1
 
 
 def test_probe_all_structure():

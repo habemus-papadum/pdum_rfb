@@ -18,6 +18,7 @@ nav:
   - Notebook (Jupyter/marimo):
       - Guide: notebook.md
       - Demo (anywidget): demos/anywidget.ipynb
+      - Jupyter demo (minimal): demos/jupyter-demo.ipynb
   - Internals: internals.md
   - Interactive demo (pdum-rfb demo): demo.md
   - Agentic frontend debugging: agentic_frontend_debugging.md
