@@ -155,7 +155,7 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
                               `build:demo` script -> src/pdum/rfb/static/demo/ (committed). Not published.
   # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>
   # (opt-in styles.css, themeable via CSS vars + slots/render-props). Each peer-deps the
-  # core; build externalizes framework+core; release.sh version-syncs all 4 npm packages.
+  # core; build externalizes framework+core; the release workflow version-syncs all 4 npm packages.
 
 packages/nvenc/             habemus-papadum-nvenc (import pdum.nvenc) — uv workspace member
   src/cpp/nvenc_ext.cpp     OURS: thin pybind11 binding over NVIDIA NvEncoderCuda (+ NVTX)
@@ -296,14 +296,15 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 
 ## Hard rules (from AGENTS.md — do not violate)
 
-- **NEVER modify version numbers** — humans manage them (`pyproject.toml`,
-  `__init__.py` `__version__`, docs). The release scripts rewrite them (incl. the
-  `~=X.Y.0` native-extra pins); don't hand-edit. Flag if you think a bump is needed.
-- **NEVER run the release scripts** — `./scripts/release.sh` / `./scripts/publish.sh`
-  publish to PyPI+npm directly; `./scripts/prepare-release.sh` pushes a `v*` tag that
-  triggers `release.yml` to publish from CI (trusted publishing + provenance);
-  `./scripts/post-release.sh` pushes the dev-version bump. Humans only. Recovery when a
-  release fails: `docs/release_recovery.md`.
+- **NEVER modify version numbers** — humans manage them. Between releases the working tree
+  carries an `X.Y.Z+dev` marker (last release + WIP flag); the release workflow rewrites all
+  version files + the `~=X.Y.0` native-extra pins via `scripts/_versioning.py`. Don't hand-edit
+  versions or hand-run `_versioning.py set`. Flag if you think a release is needed.
+- **NEVER trigger a release, and never publish** — releasing is one `workflow_dispatch`,
+  `.github/workflows/release.yml` (bump chosen at release vs. the last `vX.Y.Z` tag; builds +
+  publishes to PyPI+npm from CI with token secrets). `./scripts/publish.sh` is a token-based
+  manual break-glass fallback. Humans only. Recovery when a release fails:
+  `docs/release_recovery.md`.
 - After changing any demo notebook (`docs/demos/*.ipynb`), run
   `./scripts/test_notebooks.sh`.
 - Conventions: src-layout, UV exclusively (`uv.lock` committed; use

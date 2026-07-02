@@ -5,7 +5,7 @@
 [![Documentation](https://img.shields.io/badge/Documentation-blue.svg)](https://habemus-papadum.github.io/pdum_rfb/)
 
 [![PyPI](https://img.shields.io/pypi/v/habemus-papadum-rfb.svg)](https://pypi.org/project/habemus-papadum-rfb/)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
@@ -34,7 +34,7 @@ never imposes a fixed game-engine tick. It is **not** a generic VNC clone.
 The repo ships two halves:
 
 - a **Python server** — this package, `habemus-papadum-rfb` (`import pdum.rfb`),
-  Python **3.14+**, UV-managed;
+  Python **3.12+**, UV-managed;
 - a **browser client** — [`@habemus-papadum/rfb-widgets`](widgets/), a TypeScript
   package whose decoding runs entirely in a **Web Worker** (it owns the WebSocket,
   the decoder, and a transferred `OffscreenCanvas`).
@@ -44,6 +44,24 @@ A sibling native package, **`habemus-papadum-nvenc`** (`import pdum.nvenc`, unde
 encoder.
 
 📖 **Full documentation: <https://habemus-papadum.github.io/pdum_rfb/>**
+
+## Try it
+
+No checkout, no build — [uv](https://docs.astral.sh/uv/) runs it straight from PyPI:
+
+```bash
+# interactive demo — opens a browser tab; pick a scene, encoder, and quality
+uvx --python 3.14 --from 'habemus-papadum-rfb[demo]' pdum-rfb demo
+
+# which encode paths light up on your machine?
+uvx --python 3.14 --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor
+```
+
+[![The pdum.rfb interactive demo](https://raw.githubusercontent.com/habemus-papadum/pdum_rfb/main/docs/assets/demo.jpg)](https://habemus-papadum.github.io/pdum_rfb/)
+
+<sub>One command works on macOS **and** Linux — the platform's hardware encoder (Apple
+VideoToolbox / NVIDIA NVENC) installs automatically, everything else falls back to the CPU
+paths. `--python 3.14` just pins the interpreter uv runs with — it downloads it if needed.</sub>
 
 ## How it works
 
@@ -169,7 +187,7 @@ One command sets up everything, the same way on macOS / Linux / Linux+GPU:
 ```bash
 uv run pytest                          # Python tests
 uv run ruff check . && uv run ruff format .
-uv run python -m pdum.rfb.server --pattern bouncing_box --port 8765   # demo server
+uv run pdum-rfb demo                    # interactive web demo (add --dev for live-reload)
 uv run mkdocs serve                    # docs at http://localhost:8000
 
 pnpm -C widgets typecheck              # browser client: types
@@ -183,31 +201,27 @@ pnpm -C widgets dev                    #                 demo at http://localhos
 > **Maintainers only.** Releasing publishes to PyPI/npm, pushes tags, and creates
 > public GitHub releases. Version numbers are human-managed — don't hand-edit them.
 
-`./scripts/release.sh <patch|minor|major>` bumps the version across **all four**
-version files in lockstep (`pyproject.toml`, `src/pdum/rfb/__init__.py`,
-`widgets/package.json`, `packages/nvenc/pyproject.toml`), then — via an interactive
-step selector — commits, tags, pushes, and publishes **all three packages**:
+Releasing is a **single CI workflow** — `release` (`.github/workflows/release.yml`), a
+`workflow_dispatch` a maintainer runs from the GitHub Actions UI (or `gh workflow run
+release.yml -f bump=minor`). There is no local release script. In one run it:
 
-- **PyPI** — `scripts/publish.sh` publishes both `habemus-papadum-rfb` (hatch) and
-  the native `habemus-papadum-nvenc` wheels.
-- **npm** — `@habemus-papadum/rfb-widgets`.
-- **GitHub Release** — which triggers the docs site to redeploy.
+1. runs the 3.12–3.14 test matrix (skippable);
+2. computes the version = `bump(last vX.Y.Z tag, bump)` — the size (patch/minor/major) is
+   decided **at release**, against the last real release (tag-as-truth), not guessed ahead;
+3. writes it across **every** version file in lockstep (`pyproject.toml`,
+   `src/pdum/rfb/__init__.py`, `packages/*/pyproject.toml`, all `widgets` `package.json`s),
+   commits, tags `vX.Y.Z`, and builds the wheel matrix from that tag;
+4. publishes **all packages** — `habemus-papadum-rfb` + native `-nvenc`/`-vtenc` to **PyPI**
+   and `@habemus-papadum/rfb-widgets` + the framework wrappers to **npm** (with provenance);
+5. cuts a **GitHub Release** (which redeploys the docs) and returns `main` to the `X.Y.Z+dev`
+   working marker.
 
-Publishing is **never** done from CI. It's non-interactive when a git-ignored
-`.env` at the repo root supplies credentials (loaded by the release/publish
-scripts; pre-set env vars win):
-
-```bash
-# .env  (git-ignored — never commit)
-HATCH_INDEX_USER=__token__
-HATCH_INDEX_AUTH=pypi-…     # PyPI token (hatch does NOT read ~/.pypirc)
-NPM_TOKEN=npm_…             # npm *Automation* token (bypasses 2FA)
-```
-
-`release.sh` materializes `NPM_TOKEN` into a transient, outside-the-repo `.npmrc`
-just for the `pnpm publish` call — there is no committed or persistent `.npmrc`, so
-dev checkouts stay auth-config-free. Full mechanics and the CI overview are in
+Between releases the working tree carries an `X.Y.Z+dev` marker (last release + a WIP flag).
+`dry_run` computes the version and shows the diff without committing or publishing. Publishing
+uses repository secrets (`PYPI_API_TOKEN`, `NPM_TOKEN`) — see
 [Repository & Development](https://habemus-papadum.github.io/pdum_rfb/development/#releasing-the-pipeline).
+`scripts/publish.sh` (reading a git-ignored `.env`) remains a token-based manual break-glass
+fallback for out-of-band publishing.
 
 ## License
 

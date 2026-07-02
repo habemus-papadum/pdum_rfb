@@ -19,18 +19,19 @@ The project uses a modern Python toolchain with UV for dependency management.
 If you think a version change is needed, inform the user but do not make the change yourself.
 
 ### Release Management
-**ABSOLUTELY NEVER RUN THE RELEASE SCRIPTS.** These are production deployment scripts:
-- `./scripts/prepare-release.sh` — bumps versions, tags `vX.Y.Z`, and **pushes the tag**, which
-  triggers `.github/workflows/release.yml` to build the wheel matrix and publish to PyPI
-  (trusted publishing) + npm (provenance) and cut a public GitHub Release.
-- `./scripts/post-release.sh` — pushes the next `-alpha` dev-version bump to `main`.
-- `./scripts/publish.sh` / `./scripts/release.sh` — the manual/legacy fallback that publishes to
-  PyPI+npm directly with tokens from `.env`.
+**NEVER TRIGGER A RELEASE, AND NEVER PUBLISH.** Releasing is a single GitHub Actions workflow —
+`.github/workflows/release.yml`, a `workflow_dispatch` — run by a HUMAN from the Actions UI (or
+`gh workflow run release.yml`). Triggering it (with `dry_run=false`) bumps the version, tags
+`vX.Y.Z`, builds the wheel matrix, and publishes to PyPI + npm. There is no local release script.
+- `./scripts/publish.sh` is a token-based manual break-glass fallback (publishes to PyPI directly
+  from `.env`).
+- `scripts/_versioning.py` is the shared version library the workflow calls; do not hand-run its
+  `set` command to change committed versions.
 
 **These should ONLY be run by a human who fully understands the consequences.** Do not:
-- Execute any of them under any circumstances (pushing a `v*` tag = a real publish)
-- Suggest running one unless the user explicitly asks about the release process
-- Include them in automated workflows or scripts
+- Dispatch the release workflow or run `publish.sh` under any circumstances (a real publish)
+- Suggest triggering a release unless the user explicitly asks about the release process
+- Include release/publish in automated workflows or scripts
 
 If the user needs to make a release, explain the process (`docs/development.md` → *Releasing*;
 recovery in `docs/release_recovery.md`) but let them run the scripts themselves.
@@ -168,14 +169,17 @@ Documentation is deployed to GitHub Pages (`.github/workflows/docs.yml`):
 - Uses `./scripts/setup.sh` to ensure widgets are built before running `mkdocs build`
 
 ### Release Process
-Releases are managed by the `./scripts/release.sh` script (HUMANS ONLY):
-1. Validates git repo is clean
-2. Checks version has `-alpha` suffix
-3. Runs all validation (tests, notebooks, linting, docs)
-4. Strips `-alpha` from version for release
-5. Creates release commit and tag
-6. Publishes to PyPI
-7. Creates GitHub release
-8. Bumps to next development version with `-alpha`
+Releasing is a single CI workflow — `.github/workflows/release.yml`, a `workflow_dispatch` a
+HUMAN runs from the Actions UI (inputs: `bump` = patch/minor/major, `run_tests`, `dry_run`). In
+one run it:
+1. Runs the 3.12–3.14 test matrix (skippable via `run_tests`)
+2. Computes the release version = `bump(last vX.Y.Z tag, bump)` — the size is decided **at
+   release**, against the last real release (tag-as-truth), never guessed a release ahead
+3. Writes the version across every file, commits, tags `vX.Y.Z`, pushes
+4. Builds the wheel matrix (rfb + native nvenc/vtenc) from the tag
+5. Publishes npm then PyPI (token secrets — see the trusted-publishing migration proposal)
+6. Cuts the GitHub release and returns `main` to the `X.Y.Z+dev` working marker
 
-The release script expects versions to follow the pattern: `X.Y.Z-alpha` → `X.Y.Z` → `X.Y.(Z+1)-alpha`
+Between releases the working tree carries `X.Y.Z+dev` (last release + a WIP flag; a PEP 440 local
+version PyPI refuses to upload). `dry_run` computes the version and shows the diff without
+committing or publishing. Full detail: docs/development.md.

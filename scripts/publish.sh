@@ -7,12 +7,11 @@
 #   3. habemus-papadum-vtenc (packages/vtenc, native VideoToolbox) — delocate'd macOS
 #      wheels, published through the same `hatch publish`.
 #
-# MANUAL FALLBACK path. The PRIMARY release path is CI: pushing a `vX.Y.Z` tag runs
-# .github/workflows/release.yml, which builds the wheel matrix (build-nvenc-sdk-wheel.yml +
-# build-vtenc-wheel.yml) and publishes via PyPI trusted publishing + npm provenance — no
-# tokens. Use THIS script (token-based, from a maintainer box) only for out-of-band
-# publishing: a hotfix wheel, a platform CI can't cover, or when CI is down. The legacy
-# release.sh also calls it.
+# MANUAL FALLBACK path. The PRIMARY release path is CI: the `release` workflow
+# (.github/workflows/release.yml, run by a human from the Actions UI) bumps + tags + builds the
+# wheel matrix (build-nvenc-sdk-wheel.yml + build-vtenc-wheel.yml) and publishes to PyPI + npm.
+# Use THIS script (token-based, from a maintainer box) only for out-of-band publishing: a hotfix
+# wheel, a platform CI can't cover, or when CI is down.
 #
 # The two native packages build only on their own platform — nvenc on Linux+CUDA, vtenc
 # on macOS — so no single box builds both. Each section auto-skips off its platform

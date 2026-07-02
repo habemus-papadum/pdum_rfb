@@ -46,7 +46,7 @@ pip install habemus-papadum-rfb       # or: uv add habemus-papadum-rfb
 ```
 
 Pulls only `numpy`, `pillow`, `websockets`. Every frame is an independent
-JPEG/PNG/WebP. Runs anywhere Python 3.14 runs — no GPU, no compiler, no system
+JPEG/PNG/WebP. Runs anywhere Python 3.12+ runs — no GPU, no compiler, no system
 libraries. Good for stills, snapshots, and the lossless-final still.
 
 ## 2. CPU H.264 — `[h264]`
@@ -161,7 +161,7 @@ see the note below). Current NVENC support, with everything else needing a quick
 
 | Axis | Supported today | Notes |
 | ---- | --------------- | ----- |
-| **Python** | **3.14+** | the package's `requires-python`; CPython only |
+| **Python** | **3.12+** | the package's `requires-python`; CPython only |
 | **OS** | **Linux** (NVENC) · **macOS/Apple Silicon** (VideoToolbox, §5) | Windows GPU untested |
 | **Arch** | **amd64 (x86_64)** for NVENC; **arm64** for macOS | aarch64 NVENC wheels buildable but not yet published |
 | **manylinux** | **`manylinux_2_34`** (local build) / **`manylinux_2_28`** (CI) | 2_28 installs on RHEL8 / Ubuntu 18.10+; 2_34 needs glibc ≥ 2.34 (Ubuntu 22.04+) |

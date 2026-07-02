@@ -77,6 +77,28 @@ jobs:
           name: python-coverage-comment-action
           path: python-coverage-comment-action.txt
 
+  # The `test` job above runs the full suite (+ coverage/docs/notebooks) on the dev default
+  # (Python 3.14, via .python-version). This re-runs just the pytest suite on the lower
+  # supported interpreters, so `requires-python = ">=3.12"` is enforced in CI, not just declared.
+  pytest-versions:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Mesa lavapipe (software Vulkan for the rendercanvas render test)
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+      - name: Run tests
+        run: uv run --python ${{ matrix.python-version }} pytest -ra
+
   widgets:
     runs-on: ubuntu-latest
     steps:

@@ -1,25 +1,27 @@
-"""Shared version logic for the release scripts (dependency-light: stdlib only).
+"""Shared version logic for the CI release pipeline (dependency-light: stdlib only).
 
 The single source of truth for how ``pdum.rfb``'s **lockstep** version is discovered, read,
-bumped, and written across all 10 version-bearing files, plus how rfb's native extras are
-pinned to the shared minor. Imported by ``prepare-release.sh`` and ``post-release.sh``.
+bumped, and written across all version-bearing files, plus how rfb's native extras are pinned
+to the shared minor. Driven by ``.github/workflows/release.yml`` through the ``_cli`` at the
+bottom (``compute-release`` / ``set`` / ``latest-tag`` / ``current``).
 
-``scripts/release.sh`` (the legacy all-in-one, kept as a manual fallback) carries its own copy
-of this logic on purpose — it must keep working untouched for the imminent 0.1.0 release. Once
-the CI pipeline is the blessed path, release.sh can be retired in favour of prepare/post + CI and
-this module becomes the only copy.
-
-Versioning policy (see docs/development.md):
-  * lockstep — every published package shares one version, agreement is enforced;
-  * npm wrapper->core stays a ``^`` peer range (correct for peer deps);
-  * rfb's Python native extras (gpu-nvenc-sdk->nvenc, mac-vt->vtenc) track the shared minor
-    as ``~=X.Y.0`` so ``rfb X.Y.*`` pulls a matching native ``X.Y.*``.
+Versioning model (see docs/development.md):
+  * **tag-as-truth** — the last release is the highest ``vX.Y.Z`` git tag; a release computes
+    ``next = bump(last_tag, level)`` *at release time*, so patch/minor/major is chosen when you
+    release, relative to the last real release — never guessed a release in advance;
+  * between releases the working tree carries an ``X.Y.Z+dev`` marker (last release + a WIP
+    flag). It is a PEP 440 *local* version, which PyPI refuses to upload — an accidental-publish
+    guard. The release writes the clean ``X.Y.Z`` before building, so artifacts are never +dev;
+  * **lockstep** — every published package shares one version, agreement is enforced;
+  * npm wrapper->core stays a ``^`` peer range (correct for peer deps); rfb's Python native
+    extras (gpu-nvenc-sdk->nvenc, mac-vt->vtenc) track the shared minor as ``~=X.Y.0``.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -140,15 +142,36 @@ def bump_version(version: str, level: str) -> str:
     return f"{major}.{minor}.{patch}"
 
 
-def strip_alpha(version: str) -> str:
-    """``0.1.0-alpha`` -> ``0.1.0``; error if the ``-alpha`` suffix is absent."""
-    if not version.endswith("-alpha"):
-        raise VersionError(f"Version must end with -alpha to release (got {version})")
-    return version[: -len("-alpha")]
+def latest_release_tag() -> str | None:
+    """The highest ``vX.Y.Z`` release tag as a plain ``X.Y.Z`` (rc/pre-release tags ignored),
+    or None when the repo has no release tags yet. This is the source of truth for "last release"."""
+    out = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "tag", "--list", "v[0-9]*", "--sort=-version:refname"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in out.stdout.splitlines():
+        m = re.match(r"^v(\d+\.\d+\.\d+)$", line.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def compute_release_version(level: str) -> str:
+    """The version this release will get: ``bump(last_release_tag, level)``. With no prior tag it
+    bumps from ``0.0.0`` (so a first ``minor`` -> ``0.1.0``). This is the whole point of the
+    model: the bump is applied *at release time* against the last real release."""
+    return bump_version(latest_release_tag() or "0.0.0", level)
+
+
+def dev_marker(release_version: str) -> str:
+    """The between-releases working-tree version: ``X.Y.Z+dev`` (last release + a WIP flag)."""
+    return f"{release_version}+dev"
 
 
 def _minor_series(version: str) -> str:
-    """``0.3.1`` / ``0.3.1-alpha`` -> ``0.3.0`` — the X.Y.0 anchor for a ``~=`` range."""
+    """``0.3.1`` / ``0.3.1+dev`` -> ``0.3.0`` — the X.Y.0 anchor for a ``~=`` range."""
     m = re.match(r"^(\d+)\.(\d+)\.\d+", version.split("-")[0])
     if not m:
         raise VersionError(f"Cannot derive a minor series from version: {version}")
@@ -157,11 +180,18 @@ def _minor_series(version: str) -> str:
 
 def rewrite_internal_constraints(version: str) -> str:
     """Pin rfb's native extras to ``~=X.Y.0`` in the root pyproject. Idempotent (any existing
-    version marker is replaced). Returns the anchor written."""
+    version specifier is replaced). Preserves any PEP 508 environment marker (``; sys_platform
+    == ...``) on the dep — the native extras are markered to their platform. Returns the anchor."""
     anchor = _minor_series(version)
     content = PYPROJECT_TOML.read_text()
     for name in INTERNAL_EXTRA_DEPS:
-        content = re.sub(rf'"{re.escape(name)}(?:[~=<>!][^"]*)?"', f'"{name}~={anchor}"', content)
+        # name, optional version specifier (stops before a ';' marker), optional marker (kept).
+        pattern = rf'"{re.escape(name)}(?:[~=<>!][^";]*)?(\s*;[^"]*)?"'
+        content = re.sub(
+            pattern,
+            lambda m: f'"{name}~={anchor} {m.group(1).lstrip()}"' if m.group(1) else f'"{name}~={anchor}"',
+            content,
+        )
     PYPROJECT_TOML.write_text(content)
     return anchor
 
@@ -171,3 +201,35 @@ def set_version(new_version: str, files: list[VersionFile] | None = None) -> Non
     for vf in files or discover_version_files():
         write_version_of(vf, new_version)
     rewrite_internal_constraints(new_version)
+
+
+def _cli() -> None:
+    """Thin CLI for release.yml. ``compute-release <bump>`` prints the version this release will
+    get (``bump(last_tag, level)``); ``set <version>`` writes it — the clean ``X.Y.Z`` for the
+    release commit, or ``X.Y.Z+dev`` for the finalize commit — across every file; ``latest-tag``
+    and ``current`` print the last release tag and the working-tree version."""
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Lockstep version helper for the CI release pipeline.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("latest-tag", help="print the last release (highest vX.Y.Z tag), else nothing")
+    sub.add_parser("current", help="print the working-tree version (lockstep-checked)")
+    p_cr = sub.add_parser("compute-release", help="print bump(last_tag, level)")
+    p_cr.add_argument("bump", choices=["patch", "minor", "major"])
+    p_set = sub.add_parser("set", help="write a version (e.g. 0.2.0 or 0.2.0+dev) across all files")
+    p_set.add_argument("version")
+    args = ap.parse_args()
+
+    if args.cmd == "latest-tag":
+        print(latest_release_tag() or "")
+    elif args.cmd == "current":
+        print(read_current_version())
+    elif args.cmd == "compute-release":
+        print(compute_release_version(args.bump))
+    elif args.cmd == "set":
+        set_version(args.version)
+        print(args.version)
+
+
+if __name__ == "__main__":
+    _cli()

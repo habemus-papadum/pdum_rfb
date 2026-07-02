@@ -20,18 +20,28 @@ on:
       python_versions:
         description: "Space-separated CPython versions to build"
         default: "3.12 3.13 3.14"
+      ref:
+        description: "Git ref (tag/branch/SHA) to build; empty = the triggering ref"
+        default: ""
   workflow_call:
     inputs:
       python_versions:
         description: "Space-separated CPython versions to build"
         type: string
         default: "3.12 3.13 3.14"
+      ref:
+        description: "Git ref (tag/branch/SHA) to build; empty = the caller's ref. release.yml
+          passes the freshly-cut vX.Y.Z tag so the wheels carry the release version."
+        type: string
+        default: ""
 
 jobs:
   build:
     runs-on: macos-14 # Apple Silicon (arm64); MLX-adjacent, arm64-only wheels
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

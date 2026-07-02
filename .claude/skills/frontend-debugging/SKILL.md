@@ -53,4 +53,4 @@ injected clock/counters over relying on the real decoder. Then `pnpm -C widgets 
 - Fix two-party deadlocks at **both ends** (client recovery *and* a server backstop).
 - Keep failure logic **pure + clock-injected** so it's unit-testable headlessly.
 
-Do **not** modify version numbers or run `./scripts/release.sh` (see AGENTS.md).
+Do **not** modify version numbers or trigger the `release` workflow (see AGENTS.md).

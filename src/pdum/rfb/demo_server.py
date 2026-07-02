@@ -592,7 +592,7 @@ def _opt_float(v: Any, default: float | None = None) -> float | None:
         return default
     try:
         return float(v)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -601,7 +601,7 @@ def _opt_int(v: Any) -> int | None:
         return None
     try:
         return int(v)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 

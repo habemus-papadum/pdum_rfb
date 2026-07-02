@@ -77,8 +77,8 @@ else:
 
         # --- environment ---
         pyver = ".".join(map(str, sys.version_info[:3]))
-        py_ok = sys.version_info[:2] >= (3, 14)
-        probes.append(Probe("Python", OK if py_ok else WARN, f"{pyver} (need ≥3.14)"))
+        py_ok = sys.version_info[:2] >= (3, 12)
+        probes.append(Probe("Python", OK if py_ok else WARN, f"{pyver} (need ≥3.12)"))
         mach = platform.machine()
         syst = platform.system()
         is_mac_arm = syst == "Darwin" and mach in ("arm64", "aarch64")

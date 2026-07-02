@@ -242,3 +242,4 @@ packages/vtenc/_skbuild/
 
 # Local npm auth (references $NPM_TOKEN; created by setup for `pnpm publish`)
 .npmrc
+screenshot.png

@@ -11,10 +11,29 @@ VNC clone.
 
 The project ships two halves:
 
-- a **Python server** — the `pdum.rfb` package (Python **3.14+**, UV-managed);
+- a **Python server** — the `pdum.rfb` package (Python **3.12+**, UV-managed);
 - a **browser client** — `@habemus-papadum/rfb-widgets`, a TypeScript package whose
   decoding runs entirely in a **Web Worker** that owns the WebSocket, the decoder,
   and a transferred `OffscreenCanvas`, keeping your main thread free.
+
+## Try it
+
+No checkout, no build — [uv](https://docs.astral.sh/uv/) runs it straight from PyPI:
+
+```bash
+# interactive demo — opens a browser tab; pick a scene, encoder, and quality
+uvx --python 3.14 --from 'habemus-papadum-rfb[demo]' pdum-rfb demo
+
+# which encode paths light up on your machine?
+uvx --python 3.14 --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor
+```
+
+![The pdum.rfb interactive demo](assets/demo.jpg)
+
+One command works on macOS **and** Linux: the platform's hardware encoder (Apple
+VideoToolbox or NVIDIA NVENC) installs automatically, and everything else falls back to the
+CPU paths. `--python 3.14` just pins the interpreter uv runs with — it downloads it if needed;
+the package itself supports Python 3.12+ (see [Installation](installation.md)).
 
 ## Compared to `jupyter_rfb`
 
@@ -76,13 +95,7 @@ behind simply skips intermediate frames. The pull-based `FrameSource` model stil
 exists, but it is **internal** now (each connection's session pulls from a private
 `_ClientFeed`).
 
-Try it instantly with a built-in pattern, no client code:
-
-```bash
-uv run python -m pdum.rfb.server --pattern bouncing_box --port 8765
-```
-
-…and on the browser side:
+The browser side is three lines — point a `RemoteFramebufferView` at that server:
 
 ```ts
 import { RemoteFramebufferView } from "@habemus-papadum/rfb-widgets";

@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-svelte",
-  "version": "0.2.0-alpha",
+  "version": "0.1.0+dev",
   "description": "Svelte action + component for the pdum.rfb remote framebuffer client.",
   "type": "module",
   "license": "MIT",

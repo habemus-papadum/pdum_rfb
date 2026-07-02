@@ -1,12 +1,15 @@
 [project]
 name = "habemus-papadum-rfb"
-version = "0.2.0-alpha"
+version = "0.1.0+dev"
 description = "Remote Frame Buffer"
 readme = "README.md"
 license = { file = "LICENSE" }
 keywords = []
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
@@ -17,7 +20,7 @@ classifiers = [
 authors = [
     { name = "Nehal Patel", email = "nehal@alum.mit.edu" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.5.0",
     "pillow>=12.2.0",
@@ -54,33 +57,34 @@ nvenc = [
 #      WHEN PyAV 18.0 SHIPS ON PyPI: add "av>=18" to each extra below and GPU support
 #      becomes a one-step `pip install habemus-papadum-rfb[gpu-cuda13]`.
 gpu-cuda13 = [
-    "cupy-cuda13x>=14",  # CUDA 13.x  (add "av>=18" when released)
+    "cupy-cuda13x>=14 ; sys_platform == 'linux' and platform_machine == 'x86_64'",  # CUDA 13.x
 ]
 gpu-cuda12 = [
-    "cupy-cuda12x>=13",  # CUDA 12.x  (add "av>=18" when released)
+    "cupy-cuda12x>=13 ; sys_platform == 'linux' and platform_machine == 'x86_64'",  # CUDA 12.x
 ]
 # Alternative GPU H.264/HEVC backend via NVIDIA's Video Codec SDK encoder instead of
 # PyAV/ffmpeg — the sibling package habemus-papadum-nvenc (import pdum.nvenc), built
 # from packages/nvenc/ (a uv workspace member). It needs NO PyAV and works on Python
-# 3.14. Pulls the SDK encoder + CuPy (use cupy-cuda12x for a CUDA 12 toolkit).
-# See docs/nvenc_sdk_evaluation.md.
+# 3.14. The SDK encoder accepts a host NV12 array OR a __cuda_array_interface__ GPU
+# frame, so CuPy is NOT required here — add [gpu-cuda13]/[gpu-cuda12] for the zero-copy
+# GPU-frame path. Markered to Linux/x86_64 so it is a no-op elsewhere (runtime probe:
+# nvenc_gpu_pdum_available()). See docs/nvenc_sdk_evaluation.md.
 gpu-nvenc-sdk = [
-    "habemus-papadum-nvenc~=0.2.0",
-    "cupy-cuda13x>=14",
+    "habemus-papadum-nvenc~=0.1.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
 cli = [
     "typer>=0.12",
     "rich>=13.7",
 ]
-# `pdum-rfb doctor` with the cross-platform encoders installed, so a fresh
-# `uvx --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor` reports both what runs on
-# this platform *and* what is actually importable here (not just "install X"). Composed
-# from the other extras (self-referencing) so there are no copied dependency lines to
-# keep in sync; the platform-specific paths (CuPy/VideoToolbox/NVENC-SDK) can't be blanket
-# deps and are reported as "available on this platform — install …".
+# `pdum-rfb doctor` with every encoder that can run on the current platform installed, so
+# a fresh `uvx --from 'habemus-papadum-rfb[doctor]' pdum-rfb doctor` reports what is
+# actually importable here (not just "install X"). Compound/self-referencing: the native
+# packages (mac-vt/gpu-nvenc-sdk) carry platform markers, so this ONE spec installs vtenc
+# on macOS and nvenc on Linux and skips the other with no error. CuPy is intentionally
+# excluded (large; the SDK path doesn't need it) — doctor still reports it as installable.
 doctor = [
-    "habemus-papadum-rfb[cli,h264]",
+    "habemus-papadum-rfb[cli,h264,mac-vt,gpu-nvenc-sdk]",
 ]
 rendercanvas = [
     "rendercanvas>=2.0",
@@ -98,17 +102,20 @@ asgi = [
 # frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
 # group). See docs/mlx_metal_videotoolbox_encoder_design.md.
 mac-vt = [
-    "habemus-papadum-vtenc~=0.2.0",
+    "habemus-papadum-vtenc~=0.1.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 # `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
 # (committed under src/pdum/rfb/static/demo/), a REST control plane, and the framebuffer
 # WebSocket(s) over one uvicorn origin; the browser holds the viewer + all controls. No
 # Node/Vite at runtime. Meant for `uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb demo`.
-# A dev/eval harness, not a runtime dep. Self-references [cli] for the Typer entry point.
+# A dev/eval harness, not a runtime dep. Compound/self-referencing: pulls the CLI, the CPU
+# H.264 (av) + native HW encoders (each markered to its platform, so one spec works on
+# macOS and Linux), the ASGI server, and httpx (Starlette TestClient, used by --smoke).
 demo = [
-    "habemus-papadum-rfb[cli]",
+    "habemus-papadum-rfb[cli,h264,mac-vt,gpu-nvenc-sdk]",
     "starlette>=0.37",
     "uvicorn>=0.30",
+    "httpx>=0.27",
 ]
 # Jupyter/marimo notebook widget (pdum.rfb.notebook). The prebuilt, inlined-worker ESM
 # bundle ships in the wheel (src/pdum/rfb/static/widget.{js,css}); this pulls the Python
@@ -192,7 +199,7 @@ viz = [
 ]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py312"
 line-length = 120
 exclude = []
 

@@ -1,35 +1,120 @@
-# Release pipeline — the CI half of the hybrid flow (docs/development.md).
+# Release pipeline — the single, CI-driven way pdum.rfb is released (docs/development.md).
 #
-# Triggered by pushing a `vX.Y.Z` tag (done by scripts/prepare-release.sh). Builds every
-# distribution in a matrix across platforms, then publishes:
-#   * PyPI (rfb + nvenc + vtenc) via TRUSTED PUBLISHING — OIDC, no long-lived token;
-#   * npm (core + wrappers) with provenance;
-#   * a GitHub Release (which fires docs.yml -> Pages redeploy).
+# Trigger it from the GitHub UI (Actions -> release -> Run workflow) or `gh workflow run
+# release.yml -f bump=minor`. There is NO local release script and NO tag trigger — this is the
+# only publish path, which is what makes the old local/CI double-publish impossible.
 #
-# Ordering: npm publishes first (it runs in parallel with the slow wheel builds), and PyPI is
-# gated on npm succeeding — so an npm failure never half-publishes to the immutable PyPI. All
-# publishing is idempotent for retries (PyPI skip-existing); see docs/release_recovery.md.
+# Model (see scripts/_versioning.py):
+#   * TAG-AS-TRUTH: the last release is the highest vX.Y.Z tag. You pick `bump`
+#     (patch/minor/major) at trigger time; CI computes next = bump(last_tag, bump). The size of
+#     the release is decided against the last real release, when you release — never guessed ahead.
+#   * Between releases main carries an `X.Y.Z+dev` marker. A release writes the clean X.Y.Z,
+#     tags it, builds + publishes from that tag, then `finalize` sets main to `<new>+dev`.
+#   * PyPI + npm publish with TOKEN secrets (TEMPORARY — the maintainer is locked out of PyPI
+#     2FA; see docs/proposals/active/trusted_publishing_migration.md).
+#
+# Flow: test matrix (skippable) -> bump+tag -> build rfb/nvenc/vtenc from the tag -> npm then
+# PyPI (npm first: fail fast on the immutable side) -> GitHub release + back-to-dev.
+# `dry_run` computes the version and prints the diff, then stops before committing/publishing.
 name: release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Release size relative to the last release tag"
+        type: choice
+        options: [patch, minor, major]
+        default: minor
+      run_tests:
+        description: "Run the 3.12-3.14 test matrix before releasing"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Compute the version + show the diff, but do NOT commit/tag/publish"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  # --- build (matrix across platforms) --------------------------------------
-  build-rfb:
-    name: build habemus-papadum-rfb (sdist + wheel)
+  # --- gate: full test matrix (skippable when you know main is green) --------
+  test:
+    name: test (py ${{ matrix.python }})
+    if: ${{ inputs.run_tests }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      # Native uv builder, explicit package so it never tries to build the native members
-      # (nvenc/vtenc build in their own jobs). Produces sdist + pure-Python wheel into dist/.
+      - run: uv sync --frozen --no-group viz --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} ruff check .
+      - run: uv run --python ${{ matrix.python }} pytest -q
+
+  # --- decide the version + cut the tag -------------------------------------
+  prepare:
+    name: bump + tag (last release + bump)
+    needs: [test]
+    # Runs when tests passed OR were skipped (run_tests=false); blocks on a red matrix.
+    if: ${{ !cancelled() && needs.test.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the release commit + tag to main
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need every tag for latest_release_tag()
+      - uses: astral-sh/setup-uv@v5
+      - name: Compute this release's version
+        id: ver
+        run: |
+          RELEASE=$(python3 scripts/_versioning.py compute-release "${{ inputs.bump }}")
+          LAST=$(python3 scripts/_versioning.py latest-tag)
+          echo "Last release: ${LAST:-<none>}  ->  this (${{ inputs.bump }}): $RELEASE"
+          echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$RELEASE" >> "$GITHUB_OUTPUT"
+      - name: Write the release version across every file
+        run: |
+          python3 scripts/_versioning.py set "${{ steps.ver.outputs.version }}"
+          uv lock
+          {
+            echo "### Release ${{ steps.ver.outputs.version }} — file changes"
+            echo '```'
+            git --no-pager diff --stat
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Dry run — stop here (no commit/tag/publish)
+        if: ${{ inputs.dry_run }}
+        run: echo "::notice::DRY RUN — computed ${{ steps.ver.outputs.version }}; nothing committed, tagged, or published."
+      - name: Commit, tag, push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "${{ steps.ver.outputs.version }}"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "${{ steps.ver.outputs.version }}"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "refs/tags/${{ steps.ver.outputs.tag }}"
+
+  # --- build the wheel matrix from the freshly-cut tag ----------------------
+  build-rfb:
+    name: build habemus-papadum-rfb (sdist + wheel)
+    needs: [prepare]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: astral-sh/setup-uv@v5
       - run: uv build --package habemus-papadum-rfb
       - uses: actions/upload-artifact@v4
         with:
@@ -38,25 +123,35 @@ jobs:
 
   build-nvenc:
     name: build habemus-papadum-nvenc (manylinux)
+    needs: [prepare]
+    if: ${{ !inputs.dry_run }}
     uses: ./.github/workflows/build-nvenc-sdk-wheel.yml
     with:
       python_versions: "3.12 3.13 3.14"
+      ref: ${{ needs.prepare.outputs.tag }}
 
   build-vtenc:
     name: build habemus-papadum-vtenc (macOS arm64)
+    needs: [prepare]
+    if: ${{ !inputs.dry_run }}
     uses: ./.github/workflows/build-vtenc-wheel.yml
     with:
       python_versions: "3.12 3.13 3.14"
+      ref: ${{ needs.prepare.outputs.tag }}
 
-  # --- publish --------------------------------------------------------------
+  # --- publish (npm first: fail fast on the immutable registry) -------------
   npm-publish:
     name: publish npm (core + wrappers, provenance)
+    needs: [prepare]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance attestation
+      id-token: write # provenance attestation (independent of the token publish)
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -68,31 +163,24 @@ jobs:
       - run: pnpm --dir widgets install --frozen-lockfile
       - run: pnpm --dir widgets build
       - run: pnpm --dir widgets -r --filter "./widgets/packages/*" run build
-      # Materialize the token into a transient user-level npmrc with the LITERAL value (pnpm
-      # won't expand ${VAR} from a project npmrc); mirrors scripts/release.sh's proven path.
       - name: Publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc-publish"
           export NPM_CONFIG_USERCONFIG="$HOME/.npmrc-publish"
-          # ONE recursive publish: core (workspace root) + all 3 wrappers, skipping the private
-          # packages. Do NOT split the core into a non-recursive `pnpm --dir widgets publish` —
-          # pnpm leaks the --dir value + command as positional args and npm >= 11 rejects it
-          # (EUSAGE). See scripts/release.sh publish_to_npm for the same fix.
+          # ONE recursive publish: core (workspace root) + 3 wrappers, skipping private packages.
           pnpm --dir widgets -r publish --provenance --no-git-checks
           rm -f "$HOME/.npmrc-publish"
 
   pypi-publish:
-    name: publish PyPI (rfb + nvenc + vtenc, trusted publishing)
+    name: publish PyPI (rfb + nvenc + vtenc)
     needs: [build-rfb, build-nvenc, build-vtenc, npm-publish]
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write # OIDC trusted publishing — no token needed
+    # TEMPORARY token auth (PYPI_API_TOKEN) instead of OIDC trusted publishing — the maintainer
+    # is locked out of PyPI 2FA. Revert per docs/proposals/active/trusted_publishing_migration.md.
     steps:
-      # Merge every wheel/sdist artifact into one dist/ (PyPI routes each file to its project
-      # by name, so one publish call uploads all three packages).
+      # Merge every wheel/sdist artifact into one dist/ (PyPI routes each file by package name).
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -100,12 +188,15 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          password: ${{ secrets.PYPI_API_TOKEN }} # user defaults to __token__
           packages-dir: dist/
-          skip-existing: true # idempotent retries — never overwrites an existing file
+          skip-existing: true # idempotent retries
+          attestations: false # PEP 740 attestations need id-token:write (OIDC); off for token auth
 
+  # --- finish: GitHub release + return main to the +dev marker --------------
   github-release:
     name: create GitHub Release
-    needs: [pypi-publish, npm-publish]
+    needs: [prepare, pypi-publish, npm-publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release (fires docs.yml -> Pages)
@@ -113,5 +204,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
+
+  finalize:
+    name: back to dev (<new>+dev)
+    needs: [prepare, pypi-publish, npm-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the +dev marker commit to main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }} # main HEAD is the release commit we just pushed
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - name: Set the +dev marker and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 scripts/_versioning.py set "${{ needs.prepare.outputs.version }}+dev"
+          uv lock
+          git commit -am "back to dev (${{ needs.prepare.outputs.version }}+dev)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -155,11 +155,12 @@ copy today). GPU CI now exists as the weekly self-hosted `gpu-tests` workflow.
 
 ## 7. Packaging & release ✅ _(pipeline in place)_
 
-`scripts/release.sh` bumps all four version files in lockstep and publishes all
-three packages — `habemus-papadum-rfb` + `habemus-papadum-nvenc` to PyPI (via
-`scripts/publish.sh`) and `@habemus-papadum/rfb-widgets` to npm — then cuts a GitHub
-release that redeploys the docs. The widget Vitest + Playwright e2e already run in
-CI (`ci.yml`). See [Repository & Development](development.md#releasing-the-pipeline).
+The `release` workflow (`.github/workflows/release.yml`, a human-triggered
+`workflow_dispatch`) bumps every version file in lockstep, tags `vX.Y.Z`, and publishes all
+packages — `habemus-papadum-rfb` + native `-nvenc`/`-vtenc` to PyPI and
+`@habemus-papadum/rfb-widgets` + wrappers to npm — then cuts a GitHub release that redeploys
+the docs. The widget Vitest + Playwright e2e already run in CI (`ci.yml`). See
+[Repository & Development](development.md#releasing-the-pipeline).
 
 Remaining polish: a packaged non-`blob:` worker subpath export for the widgets (for
 strict-CSP sites), and broader GPU-wheel coverage (aarch64, more manylinux tags).
