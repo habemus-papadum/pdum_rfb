@@ -19,7 +19,7 @@ so it runs in any page, app, or headless box.
 
 Two halves:
 
-- **Python server** — `src/pdum/rfb/` (the published package). Python **3.14+**,
+- **Python server** — `src/pdum/rfb/` (the published package). Python **3.12+**,
   UV-managed.
 - **Browser client** — `widgets/`, a TypeScript package published as
   `@habemus-papadum/rfb-widgets`. All decoding runs in a **Web Worker** that owns the
@@ -170,9 +170,10 @@ package), members = `packages/*`. `pdum` is a **PEP 420 namespace** (no
 `pdum.rfb` and `habemus-papadum-nvenc` contributes `pdum.nvenc` without conflict. The
 nvenc package is **native** (scikit-build-core + auditwheel, needs a CUDA toolkit to
 build) and is only built when its `gpu-nvenc-sdk` extra is requested — default
-`uv sync` (incl. CI) never builds it. Both packages are published by
-`scripts/publish.sh` (rfb via hatch; nvenc via auditwheel'd wheels through the same
-`hatch publish`); **publishing is never done from CI**.
+`uv sync` (incl. CI) never builds it. Publishing runs **from CI**
+(`.github/workflows/release.yml`, triggered by a `vX.Y.Z` tag); `scripts/publish.sh`
+(rfb via hatch; nvenc via auditwheel'd wheels through the same `hatch publish`) is the
+manual break-glass fallback.
 
 ### Wire protocol
 
@@ -308,7 +309,7 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 - After changing any demo notebook (`docs/demos/*.ipynb`), run
   `./scripts/test_notebooks.sh`.
 - Conventions: src-layout, UV exclusively (`uv.lock` committed; use
-  `uv sync --frozen`), Hatchling build, ruff (target 3.14, line length 120,
+  `uv sync --frozen`), Hatchling build, ruff (target 3.12, line length 120,
   rules E/F/W/I), NumPy-style docstrings.
 
 ## Docs map

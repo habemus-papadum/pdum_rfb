@@ -20,7 +20,7 @@
 > full parameter set), the Python process only serves the app + logs lifecycle events,
 > and control actions ride **REST** calls. It ships prebuilt (no Node at runtime) and
 > is meant to be run with **`uvx`**. Genuine design decisions are collected in
-> [§13 Open questions](#13-open-questions--decisions-needed) with response blanks —
+> [§13 Open questions](#13-open-questions-decisions-needed) with response blanks —
 > please answer inline there.
 
 ---

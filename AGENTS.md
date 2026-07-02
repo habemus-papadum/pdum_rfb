@@ -110,14 +110,14 @@ uv run mkdocs build
   - `demos/`: Demo notebooks (if included)
 
 ### Key Constraints
-- **Python Version**: Requires Python 3.14+
+- **Python Version**: Requires Python 3.12+
 - **Dependency Management**: Uses UV exclusively; uv.lock is committed
 - **Build System**: Uses Hatch/Hatchling for building distributions
 - **Documentation Style**: NumPy docstring style (see mkdocs.yml)
 
 ### Code Standards
 - **Ruff Configuration**:
-  - Target: Python 3.14
+  - Target: Python 3.12
   - Line length: 120 characters
   - Linting rules: E (pycodestyle errors), F (pyflakes), W (warnings), I (isort)
 - **Type Hints**: Use type hints where appropriate

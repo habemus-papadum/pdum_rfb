@@ -137,7 +137,7 @@ are capitalized (`"Shift"`, `"Control"`, …). A `resize` (sent on the wire as
 `set_viewport`) carries logical `width`/`height`, physical `pwidth`/`pheight`, and
 `ratio`; by default the publisher owns resolution so it is **informational** (opt into
 letting it drive the size with `resize_policy="match_client"` — see
-[Sizing, DPR & color](#sizing-dpr--color)). Prefer the single-loop poll style above; an
+[Sizing, DPR & color](#sizing-dpr-color)). Prefer the single-loop poll style above; an
 `async for ev in display.events()` iterator is also available for a dedicated task.
 
 ## Running the server
@@ -424,8 +424,7 @@ The NVENC path rides on **PyAV's bundled ffmpeg** (the `av` wheel ships an ffmpe
 built with `h264_nvenc`), so it needs no extra Python package beyond `av` — the
 real requirement is a host **NVIDIA driver + an NVENC-capable GPU**, which pip
 cannot install. (NVIDIA's own `PyNvVideoCodec` is deliberately *not* used: it
-publishes no `cp314` wheel and no sdist, so it will not install on this project's
-Python 3.14+.)
+publishes no `cp314` wheel and no sdist, so it will not install on Python 3.14.)
 
 ```bash
 uv add 'habemus-papadum-rfb[nvenc]'   # same PyAV wheel as [h264]; documents intent
@@ -464,7 +463,7 @@ This is ~2.4–4.3× lower per-frame latency than the host path and frees the CP
 
 - **`nvenc_gpu_pdum`** (preferred) — the PyAV-free NVIDIA Video Codec SDK encoder from the
   sibling package `habemus-papadum-nvenc` (`import pdum.nvenc`). It needs **no PyAV
-  at all**, so it works today on Python 3.14 with a single `pip install`
+  at all**, so it works today across Python 3.12–3.14 with a single `pip install`
   (`habemus-papadum-rfb[gpu-nvenc-sdk]`). Gated by `nvenc_gpu_pdum_available()`. It's
   the fastest path measured — see [the SDK evaluation](proposals/completed/nvenc_sdk_evaluation.md).
 - **`nvenc_gpu_pyav`** (fallback) — the `from_dlpack` → `h264_nvenc` path above. It

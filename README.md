@@ -168,8 +168,9 @@ One command sets up everything, the same way on macOS / Linux / Linux+GPU:
   RFB_GPU=0     ./scripts/setup.sh   # CPU paths only
   ```
 
-  The `gpu-nvenc-sdk` extra pins `cupy-cuda13x`; on a CUDA-12 toolkit use
-  `RFB_GPU=force` and swap to `cupy-cuda12x`. To confirm what lit up:
+  CuPy (`cupy-cuda13x`) comes with the GPU dev setup (the `gpu-dev` group), not the
+  `gpu-nvenc-sdk` extra; on a CUDA-12 toolkit use `RFB_GPU=force` and swap to
+  `cupy-cuda12x`. To confirm what lit up:
 
   ```bash
   uv run --group gpu-dev pdum-rfb doctor     # which encode paths are available

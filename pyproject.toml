@@ -43,7 +43,7 @@ h264 = [
 # as [h264] (its bundled ffmpeg ships the h264_nvenc encoder); the actual GPU
 # requirement is a host NVIDIA driver + an NVENC-capable card, which pip cannot
 # install. NVIDIA's own PyNvVideoCodec is intentionally NOT used: it publishes no
-# cp314 wheel and no sdist, so it cannot install on this project's Python 3.14+.
+# cp314 wheel and no sdist, so it cannot install on Python 3.14 (no source fallback).
 # Availability is verified at runtime by pdum.rfb.encoders.nvenc.nvenc_available().
 nvenc = [
     "av>=17.1.0",
@@ -65,7 +65,7 @@ gpu-cuda12 = [
 # Alternative GPU H.264/HEVC backend via NVIDIA's Video Codec SDK encoder instead of
 # PyAV/ffmpeg — the sibling package habemus-papadum-nvenc (import pdum.nvenc), built
 # from packages/nvenc/ (a uv workspace member). It needs NO PyAV and works on Python
-# 3.14. The SDK encoder accepts a host NV12 array OR a __cuda_array_interface__ GPU
+# 3.12+. The SDK encoder accepts a host NV12 array OR a __cuda_array_interface__ GPU
 # frame, so CuPy is NOT required here — add [gpu-cuda13]/[gpu-cuda12] for the zero-copy
 # GPU-frame path. Markered to Linux/x86_64 so it is a no-op elsewhere (runtime probe:
 # nvenc_gpu_pdum_available()). See docs/nvenc_sdk_evaluation.md.
@@ -98,7 +98,7 @@ asgi = [
 ]
 # macOS hardware H.264 via Apple VideoToolbox — the sibling package habemus-papadum-vtenc
 # (import pdum.vtenc), built from packages/vtenc/ (a uv workspace member). It needs NO
-# PyAV and works on Python 3.14; the runtime requirement is just macOS (the VideoToolbox
+# PyAV and works on Python 3.12+; the runtime requirement is just macOS (the VideoToolbox
 # frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
 # group). See docs/mlx_metal_videotoolbox_encoder_design.md.
 mac-vt = [

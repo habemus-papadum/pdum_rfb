@@ -20,10 +20,10 @@ jobs:
   gpu:
     runs-on: [self-hosted, gpu]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -47,7 +47,7 @@ jobs:
             --sizes 1280x720,1920x1080,3840x2160 --frames 120 --bitrate 10M | tee benchmark.txt
 
       - name: Upload benchmark
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gpu-benchmark
           path: benchmark.txt

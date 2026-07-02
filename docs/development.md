@@ -54,7 +54,7 @@ The project uses **uv exclusively**. Key rules:
   | `h264` | `av` (PyAV/libx264) | CPU/software H.264 |
   | `nvenc` | `av` | host-memory NVENC (same wheel; documents intent) |
   | `gpu-cuda12` / `gpu-cuda13` | CuPy | zero-copy CUDA→NVENC (needs PyAV ≥ 18) |
-  | `gpu-nvenc-sdk` | `habemus-papadum-nvenc` + CuPy | PyAV-free GPU H.264 (recommended) |
+  | `gpu-nvenc-sdk` | `habemus-papadum-nvenc` | PyAV-free GPU H.264 (recommended; add `gpu-cuda13` for the zero-copy frame path) |
   | `rendercanvas` | `rendercanvas` | the [rendercanvas backend](proposals/completed/rendercanvas_backend.md) (bring your own wgpu/pygfx) |
   | `cli` | `typer`, `rich` | `pdum-rfb doctor` / `pdum-rfb benchmark` |
 

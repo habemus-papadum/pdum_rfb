@@ -110,9 +110,9 @@ driver. One ABI-agnostic wheel ships both NVENC 12.1 and 13.0 builds and loads t
 one your driver supports.
 
 ```bash
-pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'   # pulls habemus-papadum-nvenc + cupy-cuda13x
-# for a CUDA 12 toolkit, swap the CuPy half:
-pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]' cupy-cuda12x
+pip install 'habemus-papadum-rfb[gpu-nvenc-sdk]'   # the SDK encoder (habemus-papadum-nvenc); no CuPy needed
+# for the zero-copy CUDA→NVENC frame path, add CuPy for your toolkit:
+pip install 'habemus-papadum-rfb[gpu-nvenc-sdk,gpu-cuda13]'   # gpu-cuda12 for a CUDA 12 toolkit
 ```
 
 Verify: `pdum-rfb doctor` should show **nvenc-gpu-pdum — NVENC SDK (pdum.nvenc): ✓** and recommend it.

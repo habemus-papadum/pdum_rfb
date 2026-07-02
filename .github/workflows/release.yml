@@ -88,10 +88,10 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # need every tag for latest_release_tag()
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Compute this release's version
         id: ver
         run: |
@@ -129,12 +129,12 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv build --package habemus-papadum-rfb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-rfb
           path: dist/*
@@ -167,13 +167,13 @@ jobs:
       contents: read
       id-token: write # provenance attestation (independent of the token publish)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with:
           version: 11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -199,7 +199,7 @@ jobs:
     # is locked out of PyPI 2FA. Revert per docs/proposals/active/trusted_publishing_migration.md.
     steps:
       # Merge every wheel/sdist artifact into one dist/ (PyPI routes each file by package name).
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -219,8 +219,8 @@ jobs:
     permissions:
       contents: write # create the release (fires docs.yml -> Pages)
     steps:
-      - uses: actions/checkout@v4
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/checkout@v5
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
@@ -232,11 +232,11 @@ jobs:
     permissions:
       contents: write # push the +dev marker commit to main
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref_name }} # main HEAD is the release commit we just pushed
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Set the +dev marker and push
         run: |
           git config user.name  "github-actions[bot]"

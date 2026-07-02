@@ -9,7 +9,7 @@
 > tagging on the PyAV libx264/NVENC paths, `display-p3` client canvas). Verified by
 > `widgets/tests/unit/viewport.test.ts` (geometry: letterbox/crop/inside/DPR/round-trip),
 > `widgets/tests/e2e/fit.spec.ts` (dpr × fit matrix), and `tests/test_sizing.py` (wire
-> contract + P3 VUI decode-back). User docs: [Sizing, DPR & color](../../guide_python.md#sizing-dpr--color).
+> contract + P3 VUI decode-back). User docs: [Sizing, DPR & color](../../guide_python.md#sizing-dpr-color).
 >
 > **Deferred (designed-for, as noted below):** client zoom/pan; HDR / 10-bit; 4:4:4;
 > per-client render sizes; and P3-primaries tagging on the image path + VideoToolbox /

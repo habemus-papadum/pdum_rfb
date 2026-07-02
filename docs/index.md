@@ -44,7 +44,13 @@ the browser" for notebooks, and `pdum.rfb` speaks the same
 
 - **Not tied to Jupyter.** Frames travel over a plain WebSocket, not ipywidgets/kernel
   comms. The same server drives a standalone web page, a desktop webview, or a fully
-  headless box — no notebook or kernel in the loop.
+  headless box — no notebook or kernel in the loop. The trade-off is *reachability*: the
+  browser needs a network path to that WebSocket. It's automatic when you launched the
+  environment (localhost, a VS Code / SSH tunnel, your own `jupyter lab`), but a
+  locked-down multi-tenant **JupyterHub** you only consume needs the framebuffer exposed
+  same-origin — via `jupyter-server-proxy` or an ASGI mount (see the
+  [notebook guide](notebook.md#remote-https-notebooks-same-origin)). `jupyter_rfb`'s
+  kernel-comm path avoids this but is bounded by that channel.
 - **Built for high frame rates.** Beyond the per-frame image path (every frame a keyframe,
   like `jupyter_rfb`), a low-latency **H.264/WebCodecs** path adds per-client backpressure
   and a keyframe policy — made for continuous, interactive framerates, not just the

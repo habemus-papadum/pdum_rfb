@@ -25,11 +25,11 @@ jobs:
     timeout-minutes: 35 # backstop > the deploy-pages timeout below
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Project Setup
@@ -39,12 +39,12 @@ jobs:
         run: uv run mkdocs build
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './site'
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           # The build+upload is fast; the time is spent polling GitHub's Pages backend while the
           # deployment sits in `deployment_queued`. The action's default timeout is 10 min (600000

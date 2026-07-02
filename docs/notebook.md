@@ -107,6 +107,16 @@ depth.widget()      # in another
 
 ## Remote / HTTPS notebooks (same-origin)
 
+**Rule of thumb — who controls the environment?** If *you* launched the notebook server —
+`localhost`, a VS Code Remote / SSH tunnel (the port forwards automatically), your own
+`jupyter lab` — the framebuffer's WebSocket port is reachable and the [local recipe](#quick-start-local)
+just works. If your notebook runs on a **locked-down, multi-tenant JupyterHub that IT deployed
+and you only consume**, you don't control the network path: the `serve()` port lives on the
+kernel's container and isn't exposed, so you must route the framebuffer **same-origin** through
+the hub (below). This is the flip side of not riding the Jupyter kernel comm — a comm-based
+tool like `jupyter_rfb` works in a deployed hub out of the box (the hub already proxies the
+comm) but can't reach `pdum.rfb`'s frame rates.
+
 The local recipe above builds a `ws://<hostname>:<port>/<stream>` URL, which only works
 when the page is served over **plain `http://` on a host that can reach that port**
 (typically `localhost`). Under `https://` — JupyterHub, a hosted notebook, anything behind
