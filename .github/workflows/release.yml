@@ -1,0 +1,114 @@
+# Release pipeline — the CI half of the hybrid flow (docs/development.md).
+#
+# Triggered by pushing a `vX.Y.Z` tag (done by scripts/prepare-release.sh). Builds every
+# distribution in a matrix across platforms, then publishes:
+#   * PyPI (rfb + nvenc + vtenc) via TRUSTED PUBLISHING — OIDC, no long-lived token;
+#   * npm (core + wrappers) with provenance;
+#   * a GitHub Release (which fires docs.yml -> Pages redeploy).
+#
+# Ordering: npm publishes first (it runs in parallel with the slow wheel builds), and PyPI is
+# gated on npm succeeding — so an npm failure never half-publishes to the immutable PyPI. All
+# publishing is idempotent for retries (PyPI skip-existing); see docs/release_recovery.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # --- build (matrix across platforms) --------------------------------------
+  build-rfb:
+    name: build habemus-papadum-rfb (sdist + wheel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # Native uv builder, explicit package so it never tries to build the native members
+      # (nvenc/vtenc build in their own jobs). Produces sdist + pure-Python wheel into dist/.
+      - run: uv build --package habemus-papadum-rfb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-rfb
+          path: dist/*
+
+  build-nvenc:
+    name: build habemus-papadum-nvenc (manylinux)
+    uses: ./.github/workflows/build-nvenc-sdk-wheel.yml
+    with:
+      python_versions: "3.12 3.13 3.14"
+
+  build-vtenc:
+    name: build habemus-papadum-vtenc (macOS arm64)
+    uses: ./.github/workflows/build-vtenc-wheel.yml
+    with:
+      python_versions: "3.12 3.13 3.14"
+
+  # --- publish --------------------------------------------------------------
+  npm-publish:
+    name: publish npm (core + wrappers, provenance)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance attestation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: widgets/pnpm-lock.yaml
+      - run: pnpm --dir widgets install --frozen-lockfile
+      - run: pnpm --dir widgets build
+      - run: pnpm --dir widgets -r --filter "./widgets/packages/*" run build
+      # Materialize the token into a transient user-level npmrc with the LITERAL value (pnpm
+      # won't expand ${VAR} from a project npmrc); mirrors scripts/release.sh's proven path.
+      - name: Publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc-publish"
+          export NPM_CONFIG_USERCONFIG="$HOME/.npmrc-publish"
+          pnpm --dir widgets publish --provenance --no-git-checks
+          pnpm --dir widgets -r --filter "./widgets/packages/*" publish --provenance --no-git-checks
+          rm -f "$HOME/.npmrc-publish"
+
+  pypi-publish:
+    name: publish PyPI (rfb + nvenc + vtenc, trusted publishing)
+    needs: [build-rfb, build-nvenc, build-vtenc, npm-publish]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC trusted publishing — no token needed
+    steps:
+      # Merge every wheel/sdist artifact into one dist/ (PyPI routes each file to its project
+      # by name, so one publish call uploads all three packages).
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true # idempotent retries — never overwrites an existing file
+
+  github-release:
+    name: create GitHub Release
+    needs: [pypi-publish, npm-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release (fires docs.yml -> Pages)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true

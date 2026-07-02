@@ -284,6 +284,38 @@ def write_version_of(vf: VersionFile, new_version: str) -> None:
 VERSION_FILES: list[VersionFile] = discover_version_files()
 
 
+#: rfb extras whose internal (workspace) native deps track the shared minor via a `~=`
+#: compatible-release range, so `pip install habemus-papadum-rfb[mac-vt]==X.Y.Z` resolves a
+#: matching `X.Y.*` native package instead of any latest. The npm wrapper->core peer dep stays
+#: `^` (a range is correct for peers). Self-referential extras (rfb[cli,...]) are left alone.
+_INTERNAL_EXTRA_DEPS = ("habemus-papadum-nvenc", "habemus-papadum-vtenc")
+
+
+def _minor_series(version: str) -> str:
+    """``0.3.1`` / ``0.3.1-alpha`` -> ``0.3.0`` — the X.Y.0 anchor for a ``~=`` range."""
+    m = re.match(r"^(\d+)\.(\d+)\.\d+", version.split("-")[0])
+    if not m:
+        console.print(f"[red]✗ ERROR:[/red] Cannot derive a minor series from version: {version}")
+        sys.exit(1)
+    return f"{m.group(1)}.{m.group(2)}.0"
+
+
+def rewrite_internal_constraints(version: str) -> None:
+    """Pin rfb's native extras (``gpu-nvenc-sdk``->nvenc, ``mac-vt``->vtenc) to ``~=X.Y.0``.
+
+    Called from the version-bump steps so the pin moves in lockstep with the release. Idempotent:
+    any existing version marker on the dep (``~=``/``==``/``>=``/…) is stripped and replaced, so
+    re-running a release is safe.
+    """
+    anchor = _minor_series(version)
+    content = PYPROJECT_TOML.read_text()
+    for name in _INTERNAL_EXTRA_DEPS:
+        # Match the quoted PEP 508 string for this dep, with or without an existing spec.
+        content = re.sub(rf'"{re.escape(name)}(?:[~=<>!][^"]*)?"', f'"{name}~={anchor}"', content)
+    PYPROJECT_TOML.write_text(content)
+    console.print(f"[green]✓[/green] Pinned internal extras to [bold]~={anchor}[/bold] ({', '.join(_INTERNAL_EXTRA_DEPS)})")
+
+
 def read_current_version() -> None:
     """Read the current version from every discovered package and require agreement."""
     console.rule("[bold blue]Reading Current Version")
@@ -376,6 +408,7 @@ def update_version_files() -> None:
 
     for vf in VERSION_FILES:
         write_version_of(vf, ctx.release_version)
+    rewrite_internal_constraints(ctx.release_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.release_version}[/bold] "
         f"in all {len(VERSION_FILES)} files"
@@ -457,7 +490,10 @@ def publish_to_npm() -> None:
     )
     run_command(["pnpm", "--dir", "widgets", "build"], "Building the core widget bundle")
     run_command(
-        ["pnpm", "--dir", "widgets", "-r", "--filter", "./packages/*", "run", "build"],
+        # NB: pnpm resolves a `./`-path filter against the *process* cwd (REPO_ROOT here),
+        # NOT `--dir`; `./packages/*` would match the Python packages/ and silently no-op
+        # (exit 0). Anchor the filter at the repo root so it hits the npm wrappers.
+        ["pnpm", "--dir", "widgets", "-r", "--filter", "./widgets/packages/*", "run", "build"],
         "Building the npm wrapper packages (widgets/packages/*)",
     )
 
@@ -480,8 +516,10 @@ def publish_to_npm() -> None:
             # `-r publish` auto-discovers widgets/packages/*, skips any `"private": true`
             # package (e.g. rfb-ui), and rewrites each wrapper's `workspace:^` core dep to
             # the concrete release version (lockstep) — no wrapper list to maintain here.
+            # Filter anchored at the repo root (see the build step above): a `./packages/*`
+            # filter resolves against REPO_ROOT and would publish nothing (silent exit 0).
             run_command(
-                ["pnpm", "--dir", "widgets", "-r", "--filter", "./packages/*", "publish", "--no-git-checks"],
+                ["pnpm", "--dir", "widgets", "-r", "--filter", "./widgets/packages/*", "publish", "--no-git-checks"],
                 "Publishing the npm wrapper packages (widgets/packages/*) to npm",
             )
         finally:
@@ -556,6 +594,7 @@ def update_to_dev_version() -> None:
 
     for vf in VERSION_FILES:
         write_version_of(vf, ctx.next_dev_version)
+    rewrite_internal_constraints(ctx.next_dev_version)
     console.print(
         f"[green]✓[/green] Updated version to [bold]{ctx.next_dev_version}[/bold] "
         f"in all {len(VERSION_FILES)} files"
@@ -699,6 +738,17 @@ STEPS: list[Step] = [
         category=StepCategory.RELEASE,
         action=push_tag,
     ),
+    # npm publishes BEFORE PyPI on purpose: PyPI files are immutable and its token is
+    # verified, whereas an npm granular-token scope error only shows up at publish time.
+    # Failing on npm first avoids burning a PyPI version we could never re-upload.
+    Step(
+        id="publish_npm",
+        name="Publish to npm",
+        description="Build the widget bundle and publish @habemus-papadum/rfb-widgets + wrappers to npm",
+        category=StepCategory.RELEASE,
+        action=publish_to_npm,
+        notes="Requires pnpm + NPM_TOKEN (in .env; materialized into a transient npmrc at publish time)",
+    ),
     Step(
         id="publish_pypi",
         name="Publish to PyPI",
@@ -706,14 +756,6 @@ STEPS: list[Step] = [
         category=StepCategory.RELEASE,
         action=publish_to_pypi,
         notes="nvenc builds on Linux+CUDA, vtenc on macOS; off-platform auto-skips (use *_WHEEL_DIR for CI wheels)",
-    ),
-    Step(
-        id="publish_npm",
-        name="Publish to npm",
-        description="Build the widget bundle and publish @habemus-papadum/rfb-widgets to npm",
-        category=StepCategory.RELEASE,
-        action=publish_to_npm,
-        notes="Requires pnpm + NPM_TOKEN (in .env, consumed by .npmrc)",
     ),
     Step(
         id="github_release",

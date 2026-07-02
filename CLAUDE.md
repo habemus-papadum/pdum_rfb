@@ -297,9 +297,13 @@ AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
 ## Hard rules (from AGENTS.md — do not violate)
 
 - **NEVER modify version numbers** — humans manage them (`pyproject.toml`,
-  `__init__.py` `__version__`, docs). Flag if you think a bump is needed.
-- **NEVER run `./scripts/release.sh`** (publishes to PyPI, creates public GitHub
-  releases, pushes tags). Humans only.
+  `__init__.py` `__version__`, docs). The release scripts rewrite them (incl. the
+  `~=X.Y.0` native-extra pins); don't hand-edit. Flag if you think a bump is needed.
+- **NEVER run the release scripts** — `./scripts/release.sh` / `./scripts/publish.sh`
+  publish to PyPI+npm directly; `./scripts/prepare-release.sh` pushes a `v*` tag that
+  triggers `release.yml` to publish from CI (trusted publishing + provenance);
+  `./scripts/post-release.sh` pushes the dev-version bump. Humans only. Recovery when a
+  release fails: `docs/release_recovery.md`.
 - After changing any demo notebook (`docs/demos/*.ipynb`), run
   `./scripts/test_notebooks.sh`.
 - Conventions: src-layout, UV exclusively (`uv.lock` committed; use

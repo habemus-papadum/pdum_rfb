@@ -1,9 +1,11 @@
-# Build the NVENC SDK wheel (packages/nvenc -> habemus-papadum-nvenc) as a CI
-# artifact, to validate that it builds across CPython versions.
+# Build the NVENC SDK wheel (packages/nvenc -> habemus-papadum-nvenc) across CPython
+# versions and upload them as an artifact.
 #
-# Build only — it does NOT publish. Publishing to PyPI is done from a maintainer box
-# by scripts/publish.sh (see that script). Deliberately NOT triggered on pushes to
-# main; it's an expensive, rarely-needed build.
+# Two entry points:
+#   * workflow_dispatch — build-only validation (rarely needed; expensive).
+#   * workflow_call     — reused by release.yml, which downloads the `nvenc-sdk-wheels`
+#                         artifact and publishes it to PyPI via trusted publishing.
+# This workflow itself never publishes.
 #
 # No GPU is needed to BUILD (we link the CUDA driver stub; libnvidia-encode is
 # dlopen'd at runtime). The wheel can't be self-tested here (no GPU on GitHub
@@ -16,6 +18,16 @@ on:
     inputs:
       python_versions:
         description: "Space-separated CPython versions to build"
+        default: "3.12 3.13 3.14"
+      use_nvtx:
+        description: "Build a profiling wheel (NVTX ranges on)"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      python_versions:
+        description: "Space-separated CPython versions to build"
+        type: string
         default: "3.12 3.13 3.14"
       use_nvtx:
         description: "Build a profiling wheel (NVTX ranges on)"
@@ -37,13 +49,13 @@ jobs:
         with:
           enable-cache: true
 
+      # `inputs` is populated for BOTH workflow_dispatch and workflow_call (unified context).
       - name: Build wheel(s)
         working-directory: packages/nvenc
         run: |
-          PV="${{ github.event.inputs.python_versions || '3.12 3.13 3.14' }}"
           ARGS=""
-          [ "${{ github.event.inputs.use_nvtx }}" = "true" ] && ARGS="--nvtx"
-          PYTHON_VERSIONS="$PV" ./build-wheel.sh $ARGS
+          [ "${{ inputs.use_nvtx }}" = "true" ] && ARGS="--nvtx"
+          PYTHON_VERSIONS="${{ inputs.python_versions }}" ./build-wheel.sh $ARGS
 
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v4

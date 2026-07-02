@@ -27,7 +27,9 @@ nav:
       - ASGI / Starlette adapter: asgi.md
       - Metrics & adaptive quality: metrics_adaptive.md
       - Pipelined encode: pipelined_encode.md
-  - Repository & Development: development.md
+  - Repository & Development:
+      - Overview: development.md
+      - Release recovery: release_recovery.md
   - Performance: performance.md
   - GPU / hardware encode:
       - Zero-copy CUDA→NVENC (Linux): gpu_zerocopy.md

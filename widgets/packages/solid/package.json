@@ -4,6 +4,11 @@
   "description": "SolidJS primitive + component for the pdum.rfb remote framebuffer client.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/habemus-papadum/pdum_rfb.git",
+    "directory": "widgets/packages/solid"
+  },
   "sideEffects": ["*.css"],
   "exports": {
     ".": {

@@ -132,68 +132,97 @@ package works with any bundler — or none. The protocol packer (Python) and unp
 | `scripts/setup.sh` | Idempotent bootstrap: `uv sync --frozen` (auto-adds the `gpu-nvenc-sdk` extra on Linux+GPU+CUDA; `RFB_GPU=auto`/`force`/`0`), `pnpm install` + Playwright Chromium, pre-commit hooks. Detects but never installs uv/Node/pnpm. Rerun after pulling dependency changes. |
 | `scripts/build.sh` | `uv sync` + build the widget bundle. |
 | `scripts/pre-release.sh` | Clean-tree check, ruff, pytest, `mkdocs build`. |
+| `scripts/prepare-release.sh` | **Local half of a release**: validate, strip `-alpha`, bump every version file + repin the native extras in lockstep, commit, tag `vX.Y.Z`, push the tag (→ triggers CI publish). No tokens, no publishing. |
+| `scripts/post-release.sh` | After CI is green: bump to the next `-alpha` dev version, commit, push `main`. |
+| `scripts/_versioning.py` | Shared, stdlib-only version logic (discover/read/bump/write + extras repin) imported by the two scripts above. |
 | `scripts/test_notebooks.sh` | Execute demo notebooks (`docs/demos/*.ipynb`). Run after editing any notebook. |
 | `scripts/install-gpu.sh` | Build/install PyAV 18 (CUDA/NVENC) for the zero-copy path until PyAV 18 ships on PyPI. |
 | `scripts/build-cuda-av-wheel.sh` | Build a self-contained PyAV-18 (CUDA) wheel. |
-| `packages/nvenc/build-wheel.sh` | Build the native `habemus-papadum-nvenc` wheel(s) via auditwheel. |
-| `scripts/publish.sh` | Build + publish **both** Python packages to PyPI (see below). |
-| `scripts/release.sh` | Orchestrate a full release of **all three** packages. |
+| `packages/nvenc/build-wheel.sh` · `packages/vtenc/build-wheel.sh` | Build the native `habemus-papadum-nvenc` (auditwheel) / `habemus-papadum-vtenc` (delocate) wheel(s). |
+| `scripts/publish.sh` | **Manual fallback**: token-based publish of the three PyPI packages from a maintainer box. Not the primary path. |
+| `scripts/release.sh` | Legacy all-in-one local release (interactive). Kept as a manual fallback; the primary path is `prepare-release.sh` + CI. |
 
 ## GitHub CI
 
-Workflows live in `.github/workflows/`. **Publishing is never done from CI** — the
-wheel-build workflows produce artifacts only; releases go out from a maintainer box
-via `scripts/release.sh`.
+Workflows live in `.github/workflows/`. Releases are **published from CI** by
+`release.yml` (below) via PyPI **trusted publishing** (OIDC) + npm **provenance** —
+no long-lived index tokens. The `build-*` workflows also run standalone as build-only
+validation artifacts.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `ci.yml` | push / PR to `main` | Two jobs. **test**: `setup.sh`, ruff, install Mesa lavapipe, pytest + coverage (comment + badge — incl. the lavapipe `rendercanvas` render test), `mkdocs build`. **widgets**: pnpm typecheck, Vitest, and Playwright e2e (`uv sync --frozen --no-group viz` to boot the e2e test server). |
-| `docs.yml` | on release published / manual | Build the MkDocs site and deploy to GitHub Pages. |
-| `gpu-tests.yml` | weekly (Mon) / manual | The **only** place GPU paths run in CI. Needs a self-hosted runner labelled `gpu`; runs the `tests/test_gpu.py` tier, `pdum-rfb doctor`, and the benchmark. Stays queued (never runs on the hosted pool) if no such runner exists. |
-| `build-nvenc-sdk-wheel.yml` | manual | Build `habemus-papadum-nvenc` wheels in a manylinux_2_28 + CUDA container as a validation artifact (no GPU needed to *build*). Build-only. |
-| `build-pyav-cuda-wheel.yml` | manual / tag `gpu-av18-*` | Build the self-contained PyAV-18 (CUDA/NVENC) wheel; on a tag it also attaches the wheels to a GitHub Release (LGPL ffmpeg — kept off PyPI). |
+| `release.yml` | push tag `v*` | The release pipeline: builds the wheel matrix (`build-rfb` + reusable nvenc/vtenc), publishes npm (provenance) then PyPI (trusted publishing, `skip-existing`), and creates the GitHub Release. Triggered by `prepare-release.sh`. |
+| `docs.yml` | on release published / push `main` / manual | Build the MkDocs site and deploy to GitHub Pages. |
+| `gpu-tests.yml` | weekly (Mon) / manual | The **only** place GPU paths run in CI. Needs a self-hosted runner labelled `gpu`; runs `tests/test_gpu.py`, `pdum-rfb doctor`, and the benchmark. Stays queued if no such runner exists. |
+| `build-nvenc-sdk-wheel.yml` · `build-vtenc-wheel.yml` | manual / `workflow_call` | Build the native `habemus-papadum-nvenc` (manylinux_2_28 + CUDA container) / `habemus-papadum-vtenc` (macOS arm64) wheels across CPython versions. Reused by `release.yml`; standalone runs are build-only (no GPU/Mac-runtime needed to *build*). |
+| `build-pyav-cuda-wheel.yml` | manual / tag `gpu-av18-*` | Build the self-contained PyAV-18 (CUDA/NVENC) wheel; on a tag it attaches the wheels to a GitHub Release (LGPL ffmpeg — kept off PyPI). |
 
-Normal CI runs **GPU-less** and skips the GPU tests (they detect no device). The
-two wheel-build workflows are expensive and deliberately **not** triggered on
-pushes to `main`.
+Normal CI runs **GPU-less**. The native wheel builds are expensive and **not** triggered
+on pushes to `main`.
 
 ## Releasing (the pipeline)
 
-`scripts/release.sh` bumps the version across **all four** version files in
-lockstep — `pyproject.toml`, `src/pdum/rfb/__init__.py` (`__version__`),
-`widgets/package.json`, and `packages/nvenc/pyproject.toml` — then (via an
-interactive step selector) commits, tags, pushes, and publishes:
+Cross-platform reality: no single machine can build all three PyPI wheels
+(`habemus-papadum-rfb` is pure Python; `-nvenc` is Linux+CUDA only; `-vtenc` is
+macOS/arm64 only). So the release is **hybrid** — you cut it locally, CI builds the
+matrix and publishes:
 
-- **PyPI** — `scripts/publish.sh` builds and publishes **both** Python packages:
-  `habemus-papadum-rfb` (hatch) and the native `habemus-papadum-nvenc` wheels
-  (auditwheel'd, through the same `hatch publish`). Knobs: `SKIP_NVENC=1`,
-  `NVENC_WHEEL_DIR=<dir>`, `NVENC_PYTHON_VERSIONS`.
-- **npm** — builds and `pnpm publish`es `@habemus-papadum/rfb-widgets`.
-- **GitHub Release** — which triggers `docs.yml` to redeploy the site.
+1. **`./scripts/prepare-release.sh <patch|minor|major>`** — validates, strips `-alpha`
+   → `X.Y.Z`, bumps all 10 version files + repins the native extras (lockstep), commits,
+   tags `vX.Y.Z`, and (after a confirm) **pushes the tag**.
+2. **Pushing the tag triggers `release.yml`**, which in one run:
+   - builds `rfb` (sdist+wheel), `nvenc` (manylinux), and `vtenc` (macOS arm64) in parallel;
+   - **publishes npm** (core + wrappers, with provenance) — first, so a failure never
+     half-publishes the immutable PyPI;
+   - **publishes PyPI** (all three, one trusted-publishing call, `skip-existing`);
+   - creates the **GitHub Release** (→ `docs.yml` redeploys Pages).
+3. **`./scripts/post-release.sh <bump>`** — bump to the next `-alpha`, commit, push `main`.
 
-### Credentials (`.env`)
+If a CI step fails, see **[Release recovery](release_recovery.md)** — publishing is
+idempotent and the same tag can be re-pushed.
 
-Publishing is non-interactive when a **git-ignored `.env`** at the repo root
-provides the credentials; `release.sh` loads it (and `publish.sh` sources it
-independently). Pre-set environment variables always win.
+### Versioning policy
+
+- **Lockstep** — every published package shares one version, bumped together;
+  `_versioning.py` enforces agreement across all 10 files.
+- **npm `wrapper → core`** stays a `^` **peer** range (a range is correct for peer deps of
+  adapter packages; exact-pinned peers cause "unmet peer" conflicts).
+- **Python native extras** (`rfb[gpu-nvenc-sdk] → nvenc`, `rfb[mac-vt] → vtenc`) track the
+  shared minor as **`~=X.Y.0`**, rewritten by the release scripts, so `rfb X.Y.*` resolves a
+  matching native `X.Y.*` while patches still float.
+- **Revisit at 1.0**: when native-package churn or diverging cadences bite, consider
+  *grouped* (core+client lockstep; nvenc/vtenc independent) and/or Changesets.
+
+### Trusted-publishing setup (one-time, maintainer)
+
+CI publishing needs no long-lived PyPI token. Configure once:
+
+- **PyPI trusted publishers** for each of the three projects (`pypi.org` → project →
+  *Publishing* → add a GitHub publisher: owner `habemus-papadum`, repo `pdum_rfb`, workflow
+  `release.yml`, environment `pypi`). For a brand-new project, use the **pending publisher**
+  form before its first upload.
+- A GitHub **environment named `pypi`** (optional protection rules as a release gate).
+- **`NPM_TOKEN`** as an Actions secret (an npm *Automation*/granular token with write on the
+  whole `@habemus-papadum` scope) — used for the provenance-signed npm publish. (npm OIDC
+  trusted publishing is a later token-removal follow-up.) The four published `package.json`s
+  carry a `repository` field, required for provenance.
+
+### Manual fallback (`scripts/publish.sh` + `.env`)
+
+`scripts/publish.sh` (and the legacy `scripts/release.sh`) publish from a maintainer box with
+tokens in a **git-ignored `.env`** — use only for out-of-band publishing (a hotfix wheel, a
+platform CI can't cover, or CI down). Off-platform native packages auto-skip; stitch in
+CI-built wheels via `NVENC_WHEEL_DIR` / `VTENC_WHEEL_DIR`, or `SKIP_NVENC=1` / `SKIP_VTENC=1`.
 
 ```bash
 # .env  (git-ignored — never commit)
 HATCH_INDEX_USER=__token__
-HATCH_INDEX_AUTH=pypi-…        # your PyPI token; hatch does NOT read ~/.pypirc
+HATCH_INDEX_AUTH=pypi-…        # PyPI token; hatch does NOT read ~/.pypirc
 UV_PUBLISH_TOKEN=pypi-…        # optional, for `uv publish`
-NPM_TOKEN=npm_…                # an npm *Automation* token (bypasses 2FA)
+NPM_TOKEN=npm_…                # npm token (materialized into a transient npmrc at publish)
 ```
 
-The npm token (`NPM_TOKEN`) lives **only** in `.env`. There is no committed or
-persistent `.npmrc`: pnpm 11 refuses to expand `${NPM_TOKEN}` from a project-level
-`.npmrc`, and keeping dev checkouts auth-config-free avoids the "failed to replace
-env" / "credential could leak" warnings on every `pnpm` command. Instead,
-`publish_to_npm()` in `scripts/release.sh` writes the resolved token to a transient,
-`0600`, outside-the-repo file and points pnpm at it via `NPM_CONFIG_USERCONFIG` for
-the publish call only (then deletes it). `widgets/package.json` sets
-`publishConfig.access = "public"`, so the scoped package publishes publicly.
-
-> **Maintainers only.** `scripts/release.sh` publishes to PyPI/npm, pushes tags,
-> and creates public GitHub releases. Version numbers are human-managed — don't
-> hand-edit them; let the release script bump them.
+> **Maintainers only.** `prepare-release.sh` pushes a tag that makes CI publish to PyPI/npm
+> and create a public GitHub release; `release.sh`/`publish.sh` publish directly. Version
+> numbers are human-managed — don't hand-edit them; let the release scripts bump them.

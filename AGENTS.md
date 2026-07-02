@@ -19,18 +19,21 @@ The project uses a modern Python toolchain with UV for dependency management.
 If you think a version change is needed, inform the user but do not make the change yourself.
 
 ### Release Management
-**ABSOLUTELY NEVER RUN THE RELEASE SCRIPT (`./scripts/release.sh`).** This is a production deployment script that:
-- Publishes the package to PyPI (affects real users)
-- Creates GitHub releases (public and permanent)
-- Pushes commits and tags to the repository
-- Triggers documentation deployment
+**ABSOLUTELY NEVER RUN THE RELEASE SCRIPTS.** These are production deployment scripts:
+- `./scripts/prepare-release.sh` — bumps versions, tags `vX.Y.Z`, and **pushes the tag**, which
+  triggers `.github/workflows/release.yml` to build the wheel matrix and publish to PyPI
+  (trusted publishing) + npm (provenance) and cut a public GitHub Release.
+- `./scripts/post-release.sh` — pushes the next `-alpha` dev-version bump to `main`.
+- `./scripts/publish.sh` / `./scripts/release.sh` — the manual/legacy fallback that publishes to
+  PyPI+npm directly with tokens from `.env`.
 
-**This script should ONLY be run by a human who fully understands the consequences.** Do not:
-- Execute `./scripts/release.sh` under any circumstances
-- Suggest running it unless the user explicitly asks about the release process
-- Include it in automated workflows or scripts
+**These should ONLY be run by a human who fully understands the consequences.** Do not:
+- Execute any of them under any circumstances (pushing a `v*` tag = a real publish)
+- Suggest running one unless the user explicitly asks about the release process
+- Include them in automated workflows or scripts
 
-If the user needs to make a release, explain the process but let them run the script themselves.
+If the user needs to make a release, explain the process (`docs/development.md` → *Releasing*;
+recovery in `docs/release_recovery.md`) but let them run the scripts themselves.
 
 ## Development Commands
 
