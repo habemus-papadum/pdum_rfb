@@ -1,7 +1,8 @@
 """The ``pdum-rfb demo`` web app: a Starlette control plane over a framebuffer hub.
 
 One ``pdum-rfb demo`` process serves a **self-contained web app** — the prebuilt SPA
-(committed under ``static/demo/``), a small **REST** control plane, and the framebuffer
+(built under ``static/demo/`` via ``pnpm -C widgets build:demo``; a build artifact, not
+committed — the release CI builds it into the wheel), a small **REST** control plane, and the framebuffer
 **WebSocket(s)** — all on one origin. There is no Node, no Vite, and no terminal UI: the
 browser holds both the remote-framebuffer viewer *and* the controls (scene / encode
 backend / quality / the richer parameters), and drives the server with REST calls. The
@@ -53,7 +54,8 @@ from .types import DISPLAY_P3, SRGB
 
 log = logging.getLogger("pdum.rfb.demo")
 
-#: Where the prebuilt SPA lives once ``pnpm -C widgets build:demo`` has run.
+#: Where the prebuilt SPA lives once ``pnpm -C widgets build:demo`` has run. It's a build
+#: artifact (git-ignored, not committed); absent → the demo serves ``_PLACEHOLDER_HTML``.
 STATIC_DEMO_DIR = Path(__file__).resolve().parent / "static" / "demo"
 
 
@@ -571,8 +573,12 @@ class DemoStreamManager:
             "bitrate": host.bitrate,
             "bitrate_label": _fmt_bitrate(host.bitrate),
             "fps": host.fps,
-            "width": d.width,
-            "height": d.height,
+            # The DESIRED size (what the Size control set) under publisher policy — reading the
+            # Display's actual d.width/d.height would lag one render tick after set_params, so the
+            # panel dropdown would snap back to the old value. Under match_client the viewer truly
+            # drives the size, so report the Display's live dimensions there.
+            "width": d.width if d.resize_policy == "match_client" else st.width,
+            "height": d.height if d.resize_policy == "match_client" else st.height,
             "color": st.color or "srgb",
             "adaptive": host.adaptive,
             "still_after": host.still_after,
@@ -803,9 +809,12 @@ _PLACEHOLDER_HTML = """<!doctype html><meta charset=utf-8>
 <title>pdum-rfb demo</title>
 <body style="font-family:Georgia,serif;background:#faf9f7;color:#2c2c2c;max-width:34rem;margin:4rem auto">
 <h1 style="font-weight:400">pdum-rfb demo</h1>
-<p>The control plane is running, but the web UI bundle has not been built yet.</p>
+<p>The control plane is running, but the web UI bundle has not been built yet.
+The SPA is a build artifact (no longer committed) — build it:</p>
 <pre style="background:#fff;border:1px solid #c0b9ad;padding:1rem">pnpm -C widgets install
+pnpm -C widgets build
 pnpm -C widgets build:demo</pre>
+<p>…then reload. Or run <code>pdum-rfb demo --dev</code> for live-reload development.</p>
 <p style="color:#6b6560">REST is live: <code>GET /demo/capabilities</code>, <code>GET /demo/state</code>,
 and the framebuffer WebSocket at <code>/rfb/default</code>.</p>
 </body>"""
@@ -871,8 +880,13 @@ def _run_static(host: str, port: int, w: int, h: int, fps: int, bitrate: int | s
     app = build_demo_app(width=w, height=h, fps=fps, bitrate=bitrate)
     built = STATIC_DEMO_DIR.is_dir()
     url = f"http://{host}:{port}/"
-    spa = "built" if built else "NOT BUILT — run `pnpm -C widgets build:demo`"
-    log.info("pdum-rfb demo ▶ %s   (SPA: %s)", url, spa)
+    if not built:
+        log.warning(
+            "demo SPA not built — serving a placeholder page. Build it with "
+            "`pnpm -C widgets build && pnpm -C widgets build:demo`, "
+            "or run `pdum-rfb demo --dev` for live-reload dev."
+        )
+    log.info("pdum-rfb demo ▶ %s   (SPA: %s)", url, "built" if built else "placeholder")
     if open_browser:
         _open_browser_when_ready(url, host, port)
     uvicorn.run(app, host=host, port=port, log_level="warning")

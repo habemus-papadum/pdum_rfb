@@ -143,6 +143,12 @@ if [ -d "widgets" ]; then
         echo "   Building the anywidget bundle..."
         (cd widgets && pnpm run build:anywidget) || echo "   ⚠ anywidget bundle build failed"
 
+        # Build the `pdum-rfb demo` SPA (src/pdum/rfb/static/demo/). It's NOT committed — a
+        # build artifact — so this gives a dev tree a working non-dev `pdum-rfb demo`. Without
+        # it the demo serves a "build me" placeholder (or use `pdum-rfb demo --dev` for HMR).
+        echo "   Building the demo SPA..."
+        (cd widgets && pnpm run build && pnpm run build:demo) || echo "   ⚠ demo SPA build failed"
+
         # Playwright's Chromium is required for the e2e tests (pnpm -C widgets e2e).
         # The download is idempotent (skipped if already present); it needs no sudo.
         echo "   Installing Playwright Chromium (for e2e tests)..."

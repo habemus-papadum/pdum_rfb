@@ -151,7 +151,11 @@ copy today). GPU CI now exists as the weekly self-hosted `gpu-tests` workflow.
   composition (measure first).
 - **AV1** (`av01...`) via libaom/SVT-AV1 + WebCodecs for better compression at the
   same bitrate.
-- Reconnection/backoff hardening and a proper keyframe-after-idle policy.
+- ✅ **Auto-reconnect with backoff** — the worker rebuilds a dropped WebSocket
+  (exponential backoff + jitter, re-runs the hello/viewport handshake; skips deliberate
+  4401/4404 rejects), so a server restart / network blip resumes without a page refresh
+  (`widgets/src/reconnect.ts`, e2e `reconnect.spec.ts`). A proper keyframe-after-idle policy
+  is still open.
 
 ## 7. Packaging & release ✅ _(pipeline in place)_
 

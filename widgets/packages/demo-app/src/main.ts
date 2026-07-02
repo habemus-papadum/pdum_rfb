@@ -50,6 +50,25 @@ async function boot(): Promise<void> {
   setInterval(poll, 2500);
 }
 
+// The classic folded-ribbon "GitHub corner" (Tim Holman's octocat), themed to the demo's warm
+// palette (ink triangle, surface octocat) and linking to the repo. Fixed top-right; the header
+// gets extra right padding so the ● LIVE pill clears it.
+const GITHUB_URL = "https://github.com/habemus-papadum/pdum_rfb";
+function githubCorner(): HTMLElement {
+  return el("a", {
+    href: GITHUB_URL,
+    class: "github-corner",
+    target: "_blank",
+    rel: "noopener",
+    "aria-label": "View source on GitHub",
+    html: `<svg width="72" height="72" viewBox="0 0 250 250" aria-hidden="true">
+  <path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path>
+  <path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" class="octo-arm"></path>
+  <path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path>
+</svg>`,
+  });
+}
+
 function buildShell(): void {
   const app = document.getElementById("app")!;
   const head = el("header", { class: "demo__head" }, [
@@ -70,7 +89,7 @@ function buildShell(): void {
   ]);
   const rail = el("aside", { class: "rail" }, [controlsEl, status]);
   clear(app);
-  app.append(el("div", { class: "demo" }, [head, view, rail]));
+  app.append(el("div", { class: "demo" }, [head, view, rail]), githubCorner());
 }
 
 // --- viewer mount -----------------------------------------------------------
@@ -215,41 +234,71 @@ function sceneBackendGroup(): HTMLElement {
   ]);
 }
 
+// Quality is discrete: pragmatic fixed choices that auto-apply on change (no retune/apply
+// buttons — same live feel as scene/backend). The current stream value selects the option;
+// `selectEl` surfaces any off-list value (e.g. a private stream created with custom params).
+const BITRATE_OPTS = [
+  { bits: 50_000, value: "50k", label: "50 kbps" },
+  { bits: 250_000, value: "250k", label: "250 kbps" },
+  { bits: 1_000_000, value: "1M", label: "1 Mbps" },
+  { bits: 4_000_000, value: "4M", label: "4 Mbps" },
+  { bits: 8_000_000, value: "8M", label: "8 Mbps" },
+];
+const FPS_OPTS = [10, 15, 30, 60];
+// Deliberately mixed aspect ratios: with `contain` fit the letterboxing changes shape, so a
+// size switch reads as a real resolution change (not just the bouncing box appearing to speed
+// up). All dimensions even — the H.264/NVENC encoders require it.
+const SIZE_OPTS = [
+  { value: "1280x720", label: "1280 × 720 · 16:9" },
+  { value: "1024x768", label: "1024 × 768 · 4:3" },
+  { value: "720x720", label: "720 × 720 · 1:1" },
+  { value: "540x960", label: "540 × 960 · 9:16" },
+  { value: "1280x548", label: "1280 × 548 · 21:9" },
+];
+
+/** Nearest fixed bitrate option to the stream's current bits, so the dropdown reflects it. */
+function nearestBitrate(bits: number): string {
+  return BITRATE_OPTS.reduce((best, o) => (Math.abs(o.bits - bits) < Math.abs(best.bits - bits) ? o : best)).value;
+}
+
 function qualityGroup(): HTMLElement {
   const st = current();
-  const bitrate = el("input", { type: "text", value: st.bitrate_label }) as HTMLInputElement;
-  const fps = el("input", { type: "number", value: String(st.fps), min: "1", max: "120" }) as HTMLInputElement;
-  const width = el("input", { type: "number", value: String(st.width), min: "16" }) as HTMLInputElement;
-  const height = el("input", { type: "number", value: String(st.height), min: "16" }) as HTMLInputElement;
-  const colorOpts = ["srgb", "display-p3"].map((c) => ({ value: c, label: c }));
+
+  const bitrateSel = selectEl(
+    BITRATE_OPTS.map((o) => ({ value: o.value, label: o.label })),
+    nearestBitrate(st.bitrate),
+    (v) => void act(api.setQuality(st.name, { bitrate: v })),
+  );
+  bitrateSel.dataset.testid = "bitrate";
+
+  const fpsSel = selectEl(
+    FPS_OPTS.map((f) => ({ value: String(f), label: `${f} fps` })),
+    String(st.fps),
+    (v) => void act(api.setQuality(st.name, { fps: Number(v) })),
+  );
+  fpsSel.dataset.testid = "fps";
+
+  const sizeSel = selectEl(SIZE_OPTS, `${st.width}x${st.height}`, (v) => {
+    const [w, h] = v.split("x").map(Number);
+    void act(api.setParams(st.name, { width: w, height: h }));
+  });
+  sizeSel.dataset.testid = "size";
+
+  const colorSel = selectEl(
+    ["srgb", "display-p3"].map((c) => ({ value: c, label: c })),
+    st.color,
+    // A canvas's color space is fixed when its 2D context is created (before the first frame),
+    // so a live switch can't mutate the running canvas — apply the param, then remount so the
+    // fresh connection's `config` builds a new canvas in the chosen space.
+    (v) => void act(api.setParams(st.name, { color: v })).then(remountViewer),
+  );
+
   return el("div", { class: "group" }, [
     el("div", { class: "group__title", text: "Quality" }),
-    field("Bitrate", bitrate, "Target H.264/NVENC bitrate, e.g. 8M or 800k. Image modes ignore it."),
-    field("FPS", fps, "Publish + encoder IDR-cadence target."),
-    field(
-      "Apply",
-      el("div", { class: "btn-row" }, [
-        el("button", {
-          type: "button",
-          class: "primary",
-          text: "retune",
-          onclick: () => void act(api.setQuality(st.name, { bitrate: bitrate.value, fps: Number(fps.value) })),
-        }),
-      ]),
-    ),
-    field("Size", el("div", { class: "btn-row" }, [width, el("span", { text: "×" }), height]), "Render size (even). Publishing a new size rebuilds encoders + keyframes. Under match_client the viewer drives it."),
-    field(
-      "Color",
-      selectEl(colorOpts, st.color, (v) => void act(api.setParams(st.name, { color: v }))),
-      "Tag the stream color space (P3 = Apple wide-gamut SDR).",
-    ),
-    el("div", { class: "btn-row" }, [
-      el("button", {
-        type: "button",
-        text: "apply size",
-        onclick: () => void act(api.setParams(st.name, { width: Number(width.value), height: Number(height.value) })),
-      }),
-    ]),
+    field("Bitrate", bitrateSel, "Target H.264/NVENC bitrate. Image modes ignore it."),
+    field("FPS", fpsSel, "Publish + encoder IDR-cadence target."),
+    field("Size", sizeSel, "Render size. A new size rebuilds encoders + keyframes; under match_client the viewer drives it."),
+    field("Color", colorSel, "Tag the stream color space (P3 = Apple wide-gamut SDR). Reconnects to apply."),
   ]);
 }
 

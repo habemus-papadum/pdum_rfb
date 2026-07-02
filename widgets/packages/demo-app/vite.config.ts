@@ -12,6 +12,10 @@ const api = process.env.RFB_DEMO_API; // e.g. "http://127.0.0.1:53187" (set by -
 
 export default defineConfig({
   base: "./",
+  // Under `pdum-rfb demo --dev` (RFB_DEMO_API set) Vite shares the terminal with the Python
+  // process — disable its screen-clearing so uvicorn / server logs stay visible instead of
+  // being wiped on every HMR update. A standalone `pnpm dev` keeps Vite's default.
+  clearScreen: api ? false : undefined,
   server: api
     ? {
         proxy: {

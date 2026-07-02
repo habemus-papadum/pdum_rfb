@@ -90,10 +90,11 @@ for the SPA, REST routes for control, and `rfb_hub_endpoint` for the framebuffer
 hub's `websockets` listener is never started, so everything shares one origin. The REST
 surface: `GET /demo/capabilities` + `/demo/state`; `POST /demo/streams` (+ `DELETE
 /demo/streams/{name}`); `POST /demo/streams/{name}/{scene,backend,quality,params}`. The SPA
-is a small Vite project (`widgets/packages/demo-app/`) built to committed package data:
+is a small Vite project (`widgets/packages/demo-app/`) built to a **git-ignored** artifact
+(force-included into the wheel by `hatch_build.py`; the release CI builds it first):
 
 ```bash
-pnpm -C widgets build:demo     # -> src/pdum/rfb/static/demo/ (ships in the wheel)
+pnpm -C widgets build:demo     # -> src/pdum/rfb/static/demo/ (build artifact, ships in the wheel)
 pnpm -C widgets e2e:demo       # Playwright e2e that boots `pdum-rfb demo` and drives the UI
 ```
 

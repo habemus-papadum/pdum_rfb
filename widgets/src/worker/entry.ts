@@ -15,6 +15,7 @@ import type {
   VideoChunkHeader,
 } from "../protocol";
 import { unpackBinaryMessage } from "../protocol";
+import { isPermanentClose, reconnectDelay } from "../reconnect";
 import type { NormalizedEvent } from "../eventTypes";
 import { applyServerStats, applySetQuality } from "../serverStats";
 import type { MainToWorker, Stats, WorkerInitOptions, WorkerToMain } from "../types";
@@ -40,6 +41,14 @@ let frameDpr = 1;
 let initOptions: WorkerInitOptions = {};
 let dbg: Logger = makeLogger(false, "worker");
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+
+// Auto-reconnect state. The server dropping us (a `--dev` reload, a crash, a network blip)
+// closes the socket; we reconnect with backoff and re-run the hello/viewport handshake so the
+// stream resumes without a page refresh. `disposed` guards our own teardown from looping.
+let wsUrl: string | null = null;
+let disposed = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
 
 let stats: Stats = {
   framesDisplayed: 0,
@@ -145,12 +154,14 @@ async function handleBinary(buf: ArrayBuffer): Promise<void> {
 
 async function startConnection(url: string): Promise<void> {
   dbg.log("ws", "connecting", url);
+  wsUrl = url; // remembered so a dropped socket can be reconnected
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
-  post({ type: "state", state: "connecting" });
+  post({ type: "state", state: reconnectAttempts > 0 ? "reconnecting" : "connecting" });
 
   ws.onopen = async () => {
     dbg.log("ws", "open");
+    reconnectAttempts = 0; // a successful connect resets the backoff ladder
     post({ type: "state", state: "open" });
     video?.reset();
     const caps = await probeCapabilities({
@@ -192,12 +203,33 @@ async function startConnection(url: string): Promise<void> {
 
   ws.onclose = (ev: CloseEvent) => {
     dbg.log("ws", "closed", { code: ev.code, reason: ev.reason });
-    post({ type: "state", state: "closed" });
+    // Our own teardown or a deliberate server reject (auth/unknown-stream) is terminal;
+    // anything else (reload, crash, network blip) is transient — reconnect with backoff.
+    if (disposed || isPermanentClose(ev.code)) {
+      post({ type: "state", state: "closed" });
+      return;
+    }
+    scheduleReconnect();
   };
+  // A transient socket error is always followed by `onclose`, which drives the state and the
+  // reconnect — so just log here (posting an error state would flicker during a normal retry).
   ws.onerror = () => {
     dbg.error("ws", "websocket error");
-    post({ type: "error", error: "websocket error" });
   };
+}
+
+/** Reconnect after backoff (unless we've been disposed). Idempotent — a pending timer wins. */
+function scheduleReconnect(): void {
+  if (disposed || wsUrl === null || reconnectTimer !== null) return;
+  const delay = reconnectDelay(reconnectAttempts);
+  reconnectAttempts += 1;
+  dbg.log("ws", "reconnect scheduled", { attempt: reconnectAttempts, delayMs: delay });
+  post({ type: "state", state: "reconnecting" });
+  reconnectTimer = self.setTimeout(() => {
+    reconnectTimer = null;
+    if (disposed || wsUrl === null) return;
+    void startConnection(wsUrl);
+  }, delay);
 }
 
 function handleCapture(id: number, format: "imagedata" | "blob"): void {
@@ -294,6 +326,11 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       handleCapture(msg.id, msg.format);
       break;
     case "dispose":
+      disposed = true; // stop any in-flight reconnect from firing after teardown
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (watchdogTimer !== null) {
         clearInterval(watchdogTimer);
         watchdogTimer = null;

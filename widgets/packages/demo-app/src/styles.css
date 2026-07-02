@@ -438,3 +438,50 @@ a {
   text-decoration: underline;
   text-decoration-color: var(--hairline);
 }
+
+/* --- GitHub corner -------------------------------------------------------- */
+/* Fixed folded-ribbon octocat (themed to the warm palette). The header reserves
+   right padding so the ● LIVE pill never slides under it. */
+.demo__head {
+  padding-right: 5.5rem;
+}
+.github-corner {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  color: var(--surface); /* octocat */
+}
+.github-corner svg {
+  display: block;
+  border: 0;
+  fill: var(--ink); /* the folded triangle */
+}
+.github-corner:hover .octo-arm {
+  animation: octocat-wave 560ms ease-in-out;
+}
+.octo-arm {
+  transform-origin: 130px 106px;
+}
+@keyframes octocat-wave {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20%,
+  60% {
+    transform: rotate(-25deg);
+  }
+  40%,
+  80% {
+    transform: rotate(10deg);
+  }
+}
+@media (max-width: 500px) {
+  .github-corner:hover .octo-arm {
+    animation: none;
+  }
+  .github-corner .octo-arm {
+    animation: octocat-wave 560ms ease-in-out;
+  }
+}

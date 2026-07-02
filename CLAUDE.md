@@ -118,10 +118,13 @@ src/pdum/rfb/
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 (libx264/NVENC/VideoToolbox) w/ real PSNR
   notebook.py     opt-in [anywidget] Jupyter/marimo widgets: RfbCanvas (bare) / RfbViewer (batteries)
                   + publish_loop(); Display.widget() lazy-imports it (see docs/notebook.md)
-  static/         COMMITTED package data: widget.{js,css} (anywidget bundle, built from
-                  widgets/anywidget/ via `pnpm -C widgets build:anywidget`) + demo/ (the
-                  `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
-                  `pnpm -C widgets build:demo`); both ship in the wheel, .map gitignored
+  static/         package data. widget.{js,css} (anywidget bundle, built from
+                  widgets/anywidget/ via `pnpm -C widgets build:anywidget`) is COMMITTED. demo/
+                  (the `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
+                  `pnpm -C widgets build:demo`) is NOT committed — a git-ignored build artifact
+                  force-included into the wheel by hatch_build.py (only when present); the
+                  release CI builds it first, and setup.sh builds it for dev. Both ship in the
+                  wheel; .map gitignored. Missing demo/ → `pdum-rfb demo` serves a placeholder
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
   cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo
@@ -152,7 +155,8 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
     solid/                    @habemus-papadum/rfb-solid   (createRemoteFramebuffer ref/signals + component)
     demo-app/                 PRIVATE: the `pdum-rfb demo` SPA (vanilla shell + faicanteen styling +
                               REST control rail + framework toggle: Vanilla⇄React). Builds via the root
-                              `build:demo` script -> src/pdum/rfb/static/demo/ (committed). Not published.
+                              `build:demo` script -> src/pdum/rfb/static/demo/ (git-ignored build
+                              artifact, force-included into the wheel; not committed). Not published.
   # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>
   # (opt-in styles.css, themeable via CSS vars + slots/render-props). Each peer-deps the
   # core; build externalizes framework+core; the release workflow version-syncs all 4 npm packages.

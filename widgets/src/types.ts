@@ -4,7 +4,7 @@
 import type { NormalizedEvent } from "./eventTypes";
 import type { FitMode } from "./viewport";
 
-export type ConnectionState = "connecting" | "open" | "negotiated" | "closed" | "error";
+export type ConnectionState = "connecting" | "reconnecting" | "open" | "negotiated" | "closed" | "error";
 
 export interface WorkerInitOptions {
   maxInflight?: number;

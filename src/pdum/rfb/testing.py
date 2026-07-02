@@ -68,7 +68,9 @@ def _render_gradient(seq: int, width: int, height: int) -> np.ndarray:
 def _render_bouncing_box(seq: int, width: int, height: int) -> np.ndarray:
     arr = np.zeros((height, width, 3), dtype=np.uint8)
     arr[:] = (16, 16, 24)
-    bw, bh = max(8, width // 8), max(8, height // 8)
+    # A square box regardless of canvas aspect (side from the shorter edge), so changing the
+    # demo aspect ratio doesn't stretch the box.
+    bw = bh = max(8, min(width, height) // 8)
     span_x = max(1, width - bw)
     span_y = max(1, height - bh)
     x = _triangle(seq * 7, span_x)

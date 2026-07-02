@@ -135,13 +135,20 @@ build-backend = "hatchling.build"
 packages = ["src/pdum"]
 
 # The anywidget bundle (committed, built from widgets/anywidget/) is package data. Tracked
-# files under src/pdum ship by default (like py.typed); this makes it explicit. The
-# `pdum-rfb demo` SPA (committed under static/demo/, built from widgets/packages/demo-app/
-# via `pnpm -C widgets build:demo`) ships by that same default-inclusion of tracked files —
-# a directory force-include here would double-add each file, so it is intentionally omitted.
+# files under src/pdum ship by default (like py.typed); this makes it explicit.
 [tool.hatch.build.targets.wheel.force-include]
 "src/pdum/rfb/static/widget.js" = "pdum/rfb/static/widget.js"
 "src/pdum/rfb/static/widget.css" = "pdum/rfb/static/widget.css"
+
+# The `pdum-rfb demo` SPA is NO LONGER committed — it's git-ignored and built on demand
+# (`pnpm -C widgets build:demo`, which the release workflow runs before building the wheel
+# from source). A plain force-include would hard-fail EVERY build (including editable installs
+# / `uv sync`) whenever the dir is absent, so hatch_build.py force-includes it CONDITIONALLY —
+# only when it exists. Scoped to the WHEEL target: the sdist stays pure source, and the release
+# builds the wheel directly from source (not wheel-from-sdist) so the SPA lands in it. Absent →
+# the wheel ships no SPA and `pdum-rfb demo` serves a "build me" placeholder.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
 
 [tool.uv]
 # Groups installed automatically by a bare `uv sync` (including `--frozen`). `viz` pulls

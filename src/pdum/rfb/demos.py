@@ -214,17 +214,17 @@ class _MlxShader:
 
 DEMOS: list[Demo] = [
     Demo(
-        "test_card",
-        "Test card",
-        "Static 4-quadrant color/decode reference.",
-        lambda: _Pattern("test_card"),
-        tags=("cpu",),
-    ),
-    Demo(
         "bouncing_box",
         "Bouncing box",
         "A box bouncing on a gradient — light motion.",
         lambda: _Pattern("bouncing_box"),
+        tags=("cpu",),
+    ),
+    Demo(
+        "test_card",
+        "Test card",
+        "Static 4-quadrant color/decode reference.",
+        lambda: _Pattern("test_card"),
         tags=("cpu",),
     ),
     Demo(

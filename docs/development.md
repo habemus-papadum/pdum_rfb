@@ -99,7 +99,7 @@ pnpm typecheck    # tsc for the library + worker (separate DOM / WebWorker lib c
 pnpm test         # Vitest unit tests
 pnpm build        # dist/index.js (+ .d.ts), worker inlined
 pnpm e2e          # Playwright headless e2e (boots the Python server + demo)
-pnpm build:demo   # build the `pdum-rfb demo` SPA -> src/pdum/rfb/static/demo/ (committed package data)
+pnpm build:demo   # build the `pdum-rfb demo` SPA -> src/pdum/rfb/static/demo/ (git-ignored build artifact)
 pnpm e2e:demo     # Playwright e2e that boots `pdum-rfb demo` and drives the web UI
 ```
 
@@ -107,8 +107,11 @@ pnpm e2e:demo     # Playwright e2e that boots `pdum-rfb demo` and drives the web
 
 * **User-facing:** `pdum-rfb demo` is a single self-contained web app (see
   [the demo page](demo.md)); end users run it with `uvx` — no clone, no Node. Its SPA
-  lives in `widgets/packages/demo-app/` and is built to committed package data
-  (`pnpm build:demo`); rebuild + commit it whenever that project changes.
+  lives in `widgets/packages/demo-app/`. Its built SPA is **not committed** — it's a
+  git-ignored build artifact (`pnpm build:demo`) force-included into the wheel by
+  `hatch_build.py` when present. The release CI builds it before packaging, and
+  `scripts/setup.sh` builds it for dev; a checkout without it serves a "build me"
+  placeholder (or use `pdum-rfb demo --dev` for live reload). No need to rebuild + commit.
 * **Contributor-only:** the simple **two-process** demo — `python -m pdum.rfb.server`
   (streams a deterministic pattern on a bare WebSocket) plus `pnpm dev` (a minimal Vite
   client at `:5173`, `?ws=…&transport=image|video`) — is the quickest way to iterate on the

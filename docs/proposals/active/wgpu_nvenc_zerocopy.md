@@ -1,9 +1,13 @@
-# A minimal package for zero-copy wgpu-native → NVENC
+# A minimal package for zero-copy wgpu-native → hardware encode (NVENC & VideoToolbox)
 
 Follow-on to [`rendercanvas_backend.md`](../completed/rendercanvas_backend.md) §5. We *do* want the
 `wgpu` ecosystem (`pygfx`/`fastplotlib`). This doc scopes the smallest package that
-makes a `wgpu`-rendered frame reach NVENC **without a host round-trip** on Linux
-(`wgpu-native` → Vulkan), and lays out a de-risking spike.
+makes a `wgpu`-rendered frame reach a **hardware video encoder without a host
+round-trip** — on Linux (`wgpu-native` → Vulkan → CUDA → **NVENC**) and, by the same
+design, on macOS (`wgpu-native` → Metal → IOSurface → **VideoToolbox**; see
+[The macOS analog](#the-macos-analog-metal-iosurface-videotoolbox)). It lays out a
+de-risking spike and how the native piece folds back
+[upstream](#upstreaming-vs-shipping-our-own-binary).
 
 ## Verdict up front
 
@@ -24,6 +28,14 @@ makes a `wgpu`-rendered frame reach NVENC **without a host round-trip** on Linux
 - **Scope:** a bounded native project, comparable to the existing `packages/nvenc/`,
   plus ~150 lines of Python glue. A spike that *proves the bytes round-trip* (render →
   shared buffer → CUDA → checksum) is ~1–2 days and de-risks everything else.
+- **macOS falls out of the same design, and is *simpler*** — `IOSurface` is the native
+  shared buffer (no extension dance) and VideoToolbox does the color conversion — but the
+  **payoff is smaller** (unified memory: no PCIe to eliminate). See
+  [The macOS analog](#the-macos-analog-metal-iosurface-videotoolbox).
+- **The native patch is a bridge, not a destination.** The real fix is upstream: a `wgpu`
+  API that exports the platform handle (Vulkan FD / Metal IOSurface). Needing *both*
+  backends makes that a stronger, more general upstream ask — see
+  [Upstreaming vs. shipping our own binary](#upstreaming-vs-shipping-our-own-binary).
 
 ## The pipeline, and what's already done
 
@@ -270,6 +282,78 @@ foreign-created device**, which it doesn't support cleanly today — so it pulls
 device firmly inside `wgpu-py` and is the smaller bet. Revisit this only if maintaining
 a `wgpu-native` patch against fast-moving releases proves worse than owning the device.
 
+## The macOS analog: Metal, IOSurface, VideoToolbox
+
+The same gap exists on macOS — `wgpu-native` renders on **Metal** and its C API exposes no
+`MTLTexture` / `IOSurface` handle — but the analog is **structurally identical and simpler**,
+because macOS already ships the cross-API shared-buffer primitive the Vulkan side has to
+construct by hand: **`IOSurface`**.
+
+```
+pygfx/wgpu render ─► RGBA MTLTexture (GPU, Metal)
+   │  blit into an IOSurface-backed target (GPU→GPU, on-device)
+   ▼
+IOSurface  ═══════════════  ← the shared buffer: a system object, no export dance
+   │  CVPixelBufferCreateWithIOSurface  (wrap, no copy)
+   ▼
+CVPixelBuffer ─► VideoToolbox (pdum.vtenc) ─► Annex B ─► publish()
+```
+
+Three things make the Metal path **easier** than the CUDA one, not just different:
+
+1. **No device-creation tweak.** Vulkan must enable `VK_KHR_external_memory_fd` *at device
+   creation* (patch part (a)). Any `MTLDevice` can already make an IOSurface-backed texture
+   (`newTextureWithDescriptor:iosurface:plane:`), so the Metal patch is **purely** the
+   additive functions — zero change to existing behaviour.
+2. **VideoToolbox does the color conversion.** NVENC eats only NV12 — that's *why* the CUDA
+   path must run `rgb_to_nv12` first. A `VTCompressionSession` accepts a source
+   `CVPixelBuffer` and converts internally, so the RGB→NV12 stage can drop out. Two surface
+   choices: a **BGRA** IOSurface (VT converts; least `wgpu` work — a plain blit) or an
+   **NV12-biplanar** IOSurface (convert in a `wgpu` compute pass or MLX; matches `vtenc`'s
+   existing `420v` session unchanged).
+3. **No context / GPU matching.** CUDA needs the Vulkan device and the CUDA context on the
+   same physical GPU (`enable_cuda_context_sharing`). `IOSurface` is a device-agnostic system
+   object; VideoToolbox reads it regardless of which `MTLDevice` wrote it. One fewer invariant.
+
+`wgpu-hal`'s Metal backend reaches the raw objects exactly as the Vulkan one does —
+`Texture::as_hal::<Metal>` → `&metal::TextureRef`, `Device::as_hal::<Metal>` → the
+`MTLDevice`, `Queue::as_hal::<Metal>` → the command queue — and the `WGPU_LIB_PATH` swap plus
+the "same `.so`, one `dlopen`, shared registry" argument hold identically on macOS.
+
+**The macOS patch** (analog of the three C functions):
+
+| New C function | Does |
+| --- | --- |
+| `pdum_metal_create_exportable_target(dev, w, h) -> {Target*, IOSurfaceRef}` | Create an `IOSurface` (BGRA or NV12) + an IOSurface-backed `MTLTexture` via `as_hal`; return the surface handle + an `MTLSharedEvent`. |
+| `pdum_metal_blit_to_target(queue, srcTex, Target*, event, value)` | Blit `srcTex → target` on a command buffer, `encodeSignalEvent(event, value)`, commit. |
+| `pdum_metal_destroy_target(Target*)` | Release the texture / surface / event. |
+
+**What this reuses vs. adds (macOS):**
+
+| Piece | Status |
+| --- | --- |
+| BGRA/NV12 → Annex B via VideoToolbox | ✅ `pdum.vtenc` — its `CVPixelBuffer`s are *already* `420v`, IOSurface-backed |
+| RGB→NV12 on the GPU (optional here) | ✅ `metal.rgb_to_nv12` (MLX) — **skippable** if VideoToolbox converts BGRA |
+| `publish()` accepts a Metal frame | ✅ `display.py` / `metal.metal_frame` |
+| IOSurface-backed **target** from wgpu | ❌ `wgpu-native` Metal patch (analog artifact 1) |
+| IOSurface → `CVPixelBuffer` submit path | ❌ small `pdum.vtenc` addition: `encode_iosurface(handle)` (wrap via `CVPixelBufferCreateWithIOSurface`, submit) — bypasses today's host-NV12 memcpy fill |
+| Sync (`MTLSharedEvent` / command-buffer completion) | ❌ `pdum.wgpu`: host waits the blit before submitting to VideoToolbox |
+
+The one net-new encoder piece — `encode_iosurface` — is small: `vtenc` already *owns*
+IOSurface-backed `CVPixelBuffer`s and memcpies host NV12 into them (`vtenc_ext.mm` calls that
+memcpy "the cost a zero-copy path [eliminates]"); the zero-copy entry just wraps a
+*caller-provided* surface instead. It is the exact analog of `NvEncoderCuda`'s GPU-pointer path.
+
+**The honest catch — the payoff is smaller on macOS.** On CUDA the win is removing a **PCIe
+host round-trip** (the measured 2.4–4.3×). Apple Silicon has **unified memory**: there is no
+bus transfer to eliminate. The only copy the zero-copy path removes is host-NV12 →
+`CVPixelBuffer`, which `metal.py` itself already calls *"negligible."* So Metal zero-copy is a
+**plumbing win** — one fewer copy, and RGB→YUV moved off the CPU onto the encoder — not a
+latency breakthrough. **Prioritize accordingly: ship the Linux/CUDA path first for the real
+gain; treat the Metal analog as the cheaper, lower-risk follow-on.** It rides the whole design
+and — crucially — turns the upstream ask into a general, two-backend "export the native handle"
+feature (below), a stronger contribution than either backend alone.
+
 ## The de-risking spike (do this first — ~1–2 days)
 
 Prove the **handle round-trips correct bytes**; ignore NVENC entirely at first.
@@ -292,7 +376,8 @@ Prove the **handle round-trips correct bytes**; ignore NVENC entirely at first.
   release; each bump is a rebase. Mitigate by keeping the patch tiny (FFI shim only) and
   pinning `wgpu` in the workspace. Watch upstream: gfx-rs/wgpu **#965** (interop),
   **#7324** (arbitrary Vulkan extensions), **#7988** (CUDA↔wgpu) — if any land a public
-  external-memory API, the patch shrinks or disappears.
+  external-memory API, the patch shrinks or disappears. See
+  [Upstreaming vs. shipping our own binary](#upstreaming-vs-shipping-our-own-binary).
 - **Synchronization correctness** is the classic footgun (encoding a torn frame). The
   timeline-semaphore wait is non-negotiable; budget test time here.
 - **Row pitch / format.** WebGPU `bytesPerRow` 256-alignment and RGBA vs BGRA ordering
@@ -302,6 +387,10 @@ Prove the **handle round-trips correct bytes**; ignore NVENC entirely at first.
 - **Teardown.** External memory/semaphore lifetimes cross two runtimes — free in the
   right order (CUDA imports first, then wgpu resources) to avoid use-after-free, the
   hazard called out explicitly in wgpu #7988.
+- **macOS sync + source format.** The blit must finish before VideoToolbox reads the
+  `IOSurface` — host-wait the command buffer or an `MTLSharedEvent`. A **BGRA** surface needs
+  the `VTCompressionSession` to accept a BGRA source; an **NV12** surface keeps `vtenc`'s
+  existing `420v` session unchanged at the cost of a conversion pass.
 
 ## Effort
 
@@ -311,17 +400,70 @@ Prove the **handle round-trips correct bytes**; ignore NVENC entirely at first.
 | `wgpu-native` patch (extension tweak + 3 C functions, build/CI, wheel) | ~1–2 weeks |
 | `pdum.wgpu` glue (`cuda-python` import + sync + reuse encode tail) | ~3–5 days |
 | Integration w/ the rendercanvas backend + benchmark + e2e | ~1 week |
+| macOS analog (Metal IOSurface patch + `encode_iosurface` + `pdum.wgpu` Metal) | ~1 week, after the Linux path — shares the design, no device tweak |
 
 Bounded and incremental — and the spike tells you within two days whether the whole
 thing flies before any package work.
+
+## Upstreaming vs. shipping our own binary
+
+Two ways to live with the C-API gap long-term. They are not exclusive — the right play is to
+**pursue the first and ship the second as a bridge.**
+
+**A. Upstream a handle-export API to `wgpu` (the north star).** What has to land is small in
+code and large in consensus: a way to (1) allocate a resource with a *dedicated, exportable*
+backing, and (2) read back its **platform handle** — a Vulkan external-memory **FD**, a Metal
+**`IOSurface`** (or `MTLSharedTextureHandle`), a D3D12 shared handle. This is exactly the
+cluster that has sat open for years — gfx-rs/wgpu **#965** (interop), **#7324** (extensions),
+**#7988** (CUDA↔wgpu). The reason it's slow is *not* line count: exported handles are inherently
+`unsafe`/raw, wgpu's allocator sub-allocates (so you must *force* a dedicated allocation), and
+the semantics have to be defined uniformly across backends and squared with the WebGPU spec's
+wariness of escape hatches. So "just open up a few features" is right about the **code** and
+optimistic about the **merge** — the gate is maintainer API-design review, not difficulty.
+
+The payoff if it lands is total: **the native artifact disappears.** No `WGPU_LIB_PATH`, no ABI
+pin, no rebase-per-`wgpu-py`-bump, no bundled `.so` — `pdum.wgpu` becomes pure Python against a
+*public, versioned* API on both backends. That is worth real investment even at a months-long
+horizon.
+
+*How to make A likely to land, and cheap if it doesn't:* build the local patch
+([Recommended architecture](#recommended-architecture-patched-wgpu-native-pure-python-glue))
+to **look like the API we'd want upstream** — an `as_hal`-style `create_exportable_texture` +
+`export_handle`, not a bespoke `pdum_*` shim — and open a design thread on the existing issues
+*before* writing much, so we build toward something maintainers would accept. Our patch then
+*is* the reference implementation attached to the PR. Because we now need **both** a Vulkan FD
+and a Metal `IOSurface`, the natural proposal is the general per-backend "export the native
+handle" feature the issues are already circling — a more compelling ask than a Vulkan-only one,
+and it drags Windows/D3D12 along for free.
+
+**B. Ship our own `wgpu-native` binary (the bridge, not the destination).** The "convenience
+wheel" from *Developer build & install flow*: a `pdum-wgpu-native` wheel bundling the prebuilt,
+`auditwheel`/`delocate`'d `.so`, uv-locked, no `LD_LIBRARY_PATH` fuss — the `packages/nvenc/`
+pattern. It works and it's reproducible, but the maintenance is the honest cost: the bundled
+`.so` is **ABI-pinned to one exact `wgpu-py`**, so every `wgpu-py` release forces a rebuild +
+rebase + republish across (Python versions × platforms), and a user who bumps `wgpu-py` on
+their own gets an ABI mismatch. That's the `nvenc` maintenance model, but tracking a
+**fast-moving third-party release train** instead of a stable NVIDIA SDK — genuinely heavier,
+and a poor thing to sign up for *permanently*. So B earns its keep only as a **temporary
+convenience while A is in flight**, explicitly time-boxed to "until upstream exposes handles" —
+never a product line we commit to.
+
+**Net:** invest in A (engage the issues; shape the patch as the upstream prototype); use the
+developer-built patched `.so`, or optionally the B wheel, as the bridge that ships value now;
+delete all of it when the API lands. This promotes the existing *"drop it when wgpu exposes
+external memory natively"* note from an aside to the actual plan.
 
 ## Recommendation
 
 Run the spike. It is cheap and it converts the central unknown ("can we even get a
 CUDA-importable handle out of wgpu?") into a yes/no with a checksum. If green, build the
-patched-`wgpu-native` + `pdum.wgpu` package; the encode half is already done here. Keep
-the patch minimal and track the upstream interop issues so we can drop it when wgpu
-exposes external memory natively.
+patched-`wgpu-native` + `pdum.wgpu` package **for CUDA first** (the real, PCIe-sized win); the
+encode half is already done here. The **macOS/Metal analog** rides the same design and is
+simpler — schedule it as a lower-priority follow-on, since unified memory makes its payoff a
+plumbing cleanup rather than a latency jump. Throughout, keep the patch minimal and **shaped
+like the upstream API we want**, and engage gfx-rs/wgpu #965 / #7324 / #7988 early — so the
+native artifact is a bridge we can [delete](#upstreaming-vs-shipping-our-own-binary) when wgpu
+exposes external memory natively, not a fork we're stuck maintaining.
 
 ---
 
@@ -333,4 +475,5 @@ exposes external memory natively.
 - [`wgpu-hal` Vulkan: `as_hal`, `Buffer::raw_handle()`, `Adapter::open_with_callback`](https://docs.rs/wgpu-hal/) (the Rust-only pieces the patch surfaces to C)
 - [CUDA external-resource interop (`cuImportExternalMemory`, `cuImportExternalSemaphore`, `cuWaitExternalSemaphoresAsync`)](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXTRES__INTEROP.html) and [Vulkan interop guide](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html)
 - Prior art: [`ustreamer-capture`](https://docs.rs/ustreamer-capture/) (zero-copy Vulkan/CUDA external-memory export for NVIDIA, Rust)
-- In-repo: `src/pdum/rfb/gpu.py` (`rgb_to_nv12`, `enable_cuda_context_sharing`), `packages/nvenc/` (`NvEncoderCuda`), `src/pdum/rfb/display.py` (`publish` accepts CUDA tensors)
+- macOS interop: [`IOSurface`](https://developer.apple.com/documentation/iosurface), [`CVPixelBufferCreateWithIOSurface`](https://developer.apple.com/documentation/corevideo/1456715-cvpixelbuffercreatewithiosurface), Metal [`newTextureWithDescriptor:iosurface:plane:`](https://developer.apple.com/documentation/metal/mtldevice/1433378-newtexturewithdescriptor) and [`MTLSharedEvent`](https://developer.apple.com/documentation/metal/mtlsharedevent); [`wgpu-hal` Metal `as_hal`](https://docs.rs/wgpu-hal/)
+- In-repo: `src/pdum/rfb/gpu.py` (`rgb_to_nv12`, `enable_cuda_context_sharing`), `src/pdum/rfb/metal.py` (Metal `rgb_to_nv12`, `metal_frame`), `packages/nvenc/` (`NvEncoderCuda`), `packages/vtenc/` (`VtEncoder`, IOSurface-backed `CVPixelBuffer`s), `src/pdum/rfb/display.py` (`publish` accepts CUDA/Metal frames)

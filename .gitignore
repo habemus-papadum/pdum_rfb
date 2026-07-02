@@ -93,6 +93,10 @@ widgets/.vite/
 # data); ignore the generated sourcemaps and the inlined-worker sourcemap assets.
 src/pdum/rfb/static/*.map
 src/pdum/rfb/static/assets/
+# `pdum-rfb demo` SPA: a build artifact, no longer committed. Built on demand via
+# `pnpm -C widgets build:demo` (and by the release CI before the wheel is built, where
+# pyproject force-includes it). A dev checkout without it serves a "build me" placeholder.
+src/pdum/rfb/static/demo/
 badges/
 
 # IPython
