@@ -37,3 +37,11 @@ cmake.build-type = "Release"
 # Ships the pdum.vtenc namespace package; the CMake install drops the _vtenc .so into
 # pdum/vtenc/. No pdum/__init__.py -> PEP 420 namespace shared with pdum.rfb / pdum.nvenc.
 wheel.packages = ["src/pdum"]
+
+# Editable installs auto-rebuild the native extension when a source file (.mm) changes, so
+# editing the binding no longer leaves a stale _vtenc .so behind (the manual-reinstall footgun
+# that once stranded submit()/flush_pipeline()). editable.rebuild needs a persistent build-dir;
+# {wheel_tag} keys it per Python/platform so builds don't collide. Dev-only: a `pip wheel` /
+# released build ignores editable.rebuild (build-dir just makes that CMake build incremental).
+build-dir = "build/{wheel_tag}"
+editable.rebuild = true

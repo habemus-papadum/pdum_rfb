@@ -234,5 +234,11 @@ packages/nvenc/build-nvtx/
 packages/nvenc/dist/
 packages/nvenc/_skbuild/
 
+# packages/vtenc (habemus-papadum-vtenc): same policy — ignore build outputs. The
+# persistent editable.rebuild build-dir (build/{wheel_tag}) lands here too.
+packages/vtenc/build/
+packages/vtenc/dist/
+packages/vtenc/_skbuild/
+
 # Local npm auth (references $NPM_TOKEN; created by setup for `pnpm publish`)
 .npmrc

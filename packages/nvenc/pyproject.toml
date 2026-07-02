@@ -37,6 +37,15 @@ cmake.build-type = "Release"
 # into pdum/nvenc/. No pdum/__init__.py -> PEP 420 namespace shared with pdum.rfb.
 wheel.packages = ["src/pdum"]
 
+# Editable installs auto-rebuild the native extension when a source file (.cpp) changes, so
+# editing the binding no longer leaves a stale _nvenc_* .so behind (the manual-reinstall
+# footgun). editable.rebuild needs a persistent build-dir; {wheel_tag} keys it per
+# Python/platform. Dev-only: a `pip wheel` / released build ignores editable.rebuild. Note
+# the release path (build-wheel.sh) reuses build/ incrementally — do a clean build for a
+# pristine release (CI wheel builds already run on fresh checkouts, so they're unaffected).
+build-dir = "build/{wheel_tag}"
+editable.rebuild = true
+
 # NVTX profiling ranges are ON by default: header-only, no runtime lib bundled, and a
 # no-op (a few ns/range) when no profiler is attached — so released wheels are
 # Nsight-profileable for free. Override with -C cmake.define.USE_NVTX=OFF to disable.
