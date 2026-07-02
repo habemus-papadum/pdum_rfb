@@ -1,6 +1,6 @@
 [project]
 name = "habemus-papadum-rfb"
-version = "0.1.0-alpha"
+version = "0.1.0"
 description = "Remote Frame Buffer"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -65,7 +65,7 @@ gpu-cuda12 = [
 # 3.14. Pulls the SDK encoder + CuPy (use cupy-cuda12x for a CUDA 12 toolkit).
 # See docs/nvenc_sdk_evaluation.md.
 gpu-nvenc-sdk = [
-    "habemus-papadum-nvenc",
+    "habemus-papadum-nvenc~=0.1.0",
     "cupy-cuda13x>=14",
 ]
 # `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
@@ -98,7 +98,7 @@ asgi = [
 # frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
 # group). See docs/mlx_metal_videotoolbox_encoder_design.md.
 mac-vt = [
-    "habemus-papadum-vtenc",
+    "habemus-papadum-vtenc~=0.1.0",
 ]
 # `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
 # (committed under src/pdum/rfb/static/demo/), a REST control plane, and the framebuffer

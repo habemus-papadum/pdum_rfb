@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-solid",
-  "version": "0.1.0-alpha",
+  "version": "0.1.0",
   "description": "SolidJS primitive + component for the pdum.rfb remote framebuffer client.",
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,9 @@
     "url": "git+https://github.com/habemus-papadum/pdum_rfb.git",
     "directory": "widgets/packages/solid"
   },
-  "sideEffects": ["*.css"],
+  "sideEffects": [
+    "*.css"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,7 +19,9 @@
     },
     "./styles.css": "./dist/styles.css"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },

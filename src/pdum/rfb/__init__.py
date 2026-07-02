@@ -37,7 +37,7 @@ from .session import RfbSession
 from .transport import Channel, WebSocketTransport
 from .types import DISPLAY_P3, SRGB, ColorSpace, EncodedPayload, EncoderBackend, InputEvent, RawFrame
 
-__version__ = "0.1.0-alpha"
+__version__ = "0.1.0"
 
 __all__ = [
     "__version__",
