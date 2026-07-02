@@ -743,12 +743,12 @@ wheels = [
 
 [[package]]
 name = "habemus-papadum-nvenc"
-version = "0.2.0"
+version = "0.2.0+dev"
 source = { editable = "packages/nvenc" }
 
 [[package]]
 name = "habemus-papadum-rfb"
-version = "0.2.0"
+version = "0.2.0+dev"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -898,7 +898,7 @@ viz = [
 
 [[package]]
 name = "habemus-papadum-vtenc"
-version = "0.2.0"
+version = "0.2.0+dev"
 source = { editable = "packages/vtenc" }
 
 [[package]]

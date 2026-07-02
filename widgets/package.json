@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-widgets",
-  "version": "0.2.0",
+  "version": "0.2.0+dev",
   "description": "Framework-agnostic remote framebuffer browser client (Web Worker decoding).",
   "type": "module",
   "license": "MIT",
