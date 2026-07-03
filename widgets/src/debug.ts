@@ -1,4 +1,4 @@
-// Tiny, dependency-free client logger with three tiers:
+// Tiny client logger with three tiers:
 //
 //   error()  — a genuine failure (WS error, decoder error, image-decode throw). ALWAYS emitted
 //              (console.error). Silently swallowing these (as the worker used to) is a footgun.
@@ -9,20 +9,15 @@
 //   log()    — the verbose per-frame play-by-play (decode of every frame, hello payloads, config
 //              dumps). OFF by default; enable with the `debug` option.
 //
-// Works identically on the main thread and inside the Web Worker (both have `console`).
+// Works identically on the main thread and inside the Web Worker (both have `console`). The
+// implementation is the generic `@habemus-papadum/worker-observability` logger; this module is
+// the thin rfb-flavoured adapter that fixes the `[rfb:<tag>]` prefix convention. The
+// worker→main log forwarding + the `window.__rfb` registry are layered on this same logger by
+// the views (`registerObservable`) and the worker (`installWorkerObservability`).
 
-export interface Logger {
-  /** Whether the verbose `log()` stream is enabled. */
-  readonly enabled: boolean;
-  /** Verbose diagnostic line — emitted only when `debug` is on (console.debug). */
-  log(category: string, ...args: unknown[]): void;
-  /** A notable, rare lifecycle event — emitted unless notices are disabled (console.info). */
-  notice(category: string, ...args: unknown[]): void;
-  /** A genuine error — always emitted (console.error), regardless of the other tiers. */
-  error(category: string, ...args: unknown[]): void;
-}
+import { buildLogger, type Logger } from "@habemus-papadum/worker-observability";
 
-const noop = () => {};
+export type { Logger };
 
 /**
  * Build a logger.
@@ -32,11 +27,5 @@ const noop = () => {};
  * @param notice  Enable the `notice()` lifecycle stream (default ON).
  */
 export function makeLogger(debug: boolean, tag: string, notice = true): Logger {
-  const prefix = `[rfb:${tag}]`;
-  return {
-    enabled: debug,
-    log: debug ? (category, ...args) => console.debug(`${prefix} ${category}`, ...args) : noop,
-    notice: notice ? (category, ...args) => console.info(`${prefix} ${category}`, ...args) : noop,
-    error: (category, ...args) => console.error(`${prefix} ${category}`, ...args),
-  };
+  return buildLogger({ tag: `rfb:${tag}`, debug, notice });
 }

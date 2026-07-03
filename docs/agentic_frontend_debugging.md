@@ -138,4 +138,5 @@ random** (pass `--port N` to pin it). Edit either side → it's picked up live, 
 | Stall watchdog (pure, testable) | `widgets/src/worker/stallWatchdog.ts` (+ `tests/unit/stallWatchdog.test.ts`) |
 | Server backstops (`decoder_reset`, inflight timeout) | `src/pdum/rfb/session.py` (+ `tests/test_session.py`) |
 | Live-reload dev loop (`--dev`, `--open`, free port) | `src/pdum/rfb/demo_server.py`, `src/pdum/rfb/cli.py` |
+| Worker→main log bridge, `window.__rfb` registry, runtime `setDebug`, heartbeat | `@habemus-papadum/worker-observability` (`widgets/packages/`); wired in `widgets/src/{debug.ts,worker/entry.ts,RemoteFramebufferView.ts,MainThreadPresentView.ts}` — see [`agent_observable_web_workers.md`](agent_observable_web_workers.md) |
 | Skill entry point | `.claude/skills/frontend-debugging/SKILL.md` |

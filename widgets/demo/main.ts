@@ -100,7 +100,10 @@ interface RfbDebug {
     lastDisplayedSeq: number;
   }>;
 }
-(globalThis as unknown as { __rfb: RfbDebug }).__rfb = {
+// The view already installed the observability registry at `window.__rfb` (`.logs`,
+// `.setDebug`, `.instances`, `.state()`, `.stats()`). DECORATE it with the demo-specific
+// imperative hooks the e2e drives — don't replace it, or the registry surface is lost.
+const demoHooks: RfbDebug = {
   state: () => view.state,
   stats: () => view.stats,
   surface: () => view.surface,
@@ -118,3 +121,5 @@ interface RfbDebug {
     };
   },
 };
+const g = globalThis as unknown as { __rfb?: Record<string, unknown> };
+g.__rfb = Object.assign(g.__rfb ?? {}, demoHooks);

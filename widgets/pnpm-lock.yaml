@@ -11,6 +11,9 @@ importers:
       '@habemus-papadum/rfb-ui':
         specifier: workspace:*
         version: link:packages/rfb-ui
+      '@habemus-papadum/worker-observability':
+        specifier: workspace:*
+        version: link:packages/worker-observability
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.61.1
@@ -180,6 +183,18 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.6(happy-dom@15.11.7)
+
+  packages/worker-observability:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.3
       vitest:
         specifier: ^3.0.0
         version: 3.2.6(happy-dom@15.11.7)

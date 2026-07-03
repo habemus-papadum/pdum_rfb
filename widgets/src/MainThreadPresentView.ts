@@ -20,7 +20,9 @@
 // feed-mode worker has no renderer — so events are normalized and mapped to frame pixels
 // here, then forwarded to the worker verbatim.
 
-import { makeLogger, type Logger } from "./debug";
+import { type ObsInstance, readDebugFlag, registerObservable } from "@habemus-papadum/worker-observability/main";
+
+import { type Logger } from "./debug";
 import {
   computeBackingSize,
   normalizeKeyEvent,
@@ -74,6 +76,9 @@ export class MainThreadPresentView {
   private worker: Worker;
   private options: MainThreadPresentOptions;
   private log: Logger;
+  // Observability: registers on `window.__rfb`, forwards worker logs, exposes snapshots, and
+  // flips debug at runtime. `capture()` here reads the on-screen main-thread canvas (§7.4).
+  private obs: ObsInstance;
   private dpr: number;
 
   private backingWidth = 0;
@@ -99,7 +104,20 @@ export class MainThreadPresentView {
 
   constructor(target: HTMLCanvasElement | HTMLElement, options: MainThreadPresentOptions) {
     this.options = options;
-    this.log = makeLogger(options.debug ?? false, "present-main", options.notice ?? true);
+    const debug = options.debug ?? readDebugFlag("rfb");
+    this.obs = registerObservable({
+      channel: "rfb",
+      name: "present-main",
+      debug,
+      postToWorker: (m) => this.worker?.postMessage(m),
+      snapshots: {
+        state: () => this._state,
+        stats: () => this._stats,
+        surface: () => this._stats.surface,
+        capture: () => (fmt: "imagedata" | "blob" = "imagedata") => this.capture(fmt),
+      },
+    });
+    this.log = this.obs.makeLogger("rfb:present-main", { notice: options.notice ?? true });
     this.log.log("init", { url: options.url, fit: options.fit, imageOnly: options.imageOnly });
     this.fit = options.fit ?? "contain";
     this.background = options.background ?? "#000";
@@ -120,12 +138,16 @@ export class MainThreadPresentView {
     this.ctx = this.canvas.getContext("2d");
 
     this.worker = (options.workerFactory ?? createInlineWorker)();
-    this.worker.onmessage = (ev: MessageEvent<WorkerToMain>) => this.onWorkerMessage(ev.data);
+    this.worker.onmessage = (ev: MessageEvent<WorkerToMain>) => {
+      // Forwarded worker log lines (observability) land in the ring buffer + re-console here.
+      if (this.obs.ingest(ev.data)) return;
+      this.onWorkerMessage(ev.data);
+    };
     const workerOptions: WorkerInitOptions = {
       maxInflight: options.maxInflight,
       imageOnly: options.imageOnly,
       token: options.token,
-      debug: options.debug,
+      debug: this.obs.debug, // honor ?debug=1 / localStorage.rfbDebug
       notice: options.notice,
     };
     const init: MainToWorker = {
@@ -180,6 +202,7 @@ export class MainThreadPresentView {
     this.worker.terminate();
     this.retained = null; // an OffscreenCanvas — GC'd once unreferenced (no close() needed)
     this.retainedCtx = null;
+    this.obs.dispose();
   }
 
   // --- internals ----------------------------------------------------------

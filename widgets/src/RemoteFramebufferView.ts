@@ -9,7 +9,9 @@ import {
   normalizePointerEvent,
   normalizeWheelEvent,
 } from "./events";
-import { makeLogger, type Logger } from "./debug";
+import { type ObsInstance, readDebugFlag, registerObservable } from "@habemus-papadum/worker-observability/main";
+
+import { type Logger } from "./debug";
 import { computeStatus, createStatusOverlay, type StatusOverlayHandle, type StatusRenderer } from "./statusOverlay";
 import type { ConnectionState, MainToWorker, Stats, SurfaceKind, SurfacePreference, WorkerToMain } from "./types";
 import {
@@ -121,6 +123,9 @@ export class RemoteFramebufferView {
   private _state: ConnectionState = "connecting";
   private _stats: Stats = { ...EMPTY_STATS };
   private log: Logger;
+  // Observability: registers on `window.__rfb`, forwards worker logs into a ring buffer, exposes
+  // state/stats/surface/capture snapshots, and flips debug at runtime (worker + this logger).
+  private obs: ObsInstance;
 
   // Status overlay: shown over the canvas during connect / reconnect / disconnect (and until the
   // first frame arrives). A display resize repaints the retained frame in place — no blank — so
@@ -131,7 +136,23 @@ export class RemoteFramebufferView {
   constructor(target: HTMLCanvasElement | HTMLElement, options: RfbViewOptions) {
     this.target = target;
     this.options = options;
-    this.log = makeLogger(options.debug ?? false, "view", options.notice ?? true);
+    // Register on `window.__rfb` first, then mint the main-thread logger THROUGH it so its lines
+    // land in the same ring buffer as the forwarded worker lines, and a runtime `setDebug` flips
+    // both. `debug` also honors `?debug=1` / `localStorage.rfbDebug` so a reload can start verbose.
+    const debug = options.debug ?? readDebugFlag("rfb");
+    this.obs = registerObservable({
+      channel: "rfb",
+      name: "view",
+      debug,
+      postToWorker: (m) => this.worker?.postMessage(m),
+      snapshots: {
+        state: () => this._state,
+        stats: () => this._stats,
+        surface: () => this._stats.surface,
+        capture: () => (fmt: "imagedata" | "blob" = "imagedata") => this.capture(fmt),
+      },
+    });
+    this.log = this.obs.makeLogger("rfb:view", { notice: options.notice ?? true });
     this.log.log("init", { url: options.url, fit: options.fit, imageOnly: options.imageOnly });
     this.dpr = options.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1;
     this.minZoom = options.minZoom ?? 0.05;
@@ -263,6 +284,7 @@ export class RemoteFramebufferView {
     this.teardownWorker();
     this.overlay?.destroy();
     this.captureWaiters.clear();
+    this.obs.dispose();
   }
 
   // --- build / teardown ---------------------------------------------------
@@ -285,7 +307,12 @@ export class RemoteFramebufferView {
 
     const offscreen = this.canvas.transferControlToOffscreen();
     this.worker = (this.options.workerFactory ?? createInlineWorker)();
-    this.worker.onmessage = (ev: MessageEvent<WorkerToMain>) => this.onWorkerMessage(ev.data);
+    this.worker.onmessage = (ev: MessageEvent<WorkerToMain>) => {
+      // Forwarded worker log lines (observability) land in the ring buffer + re-console here;
+      // everything else is a normal worker→main message.
+      if (this.obs.ingest(ev.data)) return;
+      this.onWorkerMessage(ev.data);
+    };
 
     const init: MainToWorker = {
       type: "init",
@@ -307,7 +334,9 @@ export class RemoteFramebufferView {
         panX: this.framing.panX,
         panY: this.framing.panY,
         surface: this.options.surface,
-        debug: this.options.debug,
+        // Seed from the observability instance so `?debug=1`/localStorage (and any runtime
+        // rebuild after a setDebug) propagate the current verbosity into the worker.
+        debug: this.obs.debug,
         notice: this.options.notice,
       },
     };
