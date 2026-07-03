@@ -433,7 +433,7 @@ export class RemoteFramebufferView {
       ev.preventDefault();
       const rect = this.canvas.getBoundingClientRect();
       const { bx, by } = this.cssToBacking(ev.clientX - rect.left, ev.clientY - rect.top);
-      const factor = Math.exp(-ev.deltaY * 0.0015); // wheel up (deltaY<0) zooms in
+      const factor = Math.exp(-ev.deltaY * 0.00075); // wheel up (deltaY<0) zooms in (gentle: half the old rate)
       this.applyTransform(zoomAround(this.viewportStateFor(), this.clampZ(this.framing.zoom * factor), bx, by));
       return;
     }

@@ -3,13 +3,17 @@
 // under the chosen framework, and wires every control to a REST call. The Python side only
 // serves this + logs.
 
-import { formatStatsRows, statusLabel, statusTone, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+import { formatStatsRows, statusLabel, statusTone, SURFACE_CHOICES, ZOOM_STEP } from "@habemus-papadum/rfb-ui";
 import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
 import type { FitMode, SurfacePreference } from "@habemus-papadum/rfb-widgets";
 import { api, wsUrl, type BackendCap, type Capabilities, type SceneCap, type StreamState } from "./api";
+import { mountDemoChrome, type DemoChrome } from "./chrome";
 import { clear, el, field } from "./dom";
 import { createStatsOverlay, type StatsOverlay } from "./overlay";
 import { FRAMEWORKS, mountViewer, type Framework, type ViewerHandle } from "./viewer";
+// The shared batteries chrome stylesheet (`.rfb-toolbar` / `.rfb-button` / `.rfb-select` / …) —
+// the SAME CSS the framework wrappers + anywidget use for the on-canvas toolbar.
+import "@habemus-papadum/rfb-ui/rfb.css";
 import "./styles.css";
 
 const FITS: FitMode[] = ["contain", "cover", "fill"];
@@ -20,6 +24,7 @@ let caps: Capabilities;
 let streams: StreamState[] = [];
 let currentName = "default";
 let viewer: ViewerHandle | null = null;
+let chrome: DemoChrome | null = null;
 
 const viewerOpts = {
   framework: "vanilla" as Framework,
@@ -110,9 +115,21 @@ function buildShell(): void {
 async function remountViewer(): Promise<void> {
   viewer?.dispose();
   viewer = null;
+  chrome?.destroy();
+  chrome = null;
   clear(viewportEl);
   const st = current();
-  viewer = await mountViewer(viewerOpts.framework, viewportEl, {
+
+  // Host the batteries chrome: `.rfb-root` (the positioned, warm-themed shell from
+  // styles.css) wraps the `.rfb-viewport` the view mounts into, plus the on-canvas toolbar
+  // overlay (a sibling that auto-hides until the viewport is hovered). The view's canvas
+  // lands inside `.rfb-viewport` under every framework path.
+  const root = el("div", { class: "rfb-root" });
+  const surface = el("div", { class: "rfb-viewport" });
+  root.append(surface);
+  viewportEl.append(root);
+
+  viewer = await mountViewer(viewerOpts.framework, surface, {
     url: wsUrl(st.name),
     fit: viewerOpts.fit,
     surface: viewerOpts.surface,
@@ -120,7 +137,27 @@ async function remountViewer(): Promise<void> {
     debug: viewerOpts.debug,
     onState: onViewerState,
     onStats: onViewerStats,
+    onViewport: (framing) => chrome?.setZoom(framing.zoom), // keep the toolbar's zoom readout live
   });
+
+  // The on-canvas capture / zoom / fit / backend toolbar — the same batteries chrome the
+  // framework wrappers + anywidget present, driving the framework-agnostic ViewerHandle.
+  chrome = mountDemoChrome(
+    root,
+    {
+      capture: () => void capture(),
+      fullscreen: () => void viewEl.requestFullscreen?.(),
+      setSurface: (kind) => {
+        viewerOpts.surface = kind;
+        renderControls(); // keep the sidebar Backend segmented control in sync
+        viewer?.setSurface(kind); // rebuild + reconnect (canvas context type is immutable)
+      },
+      zoomIn: () => viewer?.zoomBy(ZOOM_STEP),
+      zoomOut: () => viewer?.zoomBy(1 / ZOOM_STEP),
+      resetView: () => viewer?.preset("fit"),
+    },
+    viewerOpts.surface,
+  );
 }
 
 async function selectStream(name: string): Promise<void> {
@@ -137,6 +174,7 @@ function onViewerState(state: ConnectionState): void {
 
 function onViewerStats(stats: Stats): void {
   overlay.update(stats);
+  if (stats.surface) chrome?.setSurface(stats.surface); // reflect the resolved backend (post-fallback)
   clear(statsDl);
   for (const [k, v] of formatStatsRows("negotiated", stats)) {
     if (k === "state") continue; // shown by the pill

@@ -87,6 +87,37 @@ test("the stats overlay renders over the canvas and toggles off", async ({ page 
   await expect(overlay).toBeHidden();
 });
 
+test("the batteries chrome toolbar renders its on-canvas control icons", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
+  // The full batteries chrome mounts over the viewport (the same `.rfb-toolbar` the framework
+  // wrappers + anywidget show, styled by the shared rfb-ui CSS). All the icons are present.
+  const toolbar = page.locator(".viewport .rfb-toolbar");
+  await expect(toolbar).toHaveCount(1);
+  await expect(toolbar.locator('button[title="Screenshot"]')).toBeVisible();
+  await expect(toolbar.locator('button[title="Fullscreen"]')).toBeVisible();
+  await expect(toolbar.locator('button[title="Zoom out"]')).toBeVisible();
+  await expect(toolbar.locator('button[title="Zoom in"]')).toBeVisible();
+  await expect(toolbar.locator('button[title="Fit / reset view"]')).toBeVisible();
+  await expect(toolbar.locator("select.rfb-select")).toBeVisible();
+});
+
+test("wheel zoom uses the gentle (halved) factor", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
+  const canvas = page.locator(".viewport canvas");
+  await expect(canvas).toBeVisible();
+  const zoom = page.locator(".rfb-zoom");
+  await expect(zoom).toHaveText("100%"); // fit, no zoom
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("canvas has no bounding box");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -100); // one wheel tick up = zoom in
+  // factor = exp(-deltaY * 0.00075) = exp(0.075) ≈ 1.0779 → 108%. The OLD 0.0015 factor would
+  // have zoomed to exp(0.15) ≈ 1.1618 → 116%, so this pins the halved sensitivity.
+  await expect(zoom).toHaveText("108%");
+});
+
 test("debug toggle lights up the console play-by-play", async ({ page }) => {
   const logs: string[] = [];
   page.on("console", (m) => {
