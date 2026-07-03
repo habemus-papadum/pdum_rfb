@@ -651,7 +651,9 @@ draw calls (`setFrame`+`present` for Mode A; caller `upload`+composite for Mode 
 cost to *submit* a frame; `createMs` = per-frame `VideoFrame` construction (context, kept
 separate); `flushMs` = one final GPU drain (`readPixels` / `onSubmittedWorkDone`) after the
 whole run, i.e. the deferred GPU/raster backlog; `gpuMs` = real render-pass time from a WebGPU
-`timestamp-query` when the adapter exposes it (Mode B WebGPU), else `null`.
+`timestamp-query` when the adapter exposes it — for **both** Mode B (the caller's render pass)
+and Mode A (an opt-in `WebgpuSurface.presentTimed()` around the internal present pass), else
+`null`.
 
 > **⚠️ SwiftShader caveat — read before quoting these.** The only headless GPU available in
 > CI/agent sandboxes is **ANGLE/Dawn SwiftShader, a software rasteriser** (the WebGPU project
@@ -668,8 +670,8 @@ Measured here (Apple Silicon, headless Chromium/SwiftShader, 1280×720, VideoFra
 | Mode A | 2d | 0.036 ms | 0.10 ms | 0.001 ms | ~7.4 ms/frame | — (no timer) |
 | Mode A | webgl | 0.032 ms | 0.10 ms | 0.004 ms | ~5.6 ms/frame | — (no timer) |
 | Mode B | webgl | 0.021 ms | 0.10 ms | 0.006 ms | ~6.2 ms/frame | — (no timer) |
-| Mode A | webgpu | 0.032 ms | 0.10 ms | 0.002 ms | ~9.1 ms/frame | `null` (Mode A pass internal) |
-| Mode B | webgpu | 0.033 ms | 0.10 ms | 0.003 ms | ~9.6 ms/frame | **1.27 ms** (n=30, real query) |
+| Mode A | webgpu | 0.042 ms | 0.10 ms | 0.003 ms | ~9.9 ms/frame | **1.33 ms** (n=30, real query) |
+| Mode B | webgpu | 0.030 ms | 0.10 ms | 0.007 ms | ~9.6 ms/frame | **1.32 ms** (n=30, real query) |
 
 ¹ `flushMs ÷ (warmup+frames)`: a coarse per-frame proxy for the deferred **software-raster**
 backlog — the caveat applies in full; do not read these as GPU cost.
@@ -690,9 +692,14 @@ backlog — the caveat applies in full; do not read these as GPU cost.
   overhead. The unmeasured piece is the **cross-thread `VideoFrame` transfer** (worker→main)
   Mode B requires; it is a handle move, not a pixel copy (§9), and belongs in a follow-up that
   times the transfer end-to-end under a real decode load.
-- **The WebGPU `timestamp-query` path works** (Mode B reported a real 1.27 ms render-pass time
-  even under SwiftShader), so the harness will yield genuine GPU-pass numbers on hardware
-  without code changes — the honest GPU-vs-GPU comparison the "measure first" note asks for.
+- **The WebGPU `timestamp-query` path works for BOTH modes** — Mode B (via the caller's own
+  render pass) and Mode A (via an opt-in, benchmark-only timer surgically added to
+  `WebgpuSurface`: `enableGpuTiming()` + `presentTimed()` wrap the *internal* present render
+  pass in timestamp writes; production `present()` is untouched and pays nothing). Both reported
+  a real ~1.3 ms render-pass time even under SwiftShader, so the harness yields genuine GPU-pass
+  numbers on real hardware with no further changes — the honest GPU-vs-GPU comparison the
+  "measure first" note asks for. (WebGL/Canvas2D have no portable headless GPU timer, so they
+  stay wall-clock only.)
 
-The absolute GPU/raster cost (the drain column) must be re-measured on real hardware; the
-harness makes that a one-command run on any target.
+The absolute GPU/raster cost (the drain and `gpuMs` columns) must be re-measured on real
+hardware; the harness makes that a one-command run on any target.
