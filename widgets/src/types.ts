@@ -23,6 +23,11 @@ export interface WorkerInitOptions {
   fit?: FitMode;
   /** Letterbox fill for `contain` (any CSS color; default `"#000"`). */
   background?: string;
+  /** Initial viewport transform (client-side zoom/pan), so a surface rebuild resumes the
+   *  same framing. Identity (`zoom:1`, `pan:0`) is classic fit. */
+  zoom?: number;
+  panX?: number;
+  panY?: number;
   /** Compositing backend to use for the draw path (default `"2d"`; `"auto"` prefers the
    *  GPU tiers). Falls back to Canvas2D if the requested context is unavailable. */
   surface?: SurfacePreference;
@@ -61,6 +66,9 @@ export type MainToWorker =
     }
   | { type: "capture"; id: number; format: "imagedata" | "blob" }
   | { type: "set_fit"; fit?: FitMode; background?: string }
+  // Viewport transform (client-side crop/zoom/pan). Any subset of fields is applied and the
+  // retained frame is re-presented with the new geometry — no wire/protocol change.
+  | { type: "set_view"; fit?: FitMode; background?: string; zoom?: number; panX?: number; panY?: number }
   | { type: "dispose" };
 
 export interface Stats {

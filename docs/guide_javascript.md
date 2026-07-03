@@ -40,12 +40,17 @@ interface RfbViewOptions {
   maxInflight?: number;              // client-side decode backpressure ceiling
   fit?: "contain" | "cover" | "fill"; // frame-vs-canvas AR handling (default "contain")
   background?: string;               // letterbox fill for "contain" (CSS color; default "#000")
+  zoom?: number;                     // initial zoom on top of the fit (1 = fit)
+  panX?: number; panY?: number;      // initial pan offset (backing device px)
+  gestures?: boolean;                // wheel-zoom / drag-pan / pinch (default false)
+  minZoom?: number; maxZoom?: number; // zoom clamp for gestures + zoomBy (default 0.05 .. 64)
   surface?: "2d" | "webgl" | "webgpu" | "auto"; // compositing backend (default "2d"; "auto" prefers GPU)
   token?: string;                    // auth credential sent in `hello` (e.g. a Google ID token)
   debug?: boolean;                   // verbose client-side console logging (default false)
   onState?: (s: ConnectionState) => void;
   onStats?: (s: Stats) => void;
   onError?: (e: Error) => void;
+  onViewport?: (framing: ViewportFraming) => void; // fires on any fit/zoom/pan change
 }
 ```
 
@@ -59,9 +64,10 @@ the always-available floor, and already fast for a hardware `VideoFrame`; `"webg
 `"webgpu"` upload each frame to a GPU texture and sample it; `"auto"` prefers the GPU tier
 (WebGPU → WebGL2) and falls back to Canvas2D. If a requested GPU context is unavailable the
 view silently falls back, and the **active** backend is reported on `stats.surface`
-(`"2d" | "webgl" | "webgpu"`). All three are pixel-equivalent — same fit geometry, same
-output, verified against a controlled test frame — so the GPU paths exist for client-side
-compositing and (later) zoom/pan, not different pixels. See the
+(`"2d" | "webgl" | "webgpu"`). All three are pixel-equivalent — same present geometry, same
+output, verified against a controlled test frame (including zoom/pan) — so the GPU paths
+exist for client-side compositing, not different pixels. Switch it **live** with
+`view.setSurface(kind)` (see [Viewport](#viewport-crop--zoom--pan)). See the
 [display backend design](proposals/active/client_display_backend.md).
 
 **Which backend pays?** Measured (see the benchmark in that proposal's *Measurements*
@@ -97,6 +103,47 @@ authoritative server-truth metrics that `Stats` surfaces as optional fields:
 `serverDropped`, and the adaptive `targetBitrate` / `targetFps` (undefined until the
 server sends them). For the full loop and a worked stats-HUD example, see
 [Metrics & adaptive quality](metrics_adaptive.md).
+
+### Viewport: crop / zoom / pan
+
+The client frames the stream itself — **the server never zooms** and never learns your
+zoom/pan. One shared encoded stream, N viewers each looking wherever they like, and the
+client does its own coordinate transforms so input events still map back to frame space.
+The transform is a uniform **zoom** on top of the fit plus a backing-pixel **pan**; the
+default (`zoom: 1`, no pan) is exactly the classic fit.
+
+Drive it imperatively:
+
+```ts
+view.setViewport({ zoom: 2, panX: -120 });   // any subset of { fit, zoom, panX, panY, background }
+view.zoomBy(1.25, cssX, cssY);                // multiply zoom, anchored at a CSS point (default: center)
+view.applyPreset("fit" | "cover" | "fill" | "one-to-one");  // named presets over the transform
+view.resetView();                             // back to fit (zoom 1, no pan)
+const { fit, zoom, panX, panY } = view.getViewport();
+```
+
+Everything re-presents the **retained** last frame immediately (present is decoupled from
+decode), so zoom/pan stay smooth even on a sparse stream, with no wire traffic. `onViewport`
+fires on every change so chrome can show the current zoom. Events remain correct under any
+zoom/pan — the same `viewport.ts` geometry that draws the frame inverts a pointer back to
+frame pixels (`inside` is false once you pan a click off the frame).
+
+**Gestures** (`gestures: true`, off by default): the **wheel** zooms toward the cursor, a
+**middle- or right-button drag** pans, and a **two-finger pinch** zooms/pans. Left-button
+drag, clicks, and hover still pass through to the publisher, so app interaction is
+unaffected; only the pan/zoom gestures are consumed. The batteries `<RemoteFramebuffer>`
+turns gestures on and adds zoom `+` / `−` / fit buttons.
+
+### Switching the display backend live
+
+`view.setSurface("2d" | "webgl" | "webgpu" | "auto")` changes the draw path on a running
+view. **A canvas's context type is immutable** — a canvas that yielded a `2d` context can
+never yield `webgl2` — so this cannot mutate the existing canvas: it **tears down and
+rebuilds** the view/worker with the new backend and **reconnects the stream** (a brief
+reconnect flash; the current fit/zoom/pan carry over). It therefore only works when the view
+owns its canvas — i.e. you constructed it with a **container** element (as the batteries
+wrappers do), not a caller-provided `<canvas>` (whose context is already bound). The
+batteries chrome exposes this as a backend dropdown next to `capture PNG`.
 
 ### Frame-as-texture (Mode B): composite the stream into your own scene
 
@@ -138,9 +185,11 @@ streaming and closes the socket with code `4401` if it's rejected (see the
 constructing the view; for short-lived tokens you currently reconnect with a fresh
 one (there is no built-in refresh/reconnect yet).
 
-Methods/getters: `view.state`, `view.stats`, `view.lastCaptureSeq`,
+Methods/getters: `view.state`, `view.stats`, `view.surface`, `view.lastCaptureSeq`,
 `view.capture("imagedata" | "blob")` (a debug/test hook that reads back the
-current canvas pixels), and `view.dispose()`.
+current canvas pixels); the viewport controls `view.setFit`, `view.setViewport`,
+`view.zoomBy`, `view.applyPreset`, `view.resetView`, `view.getViewport`, and
+`view.setSurface`; and `view.dispose()`.
 
 ## Framework integration
 
@@ -152,8 +201,9 @@ idiomatic wrappers for the big three. Each ships **two tiers**:
   CSS — you render and style everything.
 - **Tier 2 — batteries.** A `<RemoteFramebuffer>` component with a status pill, a compact
   latency badge, a toggleable stats HUD, an error banner, and a toolbar
-  (screenshot / fullscreen / transport toggle / HUD toggle). Opt-in stylesheet, fully
-  themeable (see [Theming](#theming-the-batteries-component)).
+  (screenshot / fullscreen / transport toggle / HUD toggle, a **display-backend selector**,
+  and **zoom `+` / `−` / fit** controls; crop/zoom/pan gestures are on). Opt-in stylesheet,
+  fully themeable (see [Theming](#theming-the-batteries-component)).
 
 | Framework | Package | Tier 1 | Tier 2 |
 | --- | --- | --- | --- |

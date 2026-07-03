@@ -15,6 +15,11 @@ export class Renderer implements FrameSink {
   fit: FitMode = "contain";
   /** Letterbox fill for `contain` (any CSS color; default black). */
   background = "#000";
+  /** Viewport transform layered on the fit (identity = classic fit). Driven by gestures /
+   *  the batteries chrome via `set_view`; feeds both present() and event mapping. */
+  zoom = 1;
+  panX = 0;
+  panY = 0;
   /** Current decoded frame size (device px), updated on each draw. */
   frameW = 0;
   frameH = 0;
@@ -52,7 +57,8 @@ export class Renderer implements FrameSink {
     this.present();
   }
 
-  /** The geometry state for the *current* frame size (used by the event path too). */
+  /** The geometry state for the *current* frame size (used by the event path too). Carries
+   *  the viewport transform so present() and backingToFrame() agree under zoom/pan. */
   viewportState(): ViewportState {
     return {
       frameW: this.frameW,
@@ -60,7 +66,21 @@ export class Renderer implements FrameSink {
       backingW: this.canvas.width,
       backingH: this.canvas.height,
       fit: this.fit,
+      zoom: this.zoom,
+      panX: this.panX,
+      panY: this.panY,
     };
+  }
+
+  /** Apply any subset of the viewport framing (fit / background / zoom / pan) and re-present
+   *  the retained frame immediately — present-on-demand, decoupled from decode cadence. */
+  setView(v: { fit?: FitMode; background?: string; zoom?: number; panX?: number; panY?: number }): void {
+    if (v.fit) this.fit = v.fit;
+    if (v.background !== undefined) this.background = v.background;
+    if (v.zoom !== undefined) this.zoom = v.zoom;
+    if (v.panX !== undefined) this.panX = v.panX;
+    if (v.panY !== undefined) this.panY = v.panY;
+    this.redraw();
   }
 
   /** Draw a decoded frame of `frameW x frameH` device px, letterboxed/cropped per `fit`.

@@ -3,9 +3,9 @@
 // under the chosen framework, and wires every control to a REST call. The Python side only
 // serves this + logs.
 
-import { formatStatsRows, statusLabel, statusTone } from "@habemus-papadum/rfb-ui";
+import { formatStatsRows, statusLabel, statusTone, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
 import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
-import type { FitMode } from "@habemus-papadum/rfb-widgets";
+import type { FitMode, SurfacePreference } from "@habemus-papadum/rfb-widgets";
 import { api, wsUrl, type BackendCap, type Capabilities, type SceneCap, type StreamState } from "./api";
 import { clear, el, field } from "./dom";
 import { createStatsOverlay, type StatsOverlay } from "./overlay";
@@ -24,6 +24,9 @@ let viewer: ViewerHandle | null = null;
 const viewerOpts = {
   framework: "vanilla" as Framework,
   fit: "contain" as FitMode,
+  // Display backend (client-side draw path). Switched live via the core view's setSurface —
+  // a canvas context type is immutable, so it rebuilds the view + reconnects the stream.
+  surface: "2d" as SurfacePreference,
   debug:
     new URLSearchParams(location.search).get("debug") === "1" || localStorage.getItem("rfb-debug") === "1",
   // Stats overlay defaults ON; a stored "0" (user toggled off before) opts out.
@@ -112,6 +115,8 @@ async function remountViewer(): Promise<void> {
   viewer = await mountViewer(viewerOpts.framework, viewportEl, {
     url: wsUrl(st.name),
     fit: viewerOpts.fit,
+    surface: viewerOpts.surface,
+    gestures: true, // wheel-zoom, middle/right-drag pan, pinch
     debug: viewerOpts.debug,
     onState: onViewerState,
     onStats: onViewerStats,
@@ -332,6 +337,23 @@ function viewerGroup(): HTMLElement {
       viewer?.setFit(viewerOpts.fit); // live, no reconnect
     },
   );
+  // Backend switch — the batteries "switch display methodology" control. A canvas context
+  // type is immutable, so setSurface rebuilds the view + reconnects (a brief flash).
+  const backendSeg = segmented(
+    SURFACE_CHOICES.map((c) => ({ id: c.value, label: c.label, title: c.title })),
+    viewerOpts.surface,
+    (v) => {
+      viewerOpts.surface = v as SurfacePreference;
+      renderControls();
+      viewer?.setSurface(viewerOpts.surface); // rebuild + reconnect
+    },
+  );
+  const zoomRow = el("div", { class: "btn-row" }, [
+    el("button", { type: "button", text: "－", title: "Zoom out", onclick: () => viewer?.zoomBy(1 / 1.25) }),
+    el("button", { type: "button", text: "1:1", title: "Native pixels", onclick: () => viewer?.preset("one-to-one") }),
+    el("button", { type: "button", text: "fit", title: "Reset to fit", onclick: () => viewer?.preset("fit") }),
+    el("button", { type: "button", text: "＋", title: "Zoom in", onclick: () => viewer?.zoomBy(1.25) }),
+  ]);
   const debugToggle = el("label", { class: "toggle" }, [
     (() => {
       const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
@@ -364,6 +386,8 @@ function viewerGroup(): HTMLElement {
     el("div", { class: "group__title", text: "Viewer" }),
     field("Framework", frameworkSeg, "Which wrapper renders the viewer, live-swapped. Vanilla = the core view; React = the same view inside a React component."),
     field("Fit", fitSeg, "How the frame maps into the viewport when aspect ratios differ."),
+    field("Backend", backendSeg, "Client draw path (Canvas2D / WebGL2 / WebGPU / auto). A canvas context type is immutable, so switching rebuilds the view + reconnects the stream."),
+    field("Zoom", zoomRow, "Client-side crop/zoom/pan (no server render). Also: wheel to zoom, middle/right-drag to pan, pinch on touch."),
     field("Debug", debugToggle, "Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode). Errors surface either way."),
     field("Overlay", overlayToggle, "Toggle the on-canvas stats overlay (fps · rtt · measured bitrate + sparklines), pinned to the viewport's bottom-left corner."),
     el("div", { class: "btn-row" }, [

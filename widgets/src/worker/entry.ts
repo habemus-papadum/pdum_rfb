@@ -304,6 +304,10 @@ async function buildRenderer(msg: Extract<MainToWorker, { type: "init" }>): Prom
     }
     if (initOptions.fit) renderer.fit = initOptions.fit;
     if (initOptions.background) renderer.background = initOptions.background;
+    // Resume the caller's zoom/pan (set on init so a setSurface rebuild keeps the framing).
+    if (typeof initOptions.zoom === "number") renderer.zoom = initOptions.zoom;
+    if (typeof initOptions.panX === "number") renderer.panX = initOptions.panX;
+    if (typeof initOptions.panY === "number") renderer.panY = initOptions.panY;
     renderer.resize(msg.backingWidth ?? 0, msg.backingHeight ?? 0);
   }
   if (disposed) {
@@ -372,6 +376,11 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         if (msg.background !== undefined) renderer.background = msg.background;
         renderer.redraw(); // apply the new fit/background to the current frame immediately
       }
+      break;
+    case "set_view":
+      // Viewport transform (crop/zoom/pan) — re-present the retained frame with the new
+      // geometry. Event mapping follows automatically (mapEvent reads renderer.viewportState).
+      renderer?.setView(msg);
       break;
     case "resize":
       dbg.notice("resize", { backing: [msg.backingWidth, msg.backingHeight], css: [msg.cssWidth, msg.cssHeight] });

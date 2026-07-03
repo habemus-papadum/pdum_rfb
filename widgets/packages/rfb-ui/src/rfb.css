@@ -134,6 +134,45 @@
   color: var(--rfb-accent);
 }
 
+/* ---- backend selector + zoom readout (viewport controls) ---- */
+.rfb-select {
+  appearance: none;
+  height: 26px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--rfb-fg);
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.rfb-select:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.rfb-select option {
+  color: #000;
+}
+.rfb-zoom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--rfb-fg);
+  opacity: 0.85;
+  user-select: none;
+}
+/* A thin divider between control clusters in the toolbar. */
+.rfb-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
 /* ---- stats HUD overlay ---- */
 .rfb-hud {
   position: absolute;

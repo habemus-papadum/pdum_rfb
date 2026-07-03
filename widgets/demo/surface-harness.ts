@@ -14,6 +14,10 @@ const [frameW, frameH] = (params.get("frame") ?? "64x64").split("x").map(Number)
 const [backingW, backingH] = (params.get("backing") ?? `${frameW}x${frameH}`).split("x").map(Number);
 const fit = (params.get("fit") as FitMode | null) ?? "fill";
 const background = params.get("bg") ?? "#123456";
+// Optional viewport transform (roadmap item 1): zoom about the canvas center + backing-px pan.
+const zoom = params.get("zoom") ? Number(params.get("zoom")) : 1;
+const panX = params.get("panx") ? Number(params.get("panx")) : 0;
+const panY = params.get("pany") ? Number(params.get("pany")) : 0;
 
 // A deliberately asymmetric source: TL red, TR green, BL blue, BR white. White lives in
 // exactly one corner, so ANY horizontal/vertical flip or transpose is detectable.
@@ -47,7 +51,7 @@ async function run(): Promise<void> {
   const frame = await makeFrame();
   surface.setFrame(frame, frameW, frameH);
   (frame as { close?: () => void }).close?.();
-  const geom = presentGeometry({ frameW, frameH, backingW, backingH, fit });
+  const geom = presentGeometry({ frameW, frameH, backingW, backingH, fit, zoom, panX, panY });
   surface.present(geom, background);
   const img = await surface.readPixels();
 

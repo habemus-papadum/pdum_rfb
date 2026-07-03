@@ -2,8 +2,8 @@
 // has no framework). Mirrors the tier-2 <RemoteFramebuffer> of the framework wrappers,
 // reusing the shared rfb-ui formatters and the rfb.css class contract.
 
-import { formatBadge, formatStatsRows, statusLabel } from "@habemus-papadum/rfb-ui";
-import type { ConnectionState, Stats } from "../src/index";
+import { formatBadge, formatStatsRows, formatZoom, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+import type { ConnectionState, Stats, SurfacePreference, ViewportFraming } from "../src/index";
 
 /** The subset of the anywidget model the widget uses. */
 export interface AnyModel {
@@ -19,12 +19,19 @@ export interface ChromeControls {
   toggleTransport: () => void;
   fullscreen: () => void;
   reconnect: () => void;
+  /** Switch the display backend live (rebuilds the view + reconnects). */
+  setSurface: (kind: SurfacePreference) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  /** Reset to fit (zoom 1, no pan). */
+  resetView: () => void;
 }
 
 export interface ChromeHandle {
   setState(s: ConnectionState): void;
   setStats(s: Stats): void;
   setError(e: Error | null): void;
+  setViewport(framing: ViewportFraming): void;
   toggleHud(): void;
   refresh(): void;
   destroy(): void;
@@ -64,13 +71,36 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
   loading.appendChild(Object.assign(document.createElement("div"), { className: "rfb-spinner" }));
 
   const hudBtn = button("📊", "Toggle stats", () => toggleHud());
+
+  // Backend selector (2D / WebGL / WebGPU / Auto) — switching rebuilds the view (a canvas
+  // context type is immutable) and reconnects the stream.
+  const backendSel = document.createElement("select");
+  backendSel.className = "rfb-select";
+  backendSel.title = "Display backend (rebuilds + reconnects)";
+  for (const c of SURFACE_CHOICES) {
+    backendSel.append(Object.assign(document.createElement("option"), { value: c.value, textContent: c.label, title: c.title }));
+  }
+  backendSel.addEventListener("change", () => controls.setSurface(backendSel.value as SurfacePreference));
+
+  // Zoom controls: out / readout / in / fit.
+  const zoomLabel = document.createElement("span");
+  zoomLabel.className = "rfb-zoom";
+  zoomLabel.textContent = formatZoom(1);
+
   const toolbar = document.createElement("div");
   toolbar.className = "rfb-toolbar";
+  const sep = () => Object.assign(document.createElement("div"), { className: "rfb-toolbar-sep" });
   toolbar.append(
     hudBtn,
     button("⇄", "Toggle transport", () => controls.toggleTransport()),
     button("📷", "Screenshot", screenshot),
     button("⛶", "Fullscreen", () => controls.fullscreen()),
+    sep(),
+    backendSel,
+    button("−", "Zoom out", () => controls.zoomOut()),
+    zoomLabel,
+    button("+", "Zoom in", () => controls.zoomIn()),
+    button("⤢", "Fit / reset view", () => controls.resetView()),
   );
 
   el.append(status, badge, toolbar, hud, banner, loading);
@@ -126,8 +156,13 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
         badge.style.display = "";
         badge.textContent = formatBadge(s);
       }
+      // Reflect the resolved backend (after any fallback) in the selector.
+      if (s.surface && backendSel.value !== s.surface) backendSel.value = s.surface;
       if (s.framesDisplayed > 0) loading.style.display = "none";
       renderHud();
+    },
+    setViewport(framing) {
+      zoomLabel.textContent = formatZoom(framing.zoom);
     },
     setError(e) {
       if (e) {

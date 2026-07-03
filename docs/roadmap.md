@@ -57,6 +57,20 @@ leaving the rest of the demo shell as is — the demo becomes the place we exerc
 chrome. See the **[display backend proposal](proposals/active/client_display_backend.md)**
 (§9) for how the viewport and backend layers meet.
 
+> **Status: shipped.** `viewport.ts` grew the general zoom/pan transform — `frameDestRect`
+> scales/pans, `presentGeometry` returns the zoom/pan-aware `{src,dst}` the display backend
+> consumes, and `backingToFrame` is its exact inverse so events stay correct under any
+> zoom/pan — plus pure preset/gesture helpers (`presetFraming` for `fit`/`cover`/`fill`/
+> `one-to-one`, `zoomAround`, `panByBacking`, `centerOnFrame`, `clampZoom`).
+> `RemoteFramebufferView` gained the viewport API (`setViewport` / `zoomBy` / `applyPreset` /
+> `resetView` / `getViewport`), opt-in gestures (`gestures: true` — wheel-zoom, middle/
+> right-drag pan, pinch, re-presenting the retained frame with no wire traffic), and a
+> **live backend switch** (`setSurface` — rebuilds the view, since a canvas context type is
+> immutable). The **batteries chrome** (anywidget + React/Svelte/Solid, shared via `rfb-ui`)
+> adds a backend selector + zoom controls next to `capture PNG`, and the `pdum-rfb demo`
+> viewer exposes both. Verified: 24 viewport unit tests + zoom/pan present-correctness and
+> live-switch e2e across all three backends (2d/webgl/webgpu). See the proposal §9/§12.
+
 ## 2. Resolution as an adaptive lever
 
 _benefit: medium · difficulty: moderate_

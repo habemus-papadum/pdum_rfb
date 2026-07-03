@@ -3,7 +3,13 @@
 // + chrome traits off the model, and reacts to trait changes. Built by
 // vite.anywidget.config.ts into ../src/pdum/rfb/static/widget.js (loaded as anywidget `_esm`).
 
-import { MainThreadPresentView, RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
+import {
+  MainThreadPresentView,
+  RemoteFramebufferView,
+  type ConnectionState,
+  type Stats,
+  type SurfacePreference,
+} from "../src/index";
 import { type AnyModel, mountChrome } from "./chrome";
 
 // Either present controller — both expose the capture/dispose surface the chrome uses.
@@ -56,6 +62,22 @@ export default {
       },
       fullscreen: () => void el.requestFullscreen?.(),
       reconnect: () => build(),
+      // Viewport / backend controls (client-side; drive the view directly, no model trait).
+      // These are Mode A (RemoteFramebufferView) features; the main-thread present path
+      // (MainThreadPresentView, the default for reparenting hosts like marimo) doesn't support
+      // live backend-switch or zoom/pan, so they no-op there — see build() and docs/notebook.md.
+      setSurface: (kind: SurfacePreference) => {
+        if (view instanceof RemoteFramebufferView) view.setSurface(kind);
+      },
+      zoomIn: () => {
+        if (view instanceof RemoteFramebufferView) view.zoomBy(1.25);
+      },
+      zoomOut: () => {
+        if (view instanceof RemoteFramebufferView) view.zoomBy(1 / 1.25);
+      },
+      resetView: () => {
+        if (view instanceof RemoteFramebufferView) view.resetView();
+      },
     };
     const chrome = mountChrome(el, model, controls);
 
@@ -108,7 +130,18 @@ export default {
           chrome.setError(e);
         },
       };
-      view = mainThread ? new MainThreadPresentView(surface, opts) : new RemoteFramebufferView(surface, opts);
+      // The main-thread present path (reparent-safe, for marimo) is a limited presenter; the
+      // viewport/backend chrome features (surface switch, gestures, zoom/pan) are Mode A only,
+      // so pass them solely to RemoteFramebufferView (which is where onViewport also gets its
+      // proper ViewportFraming type).
+      view = mainThread
+        ? new MainThreadPresentView(surface, opts)
+        : new RemoteFramebufferView(surface, {
+            ...opts,
+            surface: model.get("surface") || undefined,
+            gestures: true, // batteries chrome: wheel-zoom, drag-pan, pinch
+            onViewport: (framing) => chrome.setViewport(framing),
+          });
       chrome.setError(null);
     }
 
