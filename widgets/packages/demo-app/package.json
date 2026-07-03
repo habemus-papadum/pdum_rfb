@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-demo-app",
-  "version": "0.3.0",
+  "version": "0.3.0+dev",
   "description": "The prebuilt web app served by `pdum-rfb demo` (not published; shipped as Python package data).",
   "private": true,
   "type": "module",

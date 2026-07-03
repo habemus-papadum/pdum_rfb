@@ -46,7 +46,7 @@ from .types import (
     RawFrame,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.0+dev"
 
 __all__ = [
     "__version__",
