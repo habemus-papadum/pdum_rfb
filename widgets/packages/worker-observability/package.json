@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/worker-observability",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "description": "Framework-agnostic bridge that makes a Web Worker's logs + state observable from the main thread (and thus from agentic browser tooling). PRIVATE / experimental.",
   "private": true,
   "type": "module",

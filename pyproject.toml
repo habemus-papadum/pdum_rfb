@@ -1,6 +1,6 @@
 [project]
 name = "habemus-papadum-rfb"
-version = "0.2.1+dev"
+version = "0.3.0"
 description = "Remote Frame Buffer"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -70,7 +70,7 @@ gpu-cuda12 = [
 # GPU-frame path. Markered to Linux/x86_64 so it is a no-op elsewhere (runtime probe:
 # nvenc_gpu_pdum_available()). See docs/nvenc_sdk_evaluation.md.
 gpu-nvenc-sdk = [
-    "habemus-papadum-nvenc~=0.2.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "habemus-papadum-nvenc~=0.3.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
 cli = [
@@ -102,7 +102,7 @@ asgi = [
 # frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
 # group). See docs/mlx_metal_videotoolbox_encoder_design.md.
 mac-vt = [
-    "habemus-papadum-vtenc~=0.2.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "habemus-papadum-vtenc~=0.3.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 # `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
 # (built under src/pdum/rfb/static/demo/ via `pnpm -C widgets build:demo`; a git-ignored
