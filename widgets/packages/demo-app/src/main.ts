@@ -3,7 +3,14 @@
 // under the chosen framework, and wires every control to a REST call. The Python side only
 // serves this + logs.
 
-import { formatStatsRows, statusLabel, statusTone, SURFACE_CHOICES, ZOOM_STEP } from "@habemus-papadum/rfb-ui";
+import {
+  formatStatsRows,
+  recordingFilename,
+  statusLabel,
+  statusTone,
+  SURFACE_CHOICES,
+  ZOOM_STEP,
+} from "@habemus-papadum/rfb-ui";
 import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
 import type { FitMode, SurfacePreference } from "@habemus-papadum/rfb-widgets";
 import { api, wsUrl, type BackendCap, type Capabilities, type SceneCap, type StreamState } from "./api";
@@ -430,6 +437,12 @@ function viewerGroup(): HTMLElement {
     field("Overlay", overlayToggle, "Toggle the on-canvas stats overlay (fps · rtt · measured bitrate + sparklines), pinned to the viewport's bottom-left corner."),
     el("div", { class: "btn-row" }, [
       el("button", { type: "button", text: "capture PNG", onclick: () => void capture() }),
+      el("button", {
+        type: "button",
+        text: recording ? "◼ stop rec" : "● record",
+        title: "Record what you see (client-side, canvas.captureStream → MediaRecorder)",
+        onclick: () => void toggleRecord(),
+      }),
       el("button", { type: "button", text: "fullscreen", onclick: () => void viewEl.requestFullscreen?.() }),
       el("button", { type: "button", text: "reconnect", onclick: () => void remountViewer() }),
     ]),
@@ -509,6 +522,39 @@ async function capture(): Promise<void> {
   const a = el("a", { href: url, download: `${currentName}.png` }) as HTMLAnchorElement;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Client-side recording of what the viewer sees (canvas.captureStream → MediaRecorder). This
+// demo streams over the Mode-A OffscreenCanvas path, whose canvas is transferred to the decode
+// worker — so there's no main-thread surface to capture and `canRecord()` is false. The button
+// then explains where recording lives (the notebook/anywidget main-thread present path). See
+// docs/guide_javascript.md (Recording).
+let recording = false;
+async function toggleRecord(): Promise<void> {
+  if (!viewer) return;
+  if (!viewer.canRecord()) {
+    showError(
+      "Client-side recording needs the main-thread present path (the notebook/anywidget default). " +
+        "This demo uses the OffscreenCanvas transport, whose canvas lives in the decode worker.",
+    );
+    return;
+  }
+  try {
+    if (viewer.isRecording()) {
+      const blob = await viewer.stopRecording();
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: recordingFilename(blob.type, currentName) }) as HTMLAnchorElement;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      recording = false;
+    } else {
+      viewer.startRecording();
+      recording = true;
+    }
+    renderControls();
+  } catch (e) {
+    showError(String(e));
+  }
 }
 
 function updateSession(): void {

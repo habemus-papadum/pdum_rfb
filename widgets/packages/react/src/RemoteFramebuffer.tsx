@@ -1,6 +1,14 @@
 import { type CSSProperties, type ReactNode, useCallback, useRef, useState } from "react";
 import type { ConnectionState, Stats, SurfaceKind, SurfacePreference } from "@habemus-papadum/rfb-widgets";
-import { formatBadge, formatStatsRows, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+import {
+  formatBadge,
+  formatStatsRows,
+  recordGlyph,
+  recordingFilename,
+  recordTitle,
+  statusLabel,
+  SURFACE_CHOICES,
+} from "@habemus-papadum/rfb-ui";
 import { type UseRfbOptions, useRemoteFramebuffer, useRemoteFramebufferStats } from "./useRemoteFramebuffer";
 
 /** Values handed to every render-prop so custom chrome can drive the view. */
@@ -24,6 +32,12 @@ export interface ChromeContext {
   zoomOut: () => void;
   /** Reset to fit (zoom 1, no pan). */
   resetView: () => void;
+  /** Whether client-side recording is available (false on the Mode-A OffscreenCanvas path). */
+  canRecord: boolean;
+  /** True while a recording is in progress. */
+  isRecording: boolean;
+  /** Toggle recording; downloads the WebM/MP4 on stop. */
+  toggleRecording: () => void;
 }
 
 export interface RemoteFramebufferProps extends UseRfbOptions {
@@ -80,6 +94,7 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): ReactNode {
   const rootRef = useRef<HTMLDivElement>(null);
   const [imageOnly, setImageOnly] = useState<boolean>(!!rfbOptions.imageOnly);
   const [hudOpen, setHudOpen] = useState<boolean>(hud);
+  const [recording, setRecording] = useState<boolean>(false);
 
   const { containerRef, state, error, capture, reconnect, view } = useRemoteFramebuffer({
     ...rfbOptions,
@@ -100,6 +115,19 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): ReactNode {
   const zoomOut = useCallback(() => view?.zoomBy(1 / 1.25), [view]);
   const resetView = useCallback(() => view?.resetView(), [view]);
 
+  const canRecord = !!view?.canRecord;
+  const toggleRecording = useCallback(async () => {
+    if (!view || !view.canRecord) return;
+    if (view.isRecording) {
+      const blob = await view.stopRecording();
+      downloadBlob(blob, recordingFilename(blob.type));
+      setRecording(false);
+    } else {
+      view.startRecording();
+      setRecording(true);
+    }
+  }, [view]);
+
   const ctx: ChromeContext = {
     state,
     stats,
@@ -117,6 +145,9 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): ReactNode {
     zoomIn,
     zoomOut,
     resetView,
+    canRecord,
+    isRecording: recording,
+    toggleRecording,
   };
 
   const rootClass = className ? `rfb-root ${className}` : "rfb-root";
@@ -154,6 +185,16 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): ReactNode {
             </button>
             <button type="button" className="rfb-button" title="Screenshot" onClick={screenshot}>
               📷
+            </button>
+            <button
+              type="button"
+              className="rfb-button"
+              data-active={recording ? "true" : "false"}
+              disabled={!canRecord}
+              title={recordTitle(canRecord, recording)}
+              onClick={toggleRecording}
+            >
+              {recordGlyph(recording)}
             </button>
             <button type="button" className="rfb-button" title="Fullscreen" onClick={fullscreen}>
               ⛶

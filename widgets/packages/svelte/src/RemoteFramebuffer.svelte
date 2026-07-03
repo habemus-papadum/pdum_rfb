@@ -1,7 +1,15 @@
 <script lang="ts">
   import { type Snippet, untrack } from "svelte";
   import type { SurfacePreference } from "@habemus-papadum/rfb-widgets";
-  import { formatBadge, formatStatsRows, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+  import {
+    formatBadge,
+    formatStatsRows,
+    recordGlyph,
+    recordingFilename,
+    recordTitle,
+    statusLabel,
+    SURFACE_CHOICES,
+  } from "@habemus-papadum/rfb-ui";
   import { createRemoteFramebuffer, type RfbSvelteOptions } from "./createRemoteFramebuffer";
 
   type Props = RfbSvelteOptions & {
@@ -27,6 +35,7 @@
   // action's params below), so untrack to make that intent explicit.
   let imageOnly = $state(untrack(() => !!options.imageOnly));
   let hudOpen = $state(untrack(() => hud));
+  let recording = $state(false);
   let rootEl = $state<HTMLDivElement>();
 
   // Batteries default: enable crop/zoom/pan gestures (the toolbar has zoom controls too).
@@ -55,6 +64,31 @@
   const zoomIn = () => fb.view()?.zoomBy(1.25);
   const zoomOut = () => fb.view()?.zoomBy(1 / 1.25);
   const resetView = () => fb.view()?.resetView();
+
+  // Recording is a main-thread-canvas feature; this batteries path uses the OffscreenCanvas
+  // view (Mode A), so canRecord is false and the toggle disables. Re-evaluated on state change
+  // (the view exists by then). See docs/guide_javascript.md (Recording).
+  const canRecord = $derived.by(() => {
+    void $connState;
+    return !!fb.view()?.canRecord;
+  });
+  async function toggleRecording(): Promise<void> {
+    const v = fb.view();
+    if (!v || !v.canRecord) return;
+    if (v.isRecording) {
+      const blob = await v.stopRecording();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = recordingFilename(blob.type);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      recording = false;
+    } else {
+      v.startRecording();
+      recording = true;
+    }
+  }
 </script>
 
 <div bind:this={rootEl} class={`rfb-root ${className}`} data-state={$connState}>
@@ -73,6 +107,14 @@
       <button type="button" class="rfb-button" data-active={hudOpen} title="Toggle stats" onclick={() => (hudOpen = !hudOpen)}>📊</button>
       <button type="button" class="rfb-button" data-active={imageOnly} title="Toggle transport" onclick={() => (imageOnly = !imageOnly)}>⇄</button>
       <button type="button" class="rfb-button" title="Screenshot" onclick={screenshot}>📷</button>
+      <button
+        type="button"
+        class="rfb-button"
+        data-active={recording}
+        disabled={!canRecord}
+        title={recordTitle(canRecord, recording)}
+        onclick={toggleRecording}
+      >{recordGlyph(recording)}</button>
       <button type="button" class="rfb-button" title="Fullscreen" onclick={fullscreen}>⛶</button>
       <div class="rfb-toolbar-sep"></div>
       <select

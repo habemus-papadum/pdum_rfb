@@ -18,6 +18,16 @@ export type { FrameTextureFeedOptions } from "./FrameTextureFeed";
 export { WebglFrameTexture } from "./webglFrameTexture";
 export { WebgpuFrameTexture } from "./webgpuFrameTexture";
 
+// Client-side recording of what the viewer sees (canvas.captureStream -> MediaRecorder). Only
+// usable on a view that owns a main-thread canvas (MainThreadPresentView); Mode A throws.
+export {
+  startCanvasRecording,
+  recordingSupported,
+  pickRecordingMimeType,
+  RECORDING_UNSUPPORTED_MESSAGE,
+} from "./recording";
+export type { RecordingOptions, CanvasRecordingSession } from "./recording";
+
 export { unpackBinaryMessage, packBinaryMessage } from "./protocol";
 export type {
   BinaryHeader,

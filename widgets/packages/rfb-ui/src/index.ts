@@ -79,6 +79,26 @@ export function formatZoom(zoom: number): string {
   return `${Math.round(zoom * 100)}%`;
 }
 
+// --- recording (batteries tier) --------------------------------------------
+
+/** Filename (with the right extension) for a saved client-side recording, derived from the
+ *  MediaRecorder's negotiated MIME type (mp4 for Safari, else webm). */
+export function recordingFilename(mimeType?: string, base = "framebuffer"): string {
+  const ext = mimeType && /mp4/i.test(mimeType) ? "mp4" : "webm";
+  return `${base}.${ext}`;
+}
+
+/** Title/tooltip for the batteries record toggle, given the current capability + state. */
+export function recordTitle(canRecord: boolean, isRecording: boolean): string {
+  if (!canRecord) return "Recording needs the main-thread present path (this view's canvas is in the worker)";
+  return isRecording ? "Stop recording" : "Record what you see (video)";
+}
+
+/** Glyph for the record toggle: ⏺ idle, ⏹ while recording. */
+export function recordGlyph(isRecording: boolean): string {
+  return isRecording ? "⏹" : "⏺";
+}
+
 /** Compact always-on badge: transport · fps · rtt (blanks omitted until the server pushes them). */
 export function formatBadge(s: Stats): string {
   const label = s.transport === "webcodecs" ? "H.264" : s.transport === "image" ? "IMG" : "—";

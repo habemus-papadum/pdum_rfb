@@ -2,7 +2,16 @@
 // has no framework). Mirrors the tier-2 <RemoteFramebuffer> of the framework wrappers,
 // reusing the shared rfb-ui formatters and the rfb.css class contract.
 
-import { formatBadge, formatStatsRows, formatZoom, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+import {
+  formatBadge,
+  formatStatsRows,
+  formatZoom,
+  recordGlyph,
+  recordingFilename,
+  recordTitle,
+  statusLabel,
+  SURFACE_CHOICES,
+} from "@habemus-papadum/rfb-ui";
 import type { ConnectionState, Stats, SurfacePreference, ViewportFraming } from "../src/index";
 
 /** The subset of the anywidget model the widget uses. */
@@ -25,6 +34,12 @@ export interface ChromeControls {
   zoomOut: () => void;
   /** Reset to fit (zoom 1, no pan). */
   resetView: () => void;
+  // Client-side recording of what the viewer sees. `canRecord` is false on the Mode-A
+  // OffscreenCanvas path (no main-thread canvas); the record toggle disables itself there.
+  canRecord: () => boolean;
+  isRecording: () => boolean;
+  startRecording: () => void;
+  stopRecording: () => Promise<Blob>;
 }
 
 export interface ChromeHandle {
@@ -72,6 +87,11 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
 
   const hudBtn = button("📊", "Toggle stats", () => toggleHud());
 
+  // Record toggle (sibling to the screenshot button): captureStream() the display canvas into a
+  // MediaRecorder and download the WebM/MP4 on stop. Disabled on the Mode-A path (no main-thread
+  // canvas to capture); the main-thread present path (anywidget default) records for real.
+  const recordBtn = button(recordGlyph(false), recordTitle(true, false), () => void toggleRecord());
+
   // Backend selector (2D / WebGL / WebGPU / Auto) — switching rebuilds the view (a canvas
   // context type is immutable) and reconnects the stream.
   const backendSel = document.createElement("select");
@@ -94,6 +114,7 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
     hudBtn,
     button("⇄", "Toggle transport", () => controls.toggleTransport()),
     button("📷", "Screenshot", screenshot),
+    recordBtn,
     button("⛶", "Fullscreen", () => controls.fullscreen()),
     sep(),
     backendSel,
@@ -120,6 +141,32 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
     });
   }
 
+  async function toggleRecord(): Promise<void> {
+    if (!controls.canRecord()) return;
+    if (controls.isRecording()) {
+      const blob = await controls.stopRecording();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = recordingFilename(blob.type);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } else {
+      controls.startRecording();
+    }
+    syncRecord();
+  }
+
+  /** Reflect the current record capability + state on the toggle (disabled on Mode A). */
+  function syncRecord(): void {
+    const can = controls.canRecord();
+    const on = controls.isRecording();
+    recordBtn.disabled = !can;
+    recordBtn.textContent = recordGlyph(on);
+    recordBtn.title = recordTitle(can, on);
+    recordBtn.dataset.active = String(on);
+  }
+
   function toggleHud(): void {
     hudOpen = !hudOpen;
     renderHud();
@@ -140,6 +187,7 @@ export function mountChrome(el: HTMLElement, model: AnyModel, controls: ChromeCo
     toolbar.style.display = model.get("show_toolbar") !== false ? "" : "none";
     if (model.get("show_stats") === false) hudOpen = false;
     renderHud();
+    syncRecord();
   }
 
   refresh();

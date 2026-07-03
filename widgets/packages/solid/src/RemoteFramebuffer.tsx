@@ -1,6 +1,14 @@
 import { type Accessor, type JSX, For, Show, createSignal, mergeProps, splitProps } from "solid-js";
 import type { ConnectionState, Stats, SurfaceKind, SurfacePreference } from "@habemus-papadum/rfb-widgets";
-import { formatBadge, formatStatsRows, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
+import {
+  formatBadge,
+  formatStatsRows,
+  recordGlyph,
+  recordingFilename,
+  recordTitle,
+  statusLabel,
+  SURFACE_CHOICES,
+} from "@habemus-papadum/rfb-ui";
 import { type RfbSolidOptions, createRemoteFramebuffer } from "./createRemoteFramebuffer";
 
 /** Reactive context handed to every render-prop so custom chrome can drive the view. */
@@ -24,6 +32,12 @@ export interface ChromeContext {
   zoomOut: () => void;
   /** Reset to fit (zoom 1, no pan). */
   resetView: () => void;
+  /** Whether client-side recording is available (false on the Mode-A OffscreenCanvas path). */
+  canRecord: Accessor<boolean>;
+  /** True while a recording is in progress. */
+  isRecording: Accessor<boolean>;
+  /** Toggle recording; downloads the WebM/MP4 on stop. */
+  toggleRecording: () => void;
 }
 
 export interface RemoteFramebufferProps extends RfbSolidOptions {
@@ -73,6 +87,7 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
 
   const [imageOnly, setImageOnly] = createSignal<boolean>(!!props.imageOnly);
   const [hudOpen, setHudOpen] = createSignal<boolean>(!!local.hud);
+  const [recording, setRecording] = createSignal<boolean>(false);
   let rootEl!: HTMLDivElement;
 
   const fb = createRemoteFramebuffer(() => ({
@@ -91,6 +106,20 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
   const zoomOut = () => view()?.zoomBy(1 / 1.25);
   const resetView = () => view()?.resetView();
 
+  const canRecord = () => !!view()?.canRecord;
+  const toggleRecording = async () => {
+    const v = view();
+    if (!v || !v.canRecord) return;
+    if (v.isRecording) {
+      const blob = await v.stopRecording();
+      downloadBlob(blob, recordingFilename(blob.type));
+      setRecording(false);
+    } else {
+      v.startRecording();
+      setRecording(true);
+    }
+  };
+
   const ctx: ChromeContext = {
     state,
     stats,
@@ -108,6 +137,9 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
     zoomIn,
     zoomOut,
     resetView,
+    canRecord,
+    isRecording: recording,
+    toggleRecording,
   };
 
   return (
@@ -141,6 +173,16 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
             </button>
             <button type="button" class="rfb-button" title="Screenshot" onClick={screenshot}>
               📷
+            </button>
+            <button
+              type="button"
+              class="rfb-button"
+              data-active={recording()}
+              disabled={!canRecord()}
+              title={recordTitle(canRecord(), recording())}
+              onClick={toggleRecording}
+            >
+              {recordGlyph(recording())}
             </button>
             <button type="button" class="rfb-button" title="Fullscreen" onClick={fullscreen}>
               ⛶

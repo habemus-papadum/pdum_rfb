@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pdum.rfb recording harness</title>
+  </head>
+  <body>
+    <!-- Drives MainThreadPresentView (a real on-screen canvas) so the e2e can exercise
+         startRecording()/stopRecording() and assert a non-empty video Blob. -->
+    <div id="view" style="width: 640px; height: 480px"></div>
+    <script type="module" src="/demo/record-harness.ts"></script>
+  </body>
+</html>

@@ -10,6 +10,7 @@ import {
   normalizeWheelEvent,
 } from "./events";
 import { makeLogger, type Logger } from "./debug";
+import { RECORDING_UNSUPPORTED_MESSAGE, type RecordingOptions } from "./recording";
 import { computeStatus, createStatusOverlay, type StatusOverlayHandle, type StatusRenderer } from "./statusOverlay";
 import type { ConnectionState, MainToWorker, Stats, SurfaceKind, SurfacePreference, WorkerToMain } from "./types";
 import {
@@ -255,6 +256,32 @@ export class RemoteFramebufferView {
       this.captureWaiters.set(id, resolve);
       this.post({ type: "capture", id, format });
     });
+  }
+
+  // --- recording (unsupported on Mode A) ----------------------------------
+  // This view transfers its canvas to the worker (`transferControlToOffscreen`), so the main
+  // thread has no drawable surface for `captureStream()`. Client-side recording is a
+  // main-thread-canvas feature — use MainThreadPresentView (the anywidget's default present
+  // path). The methods exist for a uniform view surface but throw an actionable error.
+
+  /** Always `false`: Mode A has no main-thread canvas to record. See {@link startRecording}. */
+  get canRecord(): boolean {
+    return false;
+  }
+
+  /** Always `false`: this view cannot record. */
+  get isRecording(): boolean {
+    return false;
+  }
+
+  /** Throws — Mode A cannot record (its canvas lives in the worker). See {@link canRecord}. */
+  startRecording(_options?: RecordingOptions): void {
+    throw new Error(RECORDING_UNSUPPORTED_MESSAGE);
+  }
+
+  /** Rejects — Mode A cannot record (its canvas lives in the worker). See {@link canRecord}. */
+  stopRecording(): Promise<Blob> {
+    return Promise.reject(new Error(RECORDING_UNSUPPORTED_MESSAGE));
   }
 
   dispose(): void {

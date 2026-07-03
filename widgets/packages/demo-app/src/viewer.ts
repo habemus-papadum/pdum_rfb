@@ -26,6 +26,12 @@ export interface ViewerHandle {
   /** Apply a named viewport preset (fit / cover / fill / one-to-one). */
   preset(p: ViewPreset): void;
   capture(): Promise<Blob>;
+  // Client-side recording of what the viewer sees. `canRecord` is false on this Mode-A path
+  // (the canvas is transferred to the decode worker) — see docs/guide_javascript.md (Recording).
+  canRecord(): boolean;
+  isRecording(): boolean;
+  startRecording(): void;
+  stopRecording(): Promise<Blob>;
   dispose(): void;
 }
 
@@ -50,6 +56,10 @@ export async function mountViewer(
       zoomBy: (factor) => view?.zoomBy(factor),
       preset: (p) => view?.applyPreset(p),
       capture: async () => (await view!.capture("blob")) as Blob,
+      canRecord: () => !!view?.canRecord,
+      isRecording: () => !!view?.isRecording,
+      startRecording: () => view?.startRecording(),
+      stopRecording: () => view!.stopRecording(),
       dispose: () => root.unmount(),
     };
   }
@@ -70,6 +80,10 @@ export async function mountViewer(
       zoomBy: (factor) => view?.zoomBy(factor),
       preset: (p) => view?.applyPreset(p),
       capture: async () => (await view!.capture("blob")) as Blob,
+      canRecord: () => !!view?.canRecord,
+      isRecording: () => !!view?.isRecording,
+      startRecording: () => view?.startRecording(),
+      stopRecording: () => view!.stopRecording(),
       dispose: () => unmount(app),
     };
   }
@@ -83,6 +97,10 @@ export async function mountViewer(
       zoomBy: (factor) => handle.view().zoomBy(factor),
       preset: (p) => handle.view().applyPreset(p),
       capture: async () => (await handle.view().capture("blob")) as Blob,
+      canRecord: () => handle.view().canRecord,
+      isRecording: () => handle.view().isRecording,
+      startRecording: () => handle.view().startRecording(),
+      stopRecording: () => handle.view().stopRecording(),
       dispose: () => handle.dispose(),
     };
   }
@@ -94,6 +112,10 @@ export async function mountViewer(
     zoomBy: (factor) => view.zoomBy(factor),
     preset: (p) => view.applyPreset(p),
     capture: async () => (await view.capture("blob")) as Blob,
+    canRecord: () => view.canRecord,
+    isRecording: () => view.isRecording,
+    startRecording: () => view.startRecording(),
+    stopRecording: () => view.stopRecording(),
     dispose: () => view.dispose(),
   };
 }
