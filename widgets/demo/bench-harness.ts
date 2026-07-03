@@ -170,6 +170,37 @@ async function runModeA(): Promise<void> {
   const f0 = performance.now();
   await surface.readPixels(); // final flush: forces all queued GPU work to complete
   const flushMs = performance.now() - f0;
+
+  // Real GPU render-pass time for Mode A, when the backend exposes the opt-in timer (WebGPU
+  // with the timestamp-query feature — see webgpuSurface.ts). A separate short pass so the
+  // per-frame map/await doesn't contaminate submitMs above.
+  let gpuMs: Summary | null = null;
+  let gpuNote = "wall-clock present only (no GPU timer on this backend)";
+  const timed = surface as unknown as {
+    enableGpuTiming?: () => boolean;
+    presentTimed?: (g: typeof geom, bg: string) => Promise<number | null>;
+  };
+  if (timed.enableGpuTiming && timed.presentTimed) {
+    if (timed.enableGpuTiming()) {
+      const gs: number[] = [];
+      for (let i = 0; i < 30; i++) {
+        const frame = await makeFrame(pool[i % pool.length], i * 1000);
+        surface.setFrame(frame, frameW, frameH);
+        const ms = await timed.presentTimed(geom, background);
+        (frame as { close?: () => void }).close?.();
+        if (ms != null) gs.push(ms);
+      }
+      if (gs.length) {
+        gpuMs = summarize(gs);
+        gpuNote = "GPU time from timestamp-query (present render pass)";
+      } else {
+        gpuNote = "timestamp-query enabled but no valid samples";
+      }
+    } else {
+      gpuNote = "wall-clock present only (adapter lacks timestamp-query)";
+    }
+  }
+
   surface.dispose();
   expose({
     mode: "A",
@@ -177,8 +208,8 @@ async function runModeA(): Promise<void> {
     submitMs: summarize(submit),
     createMs: summarize(create),
     flushMs,
-    gpuMs: null,
-    gpuNote: "wall-clock present only (no GPU timer on this backend)",
+    gpuMs,
+    gpuNote,
   });
 }
 

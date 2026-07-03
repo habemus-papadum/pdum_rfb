@@ -49,7 +49,12 @@ export async function tryWebgpu(canvas: OffscreenCanvas): Promise<WebgpuSurface 
   try {
     const adapter = await gpu.requestAdapter();
     if (!adapter) return null;
-    const device = await adapter.requestDevice();
+    // Request timestamp-query when the adapter exposes it so the opt-in, benchmark-only
+    // presentTimed() GPU timer can run. Harmless in production: enabling an unused feature
+    // costs nothing, and the normal present() path never touches a query set.
+    const device = await adapter.requestDevice(
+      adapter.features.has("timestamp-query") ? { requiredFeatures: ["timestamp-query"] } : undefined,
+    );
     const ctx = canvas.getContext("webgpu");
     if (!ctx) {
       device.destroy();
@@ -151,14 +156,21 @@ export class WebgpuSurface implements DisplaySurface {
   }
 
   /** Render the retained frame + background into a texture view (the canvas, or a readback
-   *  target). Shared by present() and readPixels() so display and capture always agree. */
-  private renderInto(view: GPUTextureView, geom: PresentGeometry, background: string): void {
+   *  target). Shared by present() and readPixels() so display and capture always agree. When
+   *  `timed` and a query set exist, the render pass is wrapped in timestamp writes and resolved
+   *  into `gpuReadBuf` (benchmark-only; presentTimed() reads the elapsed time back). */
+  private renderInto(view: GPUTextureView, geom: PresentGeometry, background: string, timed = false): void {
     const [r, g, b, a] = this.parseColor(background);
     this.writeUniforms(geom);
     const encoder = this.device.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
+    const withTimer = timed && !!this.gpuQuerySet;
+    const passDesc: GPURenderPassDescriptor = {
       colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: { r, g, b, a } }],
-    });
+    };
+    if (withTimer) {
+      passDesc.timestampWrites = { querySet: this.gpuQuerySet!, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 };
+    }
+    const pass = encoder.beginRenderPass(passDesc);
     if (this.frameTex) {
       const bind = this.device.createBindGroup({
         layout: this.pipeline.getBindGroupLayout(0),
@@ -173,7 +185,62 @@ export class WebgpuSurface implements DisplaySurface {
       pass.draw(4);
     }
     pass.end();
+    if (withTimer && this.gpuResolveBuf && this.gpuReadBuf) {
+      encoder.resolveQuerySet(this.gpuQuerySet!, 0, 2, this.gpuResolveBuf, 0);
+      encoder.copyBufferToBuffer(this.gpuResolveBuf, 0, this.gpuReadBuf, 0, 16);
+    }
     this.device.queue.submit([encoder.finish()]);
+  }
+
+  // --- Opt-in GPU render-pass timing (benchmark-only) --------------------------------------
+  // The normal present()/readPixels() path never allocates or touches these; they exist so the
+  // draw-path benchmark (widgets/demo/bench-harness.ts) can measure real GPU time for Mode A,
+  // not just wall-clock submission. See docs/proposals/active/client_display_backend.md §15.
+  private gpuQuerySet: GPUQuerySet | null = null;
+  private gpuResolveBuf: GPUBuffer | null = null;
+  private gpuReadBuf: GPUBuffer | null = null;
+
+  /** Enable GPU render-pass timing for presentTimed(). Returns false when the device lacks the
+   *  timestamp-query feature (e.g. some software adapters). Idempotent. */
+  enableGpuTiming(): boolean {
+    if (this.gpuQuerySet) return true;
+    if (this.deviceLost || !this.device.features.has("timestamp-query")) return false;
+    try {
+      this.gpuQuerySet = this.device.createQuerySet({ type: "timestamp", count: 2 });
+      this.gpuResolveBuf = this.device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+      });
+      this.gpuReadBuf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      return true;
+    } catch {
+      this.gpuQuerySet = null;
+      return false;
+    }
+  }
+
+  /** Present the retained frame AND measure the render-pass GPU time (ms). Resolves to null if
+   *  timing isn't enabled or the timestamp read fails (it still presents in that case). Awaits a
+   *  buffer map, so this is a benchmark path, not the hot present() loop. */
+  async presentTimed(geom: PresentGeometry, background: string): Promise<number | null> {
+    if (this.deviceLost) return null;
+    this.lastGeom = geom;
+    this.lastBg = background;
+    const view = this.ctx.getCurrentTexture().createView();
+    if (!this.gpuQuerySet || !this.gpuReadBuf) {
+      this.renderInto(view, geom, background);
+      return null;
+    }
+    this.renderInto(view, geom, background, true);
+    try {
+      await this.gpuReadBuf.mapAsync(GPUMapMode.READ);
+      const ts = new BigInt64Array(this.gpuReadBuf.getMappedRange().slice(0));
+      this.gpuReadBuf.unmap();
+      const ns = Number(ts[1] - ts[0]); // WebGPU timestamps are nanoseconds
+      return ns > 0 ? ns / 1e6 : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Pack the dst rect (as clip-space corners) and the src UV sub-rect into the uniform. */
@@ -235,11 +302,15 @@ export class WebgpuSurface implements DisplaySurface {
     this.frameTex?.destroy();
     this.frameTex = null;
     try {
+      this.gpuQuerySet?.destroy();
+      this.gpuResolveBuf?.destroy();
+      this.gpuReadBuf?.destroy();
       this.uniformBuf.destroy();
       this.device.destroy();
     } catch {
       /* already gone */
     }
+    this.gpuQuerySet = null;
     this.bgCache.clear();
   }
 
