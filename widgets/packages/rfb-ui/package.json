@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-ui",
-  "version": "0.2.1",
+  "version": "0.2.1+dev",
   "description": "Private shared styles + pure helpers for the rfb framework wrappers (not published).",
   "private": true,
   "type": "module",

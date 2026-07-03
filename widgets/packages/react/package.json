@@ -1,6 +1,6 @@
 {
   "name": "@habemus-papadum/rfb-react",
-  "version": "0.2.1",
+  "version": "0.2.1+dev",
   "description": "React hook + component for the pdum.rfb remote framebuffer client.",
   "type": "module",
   "license": "MIT",
