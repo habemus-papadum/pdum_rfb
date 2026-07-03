@@ -62,6 +62,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .types import InputEvent
+
 try:
     from rendercanvas.asyncio import loop
     from rendercanvas.base import BaseCanvasGroup, BaseRenderCanvas
@@ -162,6 +164,10 @@ class RfbRenderCanvas(BaseRenderCanvas):
         # Called regularly by the scheduler. Drain browser input from all viewers and
         # deliver it to the canvas event system (pygfx controllers, handlers).
         for ev in self._display.poll_events():
+            # poll_events() may also yield a DownscaleHint (adaptive resolution); the
+            # backend owns its own sizing, so only input events are relevant here.
+            if not isinstance(ev, InputEvent):
+                continue
             rc_event = _to_rendercanvas_event(ev.event)
             if rc_event is not None:
                 self.submit_event(rc_event)

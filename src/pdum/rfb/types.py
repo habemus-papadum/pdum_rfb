@@ -154,6 +154,50 @@ class InputEvent:
     received_us: int
 
 
+@dataclass(slots=True, frozen=True)
+class DownscaleHint:
+    """A server-driven adaptive **resolution** hint delivered through ``poll_events()``.
+
+    In the push model the publisher owns the framebuffer size, so the adaptive
+    controller cannot resize the stream itself — its deepest congestion lever is to
+    *suggest* a smaller render resolution and let the render loop honor it. Enabled by
+    ``serve(adaptive=True)``, the controller emits one of these under sustained pressure
+    (bitrate, fps, and in-flight already at their floors) and again on recovery (with
+    ``scale`` climbing back toward ``1.0``); the :class:`~pdum.rfb.display.Display` fans
+    the aggregate across viewers (the most-congested viewer wins) into the same queue
+    :meth:`~pdum.rfb.display.Display.poll_events` drains, tagged as this distinct type so
+    it is easy to tell apart from an :class:`InputEvent`::
+
+        for ev in display.poll_events():
+            if isinstance(ev, rfb.DownscaleHint):
+                w, h = ev.width, ev.height        # render/publish at this size
+            else:
+                state = update(state, ev.event)   # ordinary input event
+
+    Honoring the hint is opt-in: publish a frame of the suggested size (the per-viewer
+    encoder rebuilds and the browser re-``configure()``s exactly as for any other
+    resize) or ignore it entirely — the stream keeps working either way.
+
+    Parameters
+    ----------
+    scale:
+        The recommended render scale relative to full resolution, in ``(0, 1]``
+        (``1.0`` = full res). **Absolute**, not incremental, so applying it never
+        compounds: ``round(base_w * scale)`` always sizes off your native resolution.
+    width, height:
+        A convenience suggested size — the display's initial (base) dimensions scaled
+        by ``scale`` and rounded to even values (H.264 / NV12 need even dimensions).
+    received_us:
+        Monotonic microseconds (relative to the display's start) when the hint was
+        emitted.
+    """
+
+    scale: float
+    width: int
+    height: int
+    received_us: int
+
+
 @runtime_checkable
 class FrameSource(Protocol):
     """Produces raw frames and consumes user-input events.

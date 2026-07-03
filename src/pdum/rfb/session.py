@@ -81,6 +81,11 @@ class RfbSession:
         self._clock = clock or time.monotonic
 
         self.force_keyframe = True
+        # Adaptive resolution lever (serve(adaptive=True)): the controller's current
+        # recommended render scale. The session cannot resize the shared framebuffer
+        # itself, so a change is surfaced to the publisher via the source (a DownscaleHint
+        # through Display.poll_events()); starts at full resolution.
+        self.render_scale = 1.0
         self.inflight: set[int] = set()
         self.dropped = 0
         self._last_drop_log_t = -1e9  # rate-limit the "dropping frames" warning to ~1/s
@@ -427,6 +432,13 @@ class RfbSession:
             self.encoder.close()
             self.encoder = self.encoder_factory(w, h, self.bitrate, self.fps)
             self.force_keyframe = True
+        # Resolution lever: the session can't resize the shared framebuffer, so hand the
+        # recommendation to the publisher via the source (Display fans out a DownscaleHint).
+        if target.scale != self.render_scale:
+            self.render_scale = target.scale
+            suggest = getattr(self.source, "suggest_render_scale", None)
+            if suggest is not None:
+                suggest(target.scale)
         await self.ws.send(json.dumps({"type": "set_quality", "bitrate": self.bitrate, "fps": self.fps}))
 
     async def encode_loop(self) -> None:

@@ -140,6 +140,11 @@ letting it drive the size with `resize_policy="match_client"` — see
 [Sizing, DPR & color](#sizing-dpr-color)). Prefer the single-loop poll style above; an
 `async for ev in display.events()` iterator is also available for a dedicated task.
 
+With `adaptive=True`, `poll_events()` may also yield a typed **`DownscaleHint`** (a
+server-driven resolution suggestion) interleaved with input — tell it apart with
+`isinstance(ev, rfb.DownscaleHint)`; see [Resolution as a fourth
+lever](#resolution-as-a-fourth-lever).
+
 ## Running the server
 
 ### `serve()`
@@ -191,6 +196,42 @@ lets a pipelining hardware encoder keep several frames in flight (token-based se
 attribution keeps stats correct), trading ≈`k/fps` of added latency for throughput. It
 helps the **NVENC** backend; on **VideoToolbox** it is measured to be correct but not
 faster (low-latency RC is synchronous). See [Pipelined encode](pipelined_encode.md).
+
+### Recording to MP4
+
+`display.record("out.mp4")` records what you are publishing to a real **MP4** file, tapping
+the same latest-frame stream the viewer sessions pull from — so it is **independent of any
+connected browser** and works fully headless (demo clips, CI artifacts, golden-frame
+capture):
+
+```python
+async with display.record("out.mp4"):
+    for _ in range(300):
+        display.publish(render()); await asyncio.sleep(1 / 30)
+# file finalized on exit
+```
+
+Or drive it explicitly:
+
+```python
+rec = display.record("out.mp4", crf=20)   # or bitrate=8_000_000, fps=..., preset="veryfast"
+...                                        # publish in your loop
+await rec.stop()                           # flush the encoder, finalize the container
+```
+
+It reuses **libx264** and muxes to **AVCC-in-MP4** through a *separate* PyAV path — this
+is the one place AVCC/MP4 is correct; the "Annex B only, never an mp4 muxer" invariant is
+about the **WebSocket** payload, which recording never touches. The real, monotonic
+per-frame timestamps are honored, so a variable-cadence publisher (sparse `still_after`
+scenes included) records with correct VFR frame timing. It records `rgb24`/`rgba8` host
+frames (GPU frames are downloaded first) and scales a mid-stream resize to the initial
+size. Recording needs PyAV (the `[h264]` extra); `record()` raises a clear error without
+it. It is a non-viewer tap, so it never counts toward `client_count` or the adaptive
+downscale aggregation.
+
+> The symmetric **client-side** recording (capture exactly what the viewer sees —
+> fit/zoom/pan — via the browser's `MediaRecorder`) is a separate batteries-tier feature
+> tracked in the [roadmap](roadmap.md).
 
 ### Authentication
 
@@ -645,11 +686,32 @@ rebuilding the encoder at the new bitrate/fps (forcing a keyframe) and sending a
 informational `set_quality` message to the client. Pair it with `stats_interval` so
 the browser can show what the controller is doing (see the metrics note above).
 
-> _Resolution-scale adaptation_ (a fourth lever) is intentionally **not** automatic:
-> in the push model the publisher owns the framebuffer resolution, so the clean place
-> to drop resolution is your render loop (publish a smaller array — the encoder
-> rebuilds and the browser re-`configure()`s itself). It is noted as future work in
-> the [roadmap](roadmap.md).
+#### Resolution as a fourth lever
+
+Because the publisher owns the framebuffer size, the controller cannot resize the stream
+itself — so its **deepest** lever, engaged only under *sustained* pressure (bitrate, fps,
+and in-flight already at their floors), is to *suggest* a smaller render resolution and
+let your loop honor it. The suggestion arrives as a typed **`DownscaleHint`** in the same
+`poll_events()` stream as input — symmetric with how input flows — carrying a `scale`
+(absolute, in `(0, 1]`, so it never compounds) plus a suggested even `width`/`height`:
+
+```python
+base_w, base_h = 1280, 720
+while running:
+    for ev in display.poll_events():
+        if isinstance(ev, rfb.DownscaleHint):
+            base_w, base_h = ev.width, ev.height   # or apply ev.scale yourself
+        else:
+            state = update(state, ev.event)
+    display.publish(render(state, base_w, base_h))  # smaller frame → encoder rebuild + keyframe
+    await asyncio.sleep(1 / 30)
+```
+
+Honoring the hint is opt-in — publish a smaller frame (the encoder rebuilds and the
+browser re-`configure()`s exactly as for any other resize) or ignore it; the stream keeps
+working either way. When several viewers share one display the **most-congested** viewer's
+scale wins, and the hint climbs back toward `1.0` as viewers recover or disconnect. The
+hint only appears with `adaptive=True`.
 
 ## Testing helpers
 
