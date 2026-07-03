@@ -53,6 +53,9 @@ def test_widget_tiers_default_chrome() -> None:
     assert canvas.show_toolbar is False
     assert canvas.show_stats is False
     assert canvas.height == 480  # avoids the 0-height cell -> 320x240 fallback
+    # Present path defaults to the reparent-safe main-thread draw (works in marimo); both tiers.
+    assert canvas.main_thread_present is True
+    assert viewer.main_thread_present is True
 
 
 async def test_ws_url_and_widget_factory() -> None:

@@ -31,6 +31,7 @@ declare const self: DedicatedWorkerGlobalScope;
 
 let ws: WebSocket | null = null;
 let renderer: Renderer | null = null; // Mode A only (present); null in feed mode
+let feedMode = false; // Mode B: frames transferred to main; the main thread owns present geometry
 let sink: FrameSink | null = null; // where decoded frames go (renderer, or a TransferSink)
 let video: VideoPipeline | null = null;
 let bp: BackpressureController | null = null;
@@ -278,7 +279,10 @@ function handleCapture(id: number, format: "imagedata" | "blob"): void {
  *  handler stays synchronous. */
 async function buildRenderer(msg: Extract<MainToWorker, { type: "init" }>): Promise<void> {
   if (msg.mode === "feed") {
-    // Mode B: no canvas, no present — decoded frames are transferred to the caller's context.
+    // Mode B: no canvas, no present — decoded frames are transferred to the main thread (a
+    // caller's GPU texture via FrameTextureFeed, or a main-thread 2D present via
+    // MainThreadPresentView). Either way the MAIN THREAD owns the present geometry.
+    feedMode = true;
     sink = new TransferSink((m, transfer) => post(m, transfer));
     stats.transport = "none";
     dbg.log("mode", "feed (frame-as-texture)");
@@ -356,7 +360,11 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       break;
     }
     case "event":
+      // Present mode (Mode A): map CSS -> frame pixels here — the renderer owns the geometry.
+      // Feed mode (Mode B): the main thread owns the geometry and already mapped the event, so
+      // forward it verbatim (a plain FrameTextureFeed simply never posts events).
       if (renderer) send({ type: "event", event: mapEvent(msg.event) });
+      else if (feedMode) send({ type: "event", event: msg.event });
       break;
     case "set_fit":
       if (renderer) {

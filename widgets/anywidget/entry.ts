@@ -3,8 +3,11 @@
 // + chrome traits off the model, and reacts to trait changes. Built by
 // vite.anywidget.config.ts into ../src/pdum/rfb/static/widget.js (loaded as anywidget `_esm`).
 
-import { RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
+import { MainThreadPresentView, RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
 import { type AnyModel, mountChrome } from "./chrome";
+
+// Either present controller — both expose the capture/dispose surface the chrome uses.
+type Presenter = RemoteFramebufferView | MainThreadPresentView;
 
 /** Build the WebSocket URL from the model traits. Priority: explicit `url` > same-origin
  *  `base_path` (remote/HTTPS, wss) > `host:port` (local, separate port). */
@@ -41,7 +44,7 @@ export default {
     surface.className = "rfb-viewport";
     el.appendChild(surface);
 
-    let view: RemoteFramebufferView | null = null;
+    let view: Presenter | null = null;
     let lastPush = 0;
 
     const controls = {
@@ -76,13 +79,19 @@ export default {
     function build(): void {
       view?.dispose();
       el.dataset.state = "connecting";
-      view = new RemoteFramebufferView(surface, {
+      // Present path: default to the MAIN-THREAD path (a normal <canvas> drawn on receipt of
+      // transferred frames) because it survives embedding hosts that reparent the widget subtree
+      // after mount — notably marimo, where the OffscreenCanvas-transfer path (Mode A) renders a
+      // black canvas even though the worker decodes correctly (docs/proposals/active/
+      // marimo_rendering_fix.md). Set `main_thread_present=False` to force the lower-overhead
+      // OffscreenCanvas transfer path (Mode A) where the host is known not to reparent.
+      const mainThread = model.get("main_thread_present") !== false;
+      const opts = {
         url: resolveUrl(model),
         token: model.get("token") || undefined,
         imageOnly: !!model.get("image_only"),
         fit: model.get("fit") || undefined,
         background: model.get("background") || undefined,
-        debug: true, // TEMP-DEBUG
         onState: (s: ConnectionState) => {
           el.dataset.state = s;
           model.set("state", s);
@@ -92,29 +101,28 @@ export default {
         onStats: (s: Stats) => {
           chrome.setStats(s);
           pushStats(s);
-          (window as any).__rfbStats = s; // TEMP-DEBUG
         },
         onError: (e: Error) => {
           model.set("last_error", e.message);
           model.save_changes();
           chrome.setError(e);
         },
-      });
+      };
+      view = mainThread ? new MainThreadPresentView(surface, opts) : new RemoteFramebufferView(surface, opts);
       chrome.setError(null);
     }
 
     // Connect-time traits rebuild the view; chrome-only traits just toggle DOM.
     const onConnect = () => build();
     const onChrome = () => chrome.refresh();
-    for (const t of ["url", "host", "base_path", "port", "stream", "token", "image_only", "fit", "background"]) {
-      model.on(`change:${t}`, onConnect);
-    }
+    const connectTraits = [
+      "url", "host", "base_path", "port", "stream", "token", "image_only", "fit", "background", "main_thread_present",
+    ];
+    for (const t of connectTraits) model.on(`change:${t}`, onConnect);
     model.on("change:show_toolbar", onChrome);
     model.on("change:show_stats", onChrome);
 
     build();
-    (window as any).__rfbView = () => view; // TEMP-DEBUG
-    (window as any).__rfbCapture = (fmt: "imagedata" | "blob") => controls.capture(fmt); // TEMP-DEBUG
 
     // anywidget cleanup: tear down the view/worker/socket and detach everything.
     return () => {

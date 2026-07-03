@@ -1,18 +1,17 @@
 # Fixing the marimo demo (blank viewer + no auto-run) — investigation & plan
 
-**Status:** _active / in-progress._ Root cause of the blank viewer narrowed to an
-OffscreenCanvas→DOM-placeholder **compositing** failure inside marimo; the decode/draw
-path is proven correct. Fix not yet landed. This doc records what was tried, what was
-confirmed, and what's next — plus a **standalone observability section** (§7) whose lessons
-outlive this bug and should eventually move to their own file / into the
-`frontend-debugging` skill.
+**Status:** _blank-viewer bug (Problem 2) **RESOLVED**; Problem 1 (auto-run UX) + the §7
+observability productization still open._ Root cause of the blank viewer was narrowed to an
+OffscreenCanvas→DOM-placeholder **compositing** failure inside marimo (the decode/draw path
+was proven correct all along); the fix — a **main-thread present path** — has landed and
+is the widget default. See **§9 Resolution** for what shipped. This doc keeps the full
+investigation (it's the motivating case for the client display backend's Mode B) plus a
+**standalone observability section** (§7) whose lessons outlive this bug and should
+eventually move to their own file / into the `frontend-debugging` skill.
 
-> **Live state as of this writing (left "hot" on purpose):**
-> - A marimo edit server is running headless on `http://localhost:2719` serving a copy of
->   `docs/demos/marimo-demo.py` (scratchpad copy). Click **Start server** to reproduce.
-> - `widgets/anywidget/entry.ts` carries **three temporary debug edits** (see §6) and the
->   built bundle `src/pdum/rfb/static/widget.js` was rebuilt from them. These are NOT to be
->   committed — §6 has the exact lines + revert steps.
+> **Live state:** clean. The temporary debug edits that §6 recorded were **removed** as part
+> of the fix (they had been committed to `widgets/anywidget/entry.ts`); the bundle is the
+> git-ignored on-demand artifact again. No warm marimo server is left running.
 
 ---
 
@@ -210,13 +209,17 @@ This wants its own small design pass + a note about the autorun caveat in the in
 
 ---
 
-## 6. Temporary debug hacks currently in the working tree (REMOVE before commit)
+## 6. Temporary debug hacks (REMOVED — recorded for history)
 
-Recorded verbatim so they can't get lost. All are in `widgets/anywidget/entry.ts`, tagged
-`// TEMP-DEBUG`, and the built `src/pdum/rfb/static/widget.js` was regenerated from them
-(`pnpm -C widgets build:anywidget`). They exist only because the "proper" observability
-(§7) doesn't exist yet — turning these into permanent, runtime-toggleable hooks is the whole
-point of §7.
+> **Removed** in the render fix (§9). These had been committed to
+> `widgets/anywidget/entry.ts` (tagged `// TEMP-DEBUG`): `debug: true`, and the
+> `window.__rfbStats` / `window.__rfbView` / `window.__rfbCapture` hooks. They are gone; the
+> anywidget no longer forces `debug` on and exposes no `window.__rfb*` globals in production.
+> Productizing runtime-toggleable versions of these hooks remains §7's job.
+
+Recorded verbatim so the history isn't lost. All were in `widgets/anywidget/entry.ts`, tagged
+`// TEMP-DEBUG`. They existed only because the "proper" observability (§7) doesn't exist yet —
+turning these into permanent, runtime-toggleable hooks is the whole point of §7.
 
 ```ts
 // in the RfbViewOptions passed to new RemoteFramebufferView(...):
@@ -348,12 +351,67 @@ Concrete tricks that worked here, for the skill:
 
 ## 8. Open questions
 
-- Which hypothesis in §4 is correct? (H1 reparenting is the bet; needs the `isConnected` /
-  `MutationObserver` instrumentation.)
+- ~~Which hypothesis in §4 is correct?~~ **Sidestepped, not pinned.** Rather than prove H1
+  reparenting with `isConnected`/`MutationObserver` instrumentation, the fix (§9) adopts the
+  robust/structural candidate (main-thread present) that is resilient to *any* of H1–H4, so the
+  exact mechanism no longer has to be nailed down to close the bug.
 - Should the auto-start (§5) be the default demo shape, or a second "no-buttons" demo variant,
-  given the reactive-re-run/port-churn constraint?
+  given the reactive-re-run/port-churn constraint? **(Still open — Problem 1.)**
 - Heartbeat tier: `notice` (visible by default) vs debug-gated? Leaning debug-gated + a
-  single always-on "connected/negotiated" notice, to honor "don't spam."
+  single always-on "connected/negotiated" notice, to honor "don't spam." **(Still open — §7.)**
 - Where do §7's hooks live so they're shared by the standalone view **and** the anywidget
   (and the framework wrappers)? Likely in `RemoteFramebufferView` + `debug.ts`, with the
-  anywidget just opting in, so every embedding gets them for free.
+  anywidget just opting in, so every embedding gets them for free. **(Still open — §7.)**
+
+---
+
+## 9. Resolution — the main-thread present path (landed)
+
+The blank viewer is fixed by taking the **robust/structural** candidate from §4: stop relying
+on the `transferControlToOffscreen` placeholder auto-present in fragile embedding hosts, and
+**present on the main thread** instead. It reuses the already-shipped **Mode B ("feed")**
+worker topology (the same plumbing `FrameTextureFeed` uses): the decode worker owns the
+WebSocket + decoder and **transfers each decoded frame** (`VideoFrame`/`ImageBitmap`) to the
+main thread, which draws it into a **normal `<canvas>`** with a 2D `drawImage`. That canvas is
+never transferred, so a host may reparent/re-render it freely and the next `drawImage`
+composites into wherever it now lives — no placeholder to sever.
+
+**What shipped:**
+
+- `widgets/src/MainThreadPresentView.ts` — a new managed-present controller, a small superset
+  of `RemoteFramebufferView`'s surface (constructor / `dispose` / `capture` / `setFit`). It
+  owns a main-thread `<canvas>` + 2D context, runs the worker in `mode:"feed"`, draws each
+  transferred frame (retaining a native-res copy for repaint-on-resize, via `viewport.ts`'s
+  `presentGeometry`), and — because the feed-mode worker has no renderer — does the
+  CSS→backing→frame **event coordinate mapping on the main thread** (`backingToFrame`) before
+  forwarding pointer/wheel/key events. `capture()` reads the on-screen canvas directly, which is
+  the composited-surface ground truth (§7.4) rather than a worker-surface readback.
+- `widgets/src/worker/entry.ts` — feed mode now **forwards input events verbatim** (a `feedMode`
+  flag; the main thread already mapped them). Additive: a plain `FrameTextureFeed` never posts
+  events, so it's unaffected; Mode A is unchanged.
+- `widgets/anywidget/entry.ts` — picks the controller by the new `main_thread_present` trait
+  (**default `True`**); the TEMP-DEBUG hooks (§6) were removed.
+- `src/pdum/rfb/notebook.py` — the `main_thread_present` connect-time trait (default `True`) on
+  `RfbCanvas`/`RfbViewer`.
+
+**Verified headlessly** (the hard part — §7.4 warns readback and screenshot disagree here):
+`widgets/tests/e2e/anywidget-present.spec.ts` reads the **on-screen main-thread canvas** back
+(`getImageData`) and asserts it shows the four-quadrant test pattern (`matchedRotation`), that
+it **still** shows it after the widget subtree is programmatically **reparented** (the marimo
+failure mode, in a controlled harness), and that the `present=offscreen` path is transferred to
+the worker (a main-thread readback returns `null`). All green, plus the full 27-spec e2e suite
+(events/fit/feed unaffected).
+
+**Residual manual verification (needs a human eye + a real marimo kernel).** The headless proxy
+above reparents a light-DOM element; it does not reproduce marimo's exact shadow-root re-render
+against a live kernel, and worker `console.*` isn't visible to the browser-automation tools
+(§7.1). To confirm on the real thing: `uvx --from 'habemus-papadum-rfb[demo]' pdum-rfb
+marimo-demo`, click **Start server**, and confirm the viewer shows the moving orange block (not
+black). With the default `main_thread_present=True` it should paint; toggling
+`main_thread_present=False` on the widget is the way to reproduce the original Mode-A failure if
+needed.
+
+**Still open (tracked, out of this fix's scope):** Problem 1 (auto-start UX, §5) and the §7
+observability productization (forward worker logs to main, runtime-toggleable `window.__rfb`,
+heartbeat) — the latter is what would let an agent debug the *next* compositing-class bug
+without the ad-hoc hooks this one needed.
