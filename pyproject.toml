@@ -139,24 +139,23 @@ build-backend = "hatchling.build"
 # habemus-papadum-nvenc package, which contributes pdum.nvenc.
 packages = ["src/pdum"]
 
-# The anywidget bundle (committed, built from widgets/anywidget/) is package data. Tracked
-# files under src/pdum ship by default (like py.typed); this makes it explicit. The demo
-# notebooks (source of truth in docs/demos/) also ride into the wheel here as package data so
-# `pdum-rfb jupyter-demo` / `marimo-demo` can find + launch them from an installed wheel
-# (`cli._notebook_asset` falls back to docs/demos/ in a dev checkout).
+# The demo notebooks (source of truth in docs/demos/) ride into the wheel here as package data
+# so `pdum-rfb jupyter-demo` / `marimo-demo` can find + launch them from an installed wheel
+# (`cli._notebook_asset` falls back to docs/demos/ in a dev checkout). These files ARE committed,
+# so a plain force-include is safe.
 [tool.hatch.build.targets.wheel.force-include]
-"src/pdum/rfb/static/widget.js" = "pdum/rfb/static/widget.js"
-"src/pdum/rfb/static/widget.css" = "pdum/rfb/static/widget.css"
 "docs/demos/jupyter-demo.ipynb" = "pdum/rfb/notebooks/jupyter-demo.ipynb"
 "docs/demos/marimo-demo.py" = "pdum/rfb/notebooks/marimo-demo.py"
 
-# The `pdum-rfb demo` SPA is NO LONGER committed — it's git-ignored and built on demand
-# (`pnpm -C widgets build:demo`, which the release workflow runs before building the wheel
-# from source). A plain force-include would hard-fail EVERY build (including editable installs
-# / `uv sync`) whenever the dir is absent, so hatch_build.py force-includes it CONDITIONALLY —
-# only when it exists. Scoped to the WHEEL target: the sdist stays pure source, and the release
-# builds the wheel directly from source (not wheel-from-sdist) so the SPA lands in it. Absent →
-# the wheel ships no SPA and `pdum-rfb demo` serves a "build me" placeholder.
+# NEITHER the anywidget bundle (src/pdum/rfb/static/widget.{js,css}) NOR the `pdum-rfb demo` SPA
+# (src/pdum/rfb/static/demo/) is committed — both are git-ignored build artifacts, produced on
+# demand (`pnpm -C widgets build:anywidget` / `build:demo`, which the release workflow runs
+# before building the wheel from source). A plain force-include would hard-fail EVERY build
+# (including editable installs / `uv sync`) whenever an artifact is absent, so hatch_build.py
+# force-includes each CONDITIONALLY — only when present. Scoped to the WHEEL target: the sdist
+# stays pure source, and the release builds the wheel directly from source (not wheel-from-sdist)
+# so the artifacts land in it. Absent → the widget renders its fallback cell and `pdum-rfb demo`
+# serves its "build me" placeholder. The release workflow re-checks the built wheel for both.
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
 

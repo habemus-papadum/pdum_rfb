@@ -46,8 +46,11 @@ jobs:
         run: uv run mkdocs build
       - name: Run demo notebooks (headless, no file modification)
         # Executes every .ipynb listed in mkdocs.yml (currently docs/demos/anywidget.ipynb)
-        # via nbconvert. The committed anywidget bundle is checked out, so no Node step is
-        # needed here — this proves the notebook API + widget mimebundle work end to end.
+        # via nbconvert. nbconvert runs the PYTHON only (never the widget's JS), so no Node
+        # step / built anywidget bundle is needed here — with the bundle absent the widget
+        # emits its fallback ESM and the mimebundle is still valid. This proves the notebook
+        # API + widget mimebundle work end to end; the JS itself is covered by the widgets/
+        # Vitest + Playwright suite and its `build:anywidget` step below.
         run: ./scripts/test_notebooks.sh --no-inplace
       - name: Temporarily disable git hooks for coverage action
         run: |
@@ -144,13 +147,12 @@ jobs:
           pnpm -C widgets -r --filter './packages/*' run test
           pnpm -C widgets -r --filter './packages/*' run build
 
-      - name: Anywidget bundle is up to date (committed artifact matches source)
-        # The wheel ships the prebuilt src/pdum/rfb/static/widget.{js,css}; rebuild from
-        # widgets/anywidget/ and fail if the tracked files drift from source.
-        run: |
-          pnpm -C widgets run build:anywidget
-          git diff --exit-code -- src/pdum/rfb/static/widget.js src/pdum/rfb/static/widget.css \
-            || { echo "::error::src/pdum/rfb/static/widget.{js,css} is stale — run 'pnpm -C widgets run build:anywidget' and commit the result."; exit 1; }
+      - name: Anywidget bundle builds
+        # The bundle (src/pdum/rfb/static/widget.{js,css}) is a git-ignored, on-demand build
+        # artifact — NOT committed, so there's nothing to diff against. Just prove it compiles
+        # from widgets/anywidget/; the release workflow rebuilds + bundles it into the wheel and
+        # re-inspects the wheel for it.
+        run: pnpm -C widgets run build:anywidget
 
       - name: Install Playwright browser
         run: pnpm -C widgets exec playwright install --with-deps chromium

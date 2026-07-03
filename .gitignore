@@ -89,8 +89,13 @@ widgets/test-results/
 widgets/playwright-report/
 widgets/.vite/
 
-# anywidget bundle: commit widget.js + widget.css (they ship in the wheel as package
-# data); ignore the generated sourcemaps and the inlined-worker sourcemap assets.
+# anywidget bundle (src/pdum/rfb/static/widget.{js,css}): a build artifact, NO LONGER
+# committed — like the demo SPA below. Built on demand via `pnpm -C widgets build:anywidget`
+# (setup.sh runs it; the release CI runs it before packaging, where hatch_build.py
+# force-includes it into the wheel). A source tree without it renders the widget's
+# "build me / not supported from git main" fallback cell (pdum.rfb.notebook._MISSING_BUNDLE_ESM).
+src/pdum/rfb/static/widget.js
+src/pdum/rfb/static/widget.css
 src/pdum/rfb/static/*.map
 src/pdum/rfb/static/assets/
 # `pdum-rfb demo` SPA: a build artifact, no longer committed. Built on demand via

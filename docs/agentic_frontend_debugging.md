@@ -125,8 +125,8 @@ random** (pass `--port N` to pin it). Edit either side → it's picked up live, 
 - **Trusting the headless e2e for hardware paths.** SwiftShader is software; simulate the
   trigger instead of assuming coverage.
 - **One-sided fixes to two-party deadlocks.** Add the symmetric backstop (rule 4).
-- **Debugging through the built bundle.** Use `--dev` (source + HMR); the committed
-  `static/` bundles are for shipping, not for iterating.
+- **Debugging through the built bundle.** Use `--dev` (source + HMR); the built (on-demand,
+  git-ignored) `static/` bundles are for shipping, not for iterating.
 
 ## Map
 

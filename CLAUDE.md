@@ -118,13 +118,15 @@ src/pdum/rfb/
   benchmark.py    `python -m pdum.rfb.benchmark` — offline image vs H.264 (libx264/NVENC/VideoToolbox) w/ real PSNR
   notebook.py     opt-in [anywidget] Jupyter/marimo widgets: RfbCanvas (bare) / RfbViewer (batteries)
                   + publish_loop(); Display.widget() lazy-imports it (see docs/notebook.md)
-  static/         package data. widget.{js,css} (anywidget bundle, built from
-                  widgets/anywidget/ via `pnpm -C widgets build:anywidget`) is COMMITTED. demo/
-                  (the `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
-                  `pnpm -C widgets build:demo`) is NOT committed — a git-ignored build artifact
-                  force-included into the wheel by hatch_build.py (only when present); the
-                  release CI builds it first, and setup.sh builds it for dev. Both ship in the
-                  wheel; .map gitignored. Missing demo/ → `pdum-rfb demo` serves a placeholder
+  static/         package data. NEITHER the anywidget bundle widget.{js,css} (built from
+                  widgets/anywidget/ via `pnpm -C widgets build:anywidget`) NOR demo/ (the
+                  `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
+                  `pnpm -C widgets build:demo`) is committed — both are git-ignored build
+                  artifacts force-included into the wheel by hatch_build.py (each only when
+                  present); the release CI builds both first (and re-inspects the wheel for
+                  them), and setup.sh builds both for dev. Both ship in the wheel; .map
+                  gitignored. Missing widget.js → the widget renders its fallback cell
+                  (notebook._MISSING_BUNDLE_ESM); missing demo/ → `pdum-rfb demo` serves a placeholder
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
                   fixture gen (excluded from coverage on purpose)
   cli.py          `pdum-rfb` console script (Typer): doctor, benchmark, demo, jupyter-demo,

@@ -1,6 +1,6 @@
 """Tests for the anywidget notebook integration (pdum.rfb.notebook).
 
-No browser needed: checks the committed bundle ships, the widget classes/traits, and the
+No browser needed: checks the on-demand bundle wiring, the widget classes/traits, and the
 `Display.ws_url` / `Display.widget()` wiring against a real (loopback) server.
 """
 
@@ -11,17 +11,37 @@ import pytest
 pytest.importorskip("anywidget")
 
 import pdum.rfb as rfb
+from pdum.rfb import notebook
 from pdum.rfb.notebook import RfbCanvas, RfbViewer
 
 _STATIC = pathlib.Path(rfb.__file__).parent / "static"
+_WIDGET_JS = _STATIC / "widget.js"
 
 
+@pytest.mark.skipif(
+    not _WIDGET_JS.is_file(),
+    reason="anywidget bundle not built (on-demand artifact — run pnpm -C widgets build:anywidget)",
+)
 def test_bundle_artifacts_present() -> None:
-    # The committed, prebuilt bundle must exist (this is also the build-artifact gate).
+    # When built, the bundle must be non-empty and wired as the widget's ESM/CSS. (anywidget
+    # wraps the Path `_esm`/`_css` into a FileContents descriptor at class creation, so assert
+    # against the module-level resolved values, which are the raw Paths before wrapping.)
     js = _STATIC / "widget.js"
     css = _STATIC / "widget.css"
     assert js.is_file() and js.stat().st_size > 0, "widget.js missing — run pnpm -C widgets build:anywidget"
     assert css.is_file() and css.stat().st_size > 0, "widget.css missing — run pnpm -C widgets build:anywidget"
+    assert notebook._ESM == js and notebook._CSS == css
+
+
+def test_bundle_fallback_when_absent() -> None:
+    # The bundle is git-ignored / built on demand, so it may be missing (e.g. a bare `uv sync`,
+    # or a `pip install git+…@main`). It must then degrade to a self-explanatory fallback ESM,
+    # NOT hand anywidget a non-existent path.
+    if _WIDGET_JS.is_file():
+        assert notebook._ESM == _WIDGET_JS
+    else:
+        assert isinstance(notebook._ESM, str)
+        assert "widget bundle not found" in notebook._ESM
 
 
 def test_widget_tiers_default_chrome() -> None:

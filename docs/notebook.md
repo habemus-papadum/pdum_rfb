@@ -254,12 +254,15 @@ viewer
 
 The notebook path is covered headlessly:
 
-- `tests/test_notebook_widget.py` — the committed bundle is present and non-empty, the two
-  tiers carry the right trait defaults, and `display.ws_url` / `display.widget()` produce
+- `tests/test_notebook_widget.py` — when built, the (git-ignored, on-demand) bundle is
+  present and wired as the widget's ESM/CSS; when absent it degrades to the fallback ESM; the
+  two tiers carry the right trait defaults; and `display.ws_url` / `display.widget()` produce
   the expected shape (`pytest.importorskip("anywidget")`).
 - `widgets/tests/e2e/anywidget.spec.ts` — Playwright drives the **real** front-end
   `render()` against the booted Python test server through a stubbed anywidget `model`,
   asserting it connects, decodes, displays, and reads `stats` back into the model.
 - `docs/demos/anywidget.ipynb` runs under `./scripts/test_notebooks.sh` in CI (via
-  nbconvert), and a CI gate rebuilds the bundle and fails if the committed
-  `src/pdum/rfb/static/widget.{js,css}` drifts from source.
+  nbconvert, which runs the Python only — never the widget's JS). The bundle
+  `src/pdum/rfb/static/widget.{js,css}` is a git-ignored, on-demand build artifact: CI proves
+  it compiles (`pnpm -C widgets build:anywidget`), and the release workflow rebuilds it,
+  force-includes it into the wheel, and re-inspects the built wheel to confirm it's present.

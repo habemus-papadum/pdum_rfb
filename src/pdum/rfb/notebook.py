@@ -39,6 +39,62 @@ if TYPE_CHECKING:  # pragma: no cover
     from .display import Display
 
 _STATIC = pathlib.Path(__file__).parent / "static"
+_WIDGET_JS = _STATIC / "widget.js"
+_WIDGET_CSS = _STATIC / "widget.css"
+
+# The anywidget ESM bundle (widget.js) is a BUILD ARTIFACT and is NOT committed to git — like
+# the ``pdum-rfb demo`` SPA, it's built on demand (``pnpm -C widgets build:anywidget``; setup.sh
+# runs it in a dev checkout, and the release CI runs it before packaging so every PyPI wheel
+# ships it). A source tree that never ran that build has no bundle, and anywidget would raise on
+# a missing ``_esm`` path. So when it's absent we hand anywidget a tiny fallback ESM that renders
+# a self-explanatory cell — telling the two audiences apart, because their fix differs:
+#   * a dev checkout of the repo can just build it;
+#   * a ``pip install git+…@main`` install can't (nothing built the JS), and the widget isn't
+#     supported from git main today — the released PyPI package is the supported path.
+_MISSING_BUNDLE_ESM = r"""
+export function render({ el }) {
+  el.innerHTML = `
+  <div style="font:13px/1.55 system-ui,-apple-system,sans-serif;max-width:660px;
+              padding:16px 18px;border:1px solid #e0b400;border-radius:8px;
+              background:#fffbea;color:#333">
+    <div style="font-weight:600;color:#8a6d00;margin-bottom:.5em">
+      pdum.rfb widget bundle not found
+    </div>
+    <p style="margin:.5em 0">
+      The anywidget JavaScript bundle (<code>pdum/rfb/static/widget.js</code>) isn't present.
+      It is a <strong>build artifact that is not committed to git</strong> — it's built on
+      demand — so this particular install never produced it.
+    </p>
+    <p style="margin:.9em 0 .3em">
+      <strong>If you're in a checkout of the repo</strong>, build it once and restart the kernel:
+    </p>
+    <pre style="margin:.2em 0;padding:8px 10px;background:#00000010;border-radius:6px;
+                overflow:auto;font:12px/1.4 ui-monospace,Menlo,monospace">
+./scripts/setup.sh          # or, just the bundle:
+pnpm -C widgets build:anywidget</pre>
+    <p style="margin:.9em 0 .3em">
+      <strong>If you installed straight from git main</strong>
+      (e.g. <code>pip install "habemus-papadum-rfb[anywidget] @ git+…@main"</code>):
+      the widget is <strong>not supported that way</strong>. Installing from git main doesn't
+      build the on-demand JavaScript, so the widget can't work from that install. Use the
+      released package instead —
+      <code>pip install "habemus-papadum-rfb[anywidget]"</code> from PyPI always ships the
+      bundle. If you specifically need the widget from git main, please
+      <strong>open an issue</strong>: we don't support it today, but we can add it back if
+      there's enough demand.
+    </p>
+  </div>`;
+}
+"""
+
+# Path → anywidget reads & (in dev) watches the real bundle; str → it treats the value as the
+# literal ESM/CSS. Resolve which at import time.
+if _WIDGET_JS.is_file():
+    _ESM: Any = _WIDGET_JS
+    _CSS: Any = _WIDGET_CSS
+else:
+    _ESM = _MISSING_BUNDLE_ESM
+    _CSS = ""
 
 
 class RfbCanvas(anywidget.AnyWidget):
@@ -50,8 +106,8 @@ class RfbCanvas(anywidget.AnyWidget):
     back to 320×240 without it). ``state``/``stats``/``last_error`` are read back from JS.
     """
 
-    _esm = _STATIC / "widget.js"
-    _css = _STATIC / "widget.css"
+    _esm = _ESM
+    _css = _CSS
 
     # --- connection (connect-time) ---
     url = traitlets.Unicode("").tag(sync=True)  # explicit override; wins over host/port
