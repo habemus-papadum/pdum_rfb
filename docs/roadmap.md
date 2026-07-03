@@ -7,57 +7,23 @@ clients, multiple named streams, still-after-settle, the ASGI/Starlette front-en
 adaptive quality/metrics, auto-reconnect, and the framework + notebook adapters are
 all shipped. Those are done and no longer tracked here.
 
+The **client display backend** — a pluggable draw path (Canvas2D / WebGL2 / WebGPU)
+in both Mode A (managed present) and Mode B (frame-as-texture, `FrameTextureFeed`) —
+also shipped and is verified end-to-end (29 e2e across two Playwright projects). Its
+design notes live in the
+**[client display backend proposal](proposals/active/client_display_backend.md)**;
+the two follow-ups it left open (a batteries UI to switch backends, and *measuring*
+which draw path actually pays) are folded into items 1 and 5 below.
+
 What follows is the short list of things actually worth doing next. It is
 deliberately not exhaustive. Each item carries a rough **benefit · difficulty** read
 to help triage.
 
-## 1. Client display backend: a pluggable draw path (Canvas2D / WebGL / WebGPU)
-
-_benefit: high · difficulty: high_
-
-The low-level layer *under* the viewport: the thing that turns a decoded frame into
-pixels on the canvas, with **no presentation opinion of its own**. The draw path is a
-`DisplaySurface` seam with three interchangeable backends — Canvas2D (the floor), WebGL2,
-and WebGPU — selected by capability (`surface: "2d" | "webgl" | "webgpu" | "auto"`), each
-just "sample this source region of the current frame into that destination region of
-the canvas." No fit, no zoom, no pan at this layer; those are item 2.
-
-> **Status: landed (both modes, all three backends).** **Mode A** (managed present):
-> all three backends ship, verified pixel-equal to Canvas2D against a controlled
-> asymmetric frame across both real source types (ImageBitmap + VideoFrame);
-> `stats.surface` reports the active one. **Mode B** (frame-as-texture): `FrameTextureFeed`
-> hands the decoded frame to the caller as a GPU texture in their own WebGL2/WebGPU
-> context (a decode worker transfers frames to the main thread), so they composite it
-> into their own hardware scene — minimap, overlay, blends. Verified end-to-end (29 e2e
-> across two projects). Remaining follow-ups (batteries backend-switch UI, decode-straight-
-> to-GPU-texture) are polish; see the proposal's phase tracker.
-
-Why its own item: a compositing flow is useful for more than zoom/pan — the real
-payoff of a GPU draw path is that the frame becomes a **first-class input to a
-client-side hardware scene** (composite it with a minimap, a WebGL/WebGPU GUI overlay,
-custom blends — all rendered on the client), not merely a faster `drawImage`. That is
-lower-level functionality than the UI core and deserves to stand on its own. Note the
-browser's decode memory model shapes this: you **cannot** decode into memory you own
-(WebCodecs owns the `VideoFrame`), so the model is "own/participate in the *present*
-texture," not "provide the decode buffer" — the proposal works this through per backend.
-
-Two things make it real work rather than a mechanical swap: **(a)** the
-retain-last-frame-and-repaint-on-resize resilience (trivial for the 2D copy today,
-genuinely harder as a GL/WebGPU texture) — resolved by keeping full retention on
-Canvas2D/WebGL and *deliberately relaxing it for WebGPU*, surfacing the rare, self-
-healing resize gap through the existing status overlay rather than paying per-frame
-cost; and **(b)** decoupling present cadence from decode cadence so a present loop can
-redraw the retained frame at display refresh. **Measure first** — `drawImage` of a
-hardware `VideoFrame` is already fast, so Canvas2D stays the default and a GPU path is
-opt-in / auto-only-when-it-pays.
-
-Design and phasing: **[client display backend proposal](proposals/active/client_display_backend.md)**.
-
-## 2. Core UI viewport: crop, zoom, and pan
+## 1. Core UI viewport (crop / zoom / pan) + a backend-switch chrome
 
 _benefit: high · difficulty: moderate_
 
-The UI layer built **on top of** the display backend (item 1). This is **entirely a
+The UI layer built **on top of** the shipped display backend. This is **entirely a
 client concern** — the server does not zoom and never needs to know the client's
 zoom/pan. The publisher owns the framebuffer; the client decides how to fit that frame
 into its canvas and where the viewer is looking, and does its own coordinate transforms
@@ -66,23 +32,32 @@ whole point: one shared encoded stream, N viewers each framing it however they l
 per-client server render.
 
 Today the client's sizing is rigid — a small fixed set of fit modes. The work is to
-make it **arbitrary**:
+make it **arbitrary**, and to give the batteries tier a control surface for it:
 
-- A general viewport transform (crop rect + zoom + pan) rather than fixed fit. The
+- **A general viewport transform** (crop rect + zoom + pan) rather than fixed fit. The
   geometry seam already exists: `viewport.ts` reserves `zoom`/`panX`/`panY` (identity
   today) and `backingToFrame`/`frameDestRect` already round-trip event coordinates, so
   gestures can drive zoom/pan without any wire change. It expresses the transform as the
-  `{ src, dst }` present-geometry the item-1 backend consumes.
-- Simple named presets on top of the general transform — `fit`, `cover`, `fill`,
+  `{ src, dst }` present-geometry the backend already consumes (`presentGeometry`).
+- **Simple named presets** on top of the general transform — `fit`, `cover`, `fill`,
   `1:1`, "center on point" — so the common cases stay one-liners.
-- Gestures (wheel-zoom, drag-pan, pinch) that only mutate viewport state and let the
-  backend's present loop redraw — no new draw code, no wire change.
+- **Gestures** (wheel-zoom, drag-pan, pinch) that only mutate viewport state and let the
+  present loop redraw — no new draw code, no wire change.
+- **Batteries chrome for switching the display backend.** The display backend is already
+  selectable (`surface: "2d" | "webgl" | "webgpu" | "auto"`, reported in `stats.surface`),
+  but only programmatically. Add a control in the `<RemoteFramebuffer>` batteries chrome
+  (and the anywidget chrome) — a sibling to the existing `capture PNG` button — to pick the
+  backend live, plus zoom/fit controls. This is the "switch display methodology" UI the
+  display-backend proposal deferred. Lives in the **batteries tier**, never the headless
+  primitive.
 
-This lands after item 1 gives it the `{ src, dst }` primitive and the present loop; see
-the same **[display backend proposal](proposals/active/client_display_backend.md)** (§9)
-for how the two layers meet.
+**Expose it in the demo.** Swap the `pdum-rfb demo` viewer over to the batteries chrome
+(the "Chromium batteries") so the backend selector + zoom/pan controls are visible there,
+leaving the rest of the demo shell as is — the demo becomes the place we exercise the
+chrome. See the **[display backend proposal](proposals/active/client_display_backend.md)**
+(§9) for how the viewport and backend layers meet.
 
-## 3. Resolution as an adaptive lever
+## 2. Resolution as an adaptive lever
 
 _benefit: medium · difficulty: moderate_
 
@@ -95,29 +70,19 @@ already (the encoder rebuild + keyframe path is well-trodden).
 
 Add a server-driven **downscale hint** (a fourth lever, or a `set_quality` field the
 publisher can honor) so the loop can shrink the encoded frame under pressure and
-recover when healthy — without hand-rolling it in every app.
+recover when healthy — without hand-rolling it in every app. Because the publisher owns
+resolution, the natural shape is a hint the render loop **reads off `poll_events()`**
+(an event the controller emits under pressure), so the app opts in by honoring it,
+symmetric with how input events already flow.
 
-Agreed -- so this would be an event in the poll setup?
-
-## 4. AV1 / HEVC codecs
-
-_benefit: medium · difficulty: high_
-
-Better compression at the same bitrate. The encoder registry + capability negotiation
-already model this cleanly (`register_video_encoder`, `select_transport`), and the
-browser decodes via WebCodecs. Two fronts: `av1_nvenc`/HEVC on the GPU paths, and a
-CPU AV1 encoder (libaom / SVT-AV1) mirroring the libx264 backend. Gate the client on
-`VideoDecoder.isConfigSupported` exactly like the H.264 path. Also unlocks the 10-bit /
-HDR pipeline `types.ColorSpace` already models (`bit_depth`, `bt2020`/`pq`/`hlg` are
-expressible but not yet wired through a 10-bit encode/decode chain).
-
-## 5. Record to MP4 (server-side tap + client-side batteries)
+## 3. Record to MP4 (server-side tap + client-side batteries)
 
 _benefit: high · difficulty: moderate_
 
 A first-class "record what I'm publishing / viewing to an MP4" convenience. Today
 producing a demo clip means hand-rolling a muxer around the publish loop; this should be
-a one-liner. Two variants, deliberately symmetric:
+a one-liner. Two variants, deliberately symmetric — **ship the server tap first** (the
+more broadly useful one for demos and headless capture):
 
 - **Server-side, on the rendering interface.** A convenience on `Display` (e.g.
   `display.record("out.mp4")` → a context manager / handle with `.stop()`) that taps the
@@ -134,10 +99,49 @@ a one-liner. Two variants, deliberately symmetric:
   fit/zoom/pan and all — by `captureStream()`-ing the display canvas into a
   `MediaRecorder` (webm/mp4 per browser support), exposed as a `startRecording()` /
   `stopRecording(): Promise<Blob>` on `RemoteFramebufferView` and surfaced as a control in
-  the `<RemoteFramebuffer>` batteries chrome (a sibling to the existing `capture PNG`
-  button). Lives in the batteries tier, not the headless primitive. A later refinement
-  could mux the already-decoded `EncodedVideoChunk`s directly (no re-encode) when the
-  container/codec line up.
+  the `<RemoteFramebuffer>` batteries chrome. Lives in the batteries tier, not the headless
+  primitive. A later refinement could mux the already-decoded `EncodedVideoChunk`s directly
+  (no re-encode) when the container/codec line up.
 
-The two share nothing but the intent; ship whichever is more useful first (the server tap
-is the more broadly useful one for demos and headless capture).
+## 4. AV1 / HEVC codecs
+
+_benefit: medium · difficulty: high · not scheduled_
+
+Better compression at the same bitrate. The encoder registry + capability negotiation
+already model this cleanly (`register_video_encoder`, `select_transport`), and the
+browser decodes via WebCodecs. Two fronts: `av1_nvenc`/HEVC on the GPU paths, and a
+CPU AV1 encoder (libaom / SVT-AV1) mirroring the libx264 backend. Gate the client on
+`VideoDecoder.isConfigSupported` exactly like the H.264 path. Also unlocks the 10-bit /
+HDR pipeline `types.ColorSpace` already models (`bit_depth`, `bt2020`/`pq`/`hlg` are
+expressible but not yet wired through a 10-bit encode/decode chain). Parked for now.
+
+## 5. Measure the client draw path (which backend actually pays)
+
+_benefit: medium · difficulty: moderate_
+
+The display backend ships three draw paths, but the honest guidance is still "Canvas2D
+`drawImage` of a hardware `VideoFrame` is already fast, so it stays the default and GPU
+is opt-in." Make that a **measured** claim rather than a hunch: a repeatable client
+benchmark that renders a known stream through Canvas2D vs WebGL2 vs WebGPU and reports
+per-frame present cost (and, where the platform allows, GPU time), so `surface: "auto"`
+can choose on evidence and the docs can state when each pays.
+
+Fold in the display-backend proposal's remaining **"decode-straight-to-GPU-texture"**
+question: measure the Mode B path (worker decode → transfer → upload) against Mode A
+present, and confirm whether the transfer/upload overhead is worth it for the
+composite-into-your-own-scene use case. Output: numbers in the proposal + a note in the
+JS guide.
+
+## 6. Fix the marimo blank-viewer bug
+
+_benefit: medium · difficulty: moderate_
+
+`pdum-rfb marimo-demo` renders a **blank (black) viewer** even though the worker decodes
+frames correctly (`capture()` readback shows real pixels) — an OffscreenCanvas→DOM
+compositing failure specific to marimo (the widget lives in a shadow root; marimo appears
+to reparent/re-render the subtree after `transferControlToOffscreen()`, severing the
+placeholder→compositor link). Full investigation:
+**[marimo rendering fix proposal](proposals/active/marimo_rendering_fix.md)**. The robust
+fix candidate is a **main-thread present path** (worker → `ImageBitmap`/transfer → a
+main-thread canvas the framework can freely reparent) — which the shipped Mode B topology
+now makes cheap. After any notebook change, run `./scripts/test_notebooks.sh`.
