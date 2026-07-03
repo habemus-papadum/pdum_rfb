@@ -349,24 +349,34 @@ button.primary:hover {
   margin-top: var(--space-2xs);
 }
 
-/* segmented control (fit / framework toggles) */
+/* Segmented control (fit / framework / backend toggles): equal-width cells that fill the rail
+   and stay visually connected. The 1px grid `gap` lets the container's hairline background show
+   through as clean, uniform dividers — no per-button border bookkeeping — so it reads as one
+   control however many segments wrap to a second row. */
 .seg {
-  display: inline-flex;
-  flex-wrap: wrap; /* wrap to a second row rather than overflow the rail (4-item framework toggle) */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--hairline);
   border: 1px solid var(--hairline);
+  width: 100%;
 }
 
+/* `flex: 1 1 40%` fits two per row and lets a short final row (e.g. Fit's 3rd item) grow to fill
+   the width — no empty trailing cells, unlike a fixed grid. */
 .seg button {
+  flex: 1 1 40%;
   border: none;
-  border-right: 1px solid var(--hairline);
+  margin: 0;
   background: var(--surface);
-  padding: 0.28rem 0.55rem;
+  padding: 0.34rem 0.4rem;
   font-size: 0.74rem;
   color: var(--ink-muted);
+  text-align: center;
 }
 
-.seg button:last-child {
-  border-right: none;
+.seg button:hover:not(:disabled):not([aria-pressed="true"]) {
+  color: var(--ink);
 }
 
 .seg button[aria-pressed="true"] {
@@ -593,4 +603,57 @@ a {
 }
 .stats-overlay__meta .stats-overlay__v {
   color: #d7d2c8; /* metadata reads a touch softer than the live numbers */
+}
+
+/* Persistent, dismissible modal (recording explainer) — stays until the user acts, unlike the
+   status line the poll loop overwrites. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(20, 18, 14, 0.42);
+}
+.modal__card {
+  position: relative;
+  max-width: 32rem;
+  background: var(--surface);
+  border: 1px solid var(--ink);
+  padding: 1.15rem 1.3rem 1.1rem;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+}
+.modal__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  padding-right: 1.5rem;
+}
+.modal__msg {
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--ink-muted);
+  margin: 0 0 1rem;
+}
+.modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.modal__close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  border: none;
+  background: none;
+  padding: 0.1rem 0.45rem;
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--ink-muted);
+}
+.modal__close:hover {
+  color: var(--ink);
 }

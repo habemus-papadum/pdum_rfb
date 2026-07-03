@@ -98,7 +98,7 @@ test("the batteries chrome toolbar renders its on-canvas control icons", async (
   await expect(toolbar.locator('button[title="Fullscreen"]')).toBeVisible();
   await expect(toolbar.locator('button[title="Zoom out"]')).toBeVisible();
   await expect(toolbar.locator('button[title="Zoom in"]')).toBeVisible();
-  await expect(toolbar.locator('button[title="Fit / reset view"]')).toBeVisible();
+  await expect(toolbar.locator('button[title="Fit — reset zoom & pan"]')).toBeVisible();
   await expect(toolbar.locator("select.rfb-select")).toBeVisible();
 });
 
@@ -116,6 +116,35 @@ test("wheel zoom uses the gentle (halved) factor", async ({ page }) => {
   // factor = exp(-deltaY * 0.00075) = exp(0.075) ≈ 1.0779 → 108%. The OLD 0.0015 factor would
   // have zoomed to exp(0.15) ≈ 1.1618 → 116%, so this pins the halved sensitivity.
   await expect(zoom).toHaveText("108%");
+});
+
+test("record on the worker path shows a persistent modal (not a flash the poll clobbers)", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
+  // Mode A (Worker present, the default) can't record — the record button explains why in a
+  // modal that must STAY until the user acts (the old status line was overwritten by the ~2.5s
+  // poll, so the message flashed and vanished).
+  await page.getByRole("button", { name: "● record" }).click();
+  const modal = page.locator(".modal");
+  await expect(modal).toBeVisible();
+  await expect(modal).toContainText("main-thread present path");
+  await page.waitForTimeout(3000); // longer than the 2.5s poll — it must not auto-dismiss
+  await expect(modal).toBeVisible();
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(modal).toHaveCount(0);
+});
+
+test("the Main-thread present path enables client recording", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
+  // Flip the Present control to the main-thread path (a real on-screen canvas → recordable).
+  await page.getByRole("button", { name: "Main-thread", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Main-thread", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 }); // remounted + reconnected
+  // Recording now works — no explainer modal, and the button flips to the stop state.
+  await page.getByRole("button", { name: "● record", exact: true }).click();
+  await expect(page.locator(".modal")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "◼ stop rec", exact: true })).toBeVisible();
 });
 
 test("debug toggle lights up the console play-by-play", async ({ page }) => {

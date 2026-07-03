@@ -43,6 +43,11 @@ const viewerOpts = {
     new URLSearchParams(location.search).get("debug") === "1" || localStorage.getItem("rfb-debug") === "1",
   // Stats overlay defaults ON; a stored "0" (user toggled off before) opts out.
   overlay: localStorage.getItem("rfb-overlay") !== "0",
+  // Present path. false = Mode A (OffscreenCanvas transferred to the decode worker; full
+  // zoom/pan/backend-switch, but the on-screen canvas isn't reachable to record). true =
+  // main-thread present (a real <canvas> that `captureStream()` can record; 2D only, so the
+  // backend/zoom controls don't apply). Flipping it lets you actually record in the demo.
+  presentMainThread: false,
 };
 
 // --- persistent DOM (created once) -----------------------------------------
@@ -136,16 +141,21 @@ async function remountViewer(): Promise<void> {
   root.append(surface);
   viewportEl.append(root);
 
-  viewer = await mountViewer(viewerOpts.framework, surface, {
-    url: wsUrl(st.name),
-    fit: viewerOpts.fit,
-    surface: viewerOpts.surface,
-    gestures: true, // wheel-zoom, middle/right-drag pan, pinch
-    debug: viewerOpts.debug,
-    onState: onViewerState,
-    onStats: onViewerStats,
-    onViewport: (framing) => chrome?.setZoom(framing.zoom), // keep the toolbar's zoom readout live
-  });
+  viewer = await mountViewer(
+    viewerOpts.framework,
+    surface,
+    {
+      url: wsUrl(st.name),
+      fit: viewerOpts.fit,
+      surface: viewerOpts.surface,
+      gestures: true, // wheel-zoom, middle/right-drag pan, pinch (Mode A only)
+      debug: viewerOpts.debug,
+      onState: onViewerState,
+      onStats: onViewerStats,
+      onViewport: (framing) => chrome?.setZoom(framing.zoom), // keep the toolbar's zoom readout live
+    },
+    viewerOpts.presentMainThread,
+  );
 
   // The on-canvas capture / zoom / fit / backend toolbar — the same batteries chrome the
   // framework wrappers + anywidget present, driving the framework-agnostic ViewerHandle.
@@ -382,10 +392,26 @@ function viewerGroup(): HTMLElement {
       viewer?.setFit(viewerOpts.fit); // live, no reconnect
     },
   );
+  // Present path — Mode A (worker OffscreenCanvas, recordable=no) vs main-thread (recordable=yes,
+  // but 2D-only so backend/zoom don't apply). Switching remounts the viewer.
+  const mainThread = viewerOpts.presentMainThread;
+  const presentSeg = segmented(
+    [
+      { id: "worker", label: "Worker", title: "Mode A: OffscreenCanvas in the decode worker — full backend/zoom/pan, but the canvas can't be recorded." },
+      { id: "main", label: "Main-thread", title: "A real on-screen <canvas> — recordable via captureStream, but 2D only (no live backend/zoom)." },
+    ],
+    mainThread ? "main" : "worker",
+    (v) => {
+      viewerOpts.presentMainThread = v === "main";
+      renderControls();
+      void remountViewer();
+    },
+  );
   // Backend switch — the batteries "switch display methodology" control. A canvas context
-  // type is immutable, so setSurface rebuilds the view + reconnects (a brief flash).
+  // type is immutable, so setSurface rebuilds the view + reconnects (a brief flash). Disabled on
+  // the main-thread present path (2D only).
   const backendSeg = segmented(
-    SURFACE_CHOICES.map((c) => ({ id: c.value, label: c.label, title: c.title })),
+    SURFACE_CHOICES.map((c) => ({ id: c.value, label: c.label, title: c.title, disabled: mainThread })),
     viewerOpts.surface,
     (v) => {
       viewerOpts.surface = v as SurfacePreference;
@@ -394,10 +420,10 @@ function viewerGroup(): HTMLElement {
     },
   );
   const zoomRow = el("div", { class: "btn-row" }, [
-    el("button", { type: "button", text: "－", title: "Zoom out", onclick: () => viewer?.zoomBy(1 / 1.25) }),
-    el("button", { type: "button", text: "1:1", title: "Native pixels", onclick: () => viewer?.preset("one-to-one") }),
-    el("button", { type: "button", text: "fit", title: "Reset to fit", onclick: () => viewer?.preset("fit") }),
-    el("button", { type: "button", text: "＋", title: "Zoom in", onclick: () => viewer?.zoomBy(1.25) }),
+    el("button", { type: "button", text: "－", title: "Zoom out", disabled: mainThread, onclick: () => viewer?.zoomBy(1 / 1.25) }),
+    el("button", { type: "button", text: "1:1", title: "Native pixels", disabled: mainThread, onclick: () => viewer?.preset("one-to-one") }),
+    el("button", { type: "button", text: "fit", title: "Reset to fit", disabled: mainThread, onclick: () => viewer?.preset("fit") }),
+    el("button", { type: "button", text: "＋", title: "Zoom in", disabled: mainThread, onclick: () => viewer?.zoomBy(1.25) }),
   ]);
   const debugToggle = el("label", { class: "toggle" }, [
     (() => {
@@ -431,8 +457,9 @@ function viewerGroup(): HTMLElement {
     el("div", { class: "group__title", text: "Viewer" }),
     field("Framework", frameworkSeg, "Which wrapper renders the viewer, live-swapped. Vanilla = the core view; React = the same view inside a React component."),
     field("Fit", fitSeg, "How the frame maps into the viewport when aspect ratios differ."),
-    field("Backend", backendSeg, "Client draw path (Canvas2D / WebGL2 / WebGPU / auto). A canvas context type is immutable, so switching rebuilds the view + reconnects the stream."),
-    field("Zoom", zoomRow, "Client-side crop/zoom/pan (no server render). Also: wheel to zoom, middle/right-drag to pan, pinch on touch."),
+    field("Backend", backendSeg, "Client draw path (Canvas2D / WebGL2 / WebGPU / auto). A canvas context type is immutable, so switching rebuilds the view + reconnects the stream. Disabled on the main-thread present path."),
+    field("Present", presentSeg, "Where the frame is painted. Worker = Mode A (OffscreenCanvas in the decode worker; full backend/zoom/pan). Main-thread = a real on-screen canvas that captureStream() can record — but 2D only, so backend/zoom are off. Switch to Main-thread to record in the demo."),
+    field("Zoom", zoomRow, "Client-side crop/zoom/pan (no server render). Also: wheel to zoom, middle/right-drag to pan, pinch on touch. Mode A (Worker present) only."),
     field("Debug", debugToggle, "Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode). Errors surface either way."),
     field("Overlay", overlayToggle, "Toggle the on-canvas stats overlay (fps · rtt · measured bitrate + sparklines), pinned to the viewport's bottom-left corner."),
     el("div", { class: "btn-row" }, [
@@ -440,7 +467,9 @@ function viewerGroup(): HTMLElement {
       el("button", {
         type: "button",
         text: recording ? "◼ stop rec" : "● record",
-        title: "Record what you see (client-side, canvas.captureStream → MediaRecorder)",
+        title: mainThread
+          ? "Record what you see (client-side, canvas.captureStream → MediaRecorder)"
+          : "Recording needs the Main-thread present path — click to learn how / switch",
         onclick: () => void toggleRecord(),
       }),
       el("button", { type: "button", text: "fullscreen", onclick: () => void viewEl.requestFullscreen?.() }),
@@ -524,18 +553,39 @@ async function capture(): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Client-side recording of what the viewer sees (canvas.captureStream → MediaRecorder). This
-// demo streams over the Mode-A OffscreenCanvas path, whose canvas is transferred to the decode
-// worker — so there's no main-thread surface to capture and `canRecord()` is false. The button
-// then explains where recording lives (the notebook/anywidget main-thread present path). See
+// Client-side recording of what the viewer sees (canvas.captureStream → MediaRecorder). Recording
+// needs a real on-screen canvas; the Mode-A path transfers its canvas to the decode worker, so
+// `canRecord()` is false there — the main-thread present path can record (Present control). See
 // docs/guide_javascript.md (Recording).
 let recording = false;
 async function toggleRecord(): Promise<void> {
   if (!viewer) return;
   if (!viewer.canRecord()) {
-    showError(
-      "Client-side recording needs the main-thread present path (the notebook/anywidget default). " +
-        "This demo uses the OffscreenCanvas transport, whose canvas lives in the decode worker.",
+    // A persistent, dismissible modal (NOT the transient status line, which the ~2 Hz poll can
+    // clobber) that explains the constraint and offers a one-click switch to the recordable path.
+    showModal(
+      "Recording needs the main-thread present path",
+      "This demo streams over the Mode-A path: the on-screen canvas is transferred to the decode " +
+        "worker, so there's no main-thread canvas for MediaRecorder's captureStream() to record. " +
+        "The main-thread present path (a normal <canvas> — also the notebook/anywidget default) can " +
+        "record, but it's 2D only, so the live backend switch and zoom/pan don't apply there.",
+      [
+        {
+          label: "Switch to Main-thread & record",
+          primary: true,
+          onClick: async () => {
+            viewerOpts.presentMainThread = true;
+            renderControls();
+            await remountViewer();
+            if (viewer?.canRecord()) {
+              viewer.startRecording();
+              recording = true;
+              renderControls();
+            }
+          },
+        },
+        { label: "Not now", onClick: () => {} },
+      ],
     );
     return;
   }
@@ -553,8 +603,50 @@ async function toggleRecord(): Promise<void> {
     }
     renderControls();
   } catch (e) {
-    showError(String(e));
+    showModal("Recording error", String(e), [{ label: "OK", primary: true, onClick: () => {} }]);
   }
+}
+
+// A persistent, dismissible modal — for messages that must not be missed (unlike the status line,
+// which the poll loop can overwrite within a second).
+interface ModalAction {
+  label: string;
+  primary?: boolean;
+  onClick: () => void | Promise<void>;
+}
+let modalEl: HTMLElement | null = null;
+function closeModal(): void {
+  modalEl?.remove();
+  modalEl = null;
+}
+function showModal(title: string, message: string, actions: ModalAction[]): void {
+  closeModal();
+  const card = el("div", { class: "modal__card", role: "dialog", "aria-modal": "true" }, [
+    el("div", { class: "modal__title", text: title }),
+    el("p", { class: "modal__msg", text: message }),
+    el(
+      "div",
+      { class: "modal__actions" },
+      actions.map((a) =>
+        el("button", {
+          type: "button",
+          class: a.primary ? "primary" : "",
+          text: a.label,
+          onclick: () => {
+            closeModal();
+            void a.onClick();
+          },
+        }),
+      ),
+    ),
+  ]);
+  card.append(el("button", { class: "modal__close", type: "button", text: "×", title: "Dismiss", onclick: closeModal }));
+  const backdrop = el("div", { class: "modal" }, [card]);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+  modalEl = backdrop;
+  document.body.append(backdrop);
 }
 
 function updateSession(): void {

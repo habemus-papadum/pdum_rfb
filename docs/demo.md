@@ -27,12 +27,30 @@ soft and editorial. Everything the old terminal panel did now lives here, beside
 | **Stream** | Pick the shared stream or **mint a private one** (see below). |
 | **Scene & backend** | Pick a scene; pick an encode backend — switched **live on the same socket** (the browser follows on the next keyframe). Backends/scenes that can't run on this box are **greyed out** with a reason. |
 | **Quality** | Retune bitrate + fps (encoder rebuild), change render size (publishing a new size rebuilds encoders + keyframes), tag the color space (sRGB / Display-P3). |
-| **Viewer** | Client-only: swap the **framework** rendering the viewer (Vanilla / React / Svelte / Solid), the **fit** mode (contain/cover/fill), the **debug** console toggle, the on-canvas **stats overlay** (fps/rtt/bitrate + sparklines), plus capture-PNG / fullscreen / reconnect. |
+| **Viewer** | Client-only: swap the **framework** rendering the viewer (Vanilla / React / Svelte / Solid), the display **backend** (Canvas2D / WebGL2 / WebGPU / auto), the **fit** mode (contain/cover/fill), the **present** path (Worker / Main-thread — see *Zoom, pan & recording* below), **zoom** (also wheel to zoom, middle/right-drag to pan, pinch on touch), the **debug** console toggle, the on-canvas **stats overlay** (fps/rtt/bitrate + sparklines), plus capture-PNG / record / fullscreen / reconnect. |
 | **Structural** | The per-stream knobs fixed at birth (adaptive, still-after-settle, stats interval, pipeline depth, resize policy). Read-only here — **create a private stream to explore them**. |
 | **Session** | Live per-viewer stats (fps / bitrate / encode-ms / RTT / decode queue / dropped) from the server's `stats` push, plus the connection state and any scene error. |
 
 Every control that changes the *stream* is a **REST** call to the Python process (which
 logs it); the *viewer* controls are purely client-side.
+
+### Zoom, pan & recording
+
+**Zoom / pan** is client-side crop (no server re-render). Use the on-canvas toolbar's
+`−` / `+` / `fit` buttons or the Viewer group's Zoom row, **or the gestures**: mouse **wheel**
+zooms toward the cursor, a **middle- or right-button drag pans** (left-drag and clicks pass
+straight through to the scene, so `paint` still draws), and a two-finger **pinch** zooms/pans on
+touch. `fit` (toolbar) / `fit` (Zoom row) resets to the default framing.
+
+**Recording** ("● record") captures what the viewer shows to a `.webm`/`.mp4` client-side via
+`canvas.captureStream()` → `MediaRecorder`. That needs a **real on-screen canvas**, which only the
+**Main-thread** present path has — the default **Worker** path (Mode A) transfers its canvas to the
+decode worker as an `OffscreenCanvas`, so there's nothing on the main thread to capture. Hitting
+record on the Worker path pops a persistent explainer with a one-click **Switch to Main-thread &
+record**. The main-thread path is 2D-only, so the backend switch and zoom/pan are disabled there
+(it's the same reparent-safe path the notebook/anywidget uses by default under marimo). This is
+*client-side* recording; for a headless server-side tap see `Display.record()` in the
+[Python guide](guide_python.md).
 
 ## Multiple clients & streams
 

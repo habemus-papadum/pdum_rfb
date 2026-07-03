@@ -4,7 +4,7 @@
 // wrapper does — no wrapper-package build needed (mirrors reactViewer.ts). Every framework
 // runtime is lazy-loaded (dynamic import) so the initial bundle only pays for the one picked.
 
-import { RemoteFramebufferView, type RfbViewOptions } from "@habemus-papadum/rfb-widgets";
+import { MainThreadPresentView, RemoteFramebufferView, type RfbViewOptions } from "@habemus-papadum/rfb-widgets";
 import type { FitMode, SurfacePreference, ViewPreset } from "@habemus-papadum/rfb-widgets";
 
 export type Framework = "vanilla" | "react" | "svelte" | "solid";
@@ -39,7 +39,28 @@ export async function mountViewer(
   framework: Framework,
   container: HTMLElement,
   options: RfbViewOptions,
+  presentMainThread = false,
 ): Promise<ViewerHandle> {
+  if (presentMainThread) {
+    // The MAIN-THREAD present path (MainThreadPresentView) owns a real on-screen <canvas>, so it
+    // can `captureStream()` for client-side recording — unlike the Mode-A OffscreenCanvas path,
+    // whose canvas lives in the decode worker. It's a framework-neutral 2D presenter, so the
+    // backend-switch / zoom / pan controls don't apply here (they no-op); recording does.
+    const view = new MainThreadPresentView(container, options);
+    return {
+      framework,
+      setFit: (fit, bg) => view.setFit(fit, bg),
+      setSurface: () => {}, // no-op: main-thread present is 2D only
+      zoomBy: () => {}, // no-op: no viewport transform on this path
+      preset: () => {},
+      capture: async () => (await view.capture("blob")) as Blob,
+      canRecord: () => view.canRecord,
+      isRecording: () => view.isRecording,
+      startRecording: () => view.startRecording(),
+      stopRecording: () => view.stopRecording(),
+      dispose: () => view.dispose(),
+    };
+  }
   if (framework === "react") {
     const [{ createRoot }, { createElement }, { ReactViewer }] = await Promise.all([
       import("react-dom/client"),

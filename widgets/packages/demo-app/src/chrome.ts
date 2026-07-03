@@ -59,7 +59,9 @@ export function mountDemoChrome(host: HTMLElement, actions: ChromeActions, surfa
     button("−", "Zoom out", actions.zoomOut),
     zoomLabel,
     button("+", "Zoom in", actions.zoomIn),
-    button("⤢", "Fit / reset view", actions.resetView),
+    // Text "fit" (not a diagonal-arrows glyph, which reads as fullscreen next to ⛶) — resets
+    // zoom + pan back to the fit framing.
+    button("fit", "Fit — reset zoom & pan", actions.resetView),
   ]);
   host.append(toolbar);
 
