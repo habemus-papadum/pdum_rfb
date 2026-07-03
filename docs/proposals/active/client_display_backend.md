@@ -594,7 +594,9 @@ Each phase is independently shippable and leaves the tree green.
 - **(Roadmap item 2) — viewport UI.** Zoom/pan/crop `{src,dst}`, presets, gestures,
   event inverse-map — all on top of P1–P3, no new draw code.
 - **Future** — batteries backend-switch (§12); decode-straight-to-GPU-texture ingest if
-  profiling shows the `CanvasImageSource` hop costs (measure first).
+  profiling shows the `CanvasImageSource` hop costs (measure first — the draw-path benchmark
+  in §15 is the tool; it already shows the *present* side is negligible on every backend, so
+  the open cost is the worker→main frame transfer, not the draw).
 
 P1 alone is worth landing: it untangles `Renderer` and gives `viewport.ts` the
 `{src,dst}` primitive — the actual blocker for item 2 — before any GPU backend exists.
@@ -624,3 +626,73 @@ P1 alone is worth landing: it untangles `Renderer` and gives `viewport.ts` the
    viewport policy — recompute `{src,dst}` on the present side from a small state struct,
    or send the rects? Recommendation: send the compact `ViewportState`, compute next to
    `present` (keeps `viewport.ts` the single geometry source).
+
+---
+
+## 15. Measurements (draw-path benchmark)
+
+The "measure first" hunch behind the `"2d"` default (§7, open question #2) is now backed by
+a repeatable, headless benchmark instead of intuition.
+
+**Harness.** `widgets/bench-harness.html` + `widgets/demo/bench-harness.ts` — a server-free,
+main-thread page (mirrors `surface-harness.ts`) that renders a **known, deterministic moving
+frame sequence** (a rotating pool of distinct gradient + moving-box + speckle frames, so the
+driver can't elide a redundant upload) through a chosen path and publishes timings on
+`window.__bench`. Query params: `mode=A|B`, `surface=2d|webgl|webgpu` (Mode A),
+`feed=webgl|webgpu` (Mode B), `source=videoframe|bitmap`, `frame=WxH`, `frames`, `warmup`.
+Specs: `widgets/tests/e2e/bench.spec.ts` (chromium: Mode A `{2d, webgl}` + Mode B `{webgl}`)
+and `widgets/tests/e2e/bench-webgpu.spec.ts` (the gated `chromium-webgpu` project: Mode A/B
+`{webgpu}`). Run: `pnpm -C widgets e2e bench.spec.ts --project=chromium` and
+`… bench-webgpu.spec.ts --project=chromium-webgpu`; the table is printed and attached to the
+run.
+
+**Metrics** (main-thread wall-clock, `performance.now()`): `submitMs` = time around the
+draw calls (`setFrame`+`present` for Mode A; caller `upload`+composite for Mode B) — the CPU
+cost to *submit* a frame; `createMs` = per-frame `VideoFrame` construction (context, kept
+separate); `flushMs` = one final GPU drain (`readPixels` / `onSubmittedWorkDone`) after the
+whole run, i.e. the deferred GPU/raster backlog; `gpuMs` = real render-pass time from a WebGPU
+`timestamp-query` when the adapter exposes it (Mode B WebGPU), else `null`.
+
+> **⚠️ SwiftShader caveat — read before quoting these.** The only headless GPU available in
+> CI/agent sandboxes is **ANGLE/Dawn SwiftShader, a software rasteriser** (the WebGPU project
+> pins `--use-webgpu-adapter=swiftshader`). The `flushMs`/`gpuMs` (GPU-execution) numbers below
+> are therefore **NOT representative of real-GPU performance** — they measure a CPU emulation of
+> a GPU. What *is* portable and meaningful is (a) the `submitMs` (main-thread) column, which is
+> real CPU work regardless of the rasteriser, and (b) the harness + methodology. **Real-GPU
+> throughput numbers come from a human running these specs on hardware.**
+
+Measured here (Apple Silicon, headless Chromium/SwiftShader, 1280×720, VideoFrame source):
+
+| path | backend | submit mean | submit p95 | create mean | GPU drain (amortized)¹ | gpuMs (timestamp) |
+|---|---|---|---|---|---|---|
+| Mode A | 2d | 0.036 ms | 0.10 ms | 0.001 ms | ~7.4 ms/frame | — (no timer) |
+| Mode A | webgl | 0.032 ms | 0.10 ms | 0.004 ms | ~5.6 ms/frame | — (no timer) |
+| Mode B | webgl | 0.021 ms | 0.10 ms | 0.006 ms | ~6.2 ms/frame | — (no timer) |
+| Mode A | webgpu | 0.032 ms | 0.10 ms | 0.002 ms | ~9.1 ms/frame | `null` (Mode A pass internal) |
+| Mode B | webgpu | 0.033 ms | 0.10 ms | 0.003 ms | ~9.6 ms/frame | **1.27 ms** (n=30, real query) |
+
+¹ `flushMs ÷ (warmup+frames)`: a coarse per-frame proxy for the deferred **software-raster**
+backlog — the caveat applies in full; do not read these as GPU cost.
+
+**What it says (portable conclusions):**
+
+- **Per-frame present cost on the main thread is negligible — and effectively equal — across
+  all four backends** (`submit` median 0.000 ms, p95 ≤ 0.1 ms at 1280×720). Drawing a frame is
+  a *command submission*; the pixel-moving is a deferred GPU/compositor blit. This is the
+  concrete evidence for open question #2: **`"2d"` stays the default** — it adds no main-thread
+  cost over the GPU tiers, and `drawImage` of a hardware `VideoFrame` is itself a GPU blit, so
+  a GPU backend does not buy a cheaper *present*.
+- **The reason to choose WebGL/WebGPU is therefore Mode B (frame-as-texture) compositing and
+  future zoom/pan — not present speed.** The benchmark confirms the payoff isn't "a faster
+  `drawImage`"; it's "the frame is a first-class texture in your scene" (§1, §6).
+- **Mode B upload+composite is in the same negligible submit band as Mode A present**, so the
+  "decode-straight-to-GPU-texture" open item (§13 Future) is not blocked by any *submit*-side
+  overhead. The unmeasured piece is the **cross-thread `VideoFrame` transfer** (worker→main)
+  Mode B requires; it is a handle move, not a pixel copy (§9), and belongs in a follow-up that
+  times the transfer end-to-end under a real decode load.
+- **The WebGPU `timestamp-query` path works** (Mode B reported a real 1.27 ms render-pass time
+  even under SwiftShader), so the harness will yield genuine GPU-pass numbers on hardware
+  without code changes — the honest GPU-vs-GPU comparison the "measure first" note asks for.
+
+The absolute GPU/raster cost (the drain column) must be re-measured on real hardware; the
+harness makes that a one-command run on any target.

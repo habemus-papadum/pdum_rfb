@@ -64,6 +64,16 @@ output, verified against a controlled test frame — so the GPU paths exist for 
 compositing and (later) zoom/pan, not different pixels. See the
 [display backend design](proposals/active/client_display_backend.md).
 
+**Which backend pays?** Measured (see the benchmark in that proposal's *Measurements*
+section): at 1280×720 the **per-frame main-thread present cost is negligible for all three**
+backends — under 0.1 ms at p95 to *submit* `setFrame`+`present`, because the actual
+pixel-moving is a deferred GPU/compositor blit, not main-thread work. So the default is
+**`"2d"`**: it costs nothing extra on the thread and `drawImage` of a hardware `VideoFrame`
+is already a GPU blit. Reach for `"webgl"`/`"webgpu"` (or `FrameTextureFeed`, below) when you
+need the frame as a **texture in your own scene** (compositing, overlays, later zoom/pan) —
+that is the reason the GPU paths exist, not a faster present. Absolute GPU throughput is
+workload- and hardware-specific; run the benchmark on your target to compare there.
+
 **Debug logging.** `debug: true` turns on a tagged console play-by-play from the main
 thread and the decode worker — `[rfb:worker] ws / config / keyframe / frame` and
 `[rfb:view] state` — so you can watch the connection negotiate, keyframes get requested,

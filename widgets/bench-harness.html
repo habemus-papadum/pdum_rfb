@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pdum.rfb display-surface draw-path benchmark</title>
+  </head>
+  <body>
+    <!-- Server-free draw-path benchmark: times per-frame present cost across the three
+         Mode A backends (Canvas2D / WebGL2 / WebGPU) and the Mode B frame-as-texture
+         upload+composite paths, over a known deterministic frame sequence. Publishes the
+         timings on window.__bench for the e2e (tests/e2e/bench.spec.ts + bench-webgpu.spec.ts)
+         and for a human running it against real GPU hardware. No worker, no WebSocket. -->
+    <pre id="out">running benchmark…</pre>
+    <script type="module" src="/demo/bench-harness.ts"></script>
+  </body>
+</html>
