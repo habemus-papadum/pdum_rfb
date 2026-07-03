@@ -54,3 +54,6 @@ export type {
 } from "./eventTypes";
 
 export type { ConnectionState, Stats } from "./types";
+
+export { computeStatus } from "./statusOverlay";
+export type { StatusKind, StatusRenderer, ViewStatus } from "./statusOverlay";

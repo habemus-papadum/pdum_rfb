@@ -8,7 +8,8 @@ import { mbps, msFmt, n1 } from "@habemus-papadum/rfb-ui";
 import type { Stats } from "@habemus-papadum/rfb-widgets";
 import { clear, el } from "./dom";
 
-const HISTORY = 60; // samples kept per metric (~1 min at the demo's 1s stats cadence)
+const HISTORY = 30; // history points kept per sparkline
+const SAMPLE_INTERVAL_MS = 1000; // append one history point ~per second (see update())
 const SPARK_W = 96;
 const SPARK_H = 18;
 
@@ -89,6 +90,7 @@ export function createStatsOverlay(): StatsOverlay {
   const bitrateHist = ring(HISTORY);
   const rttHist = ring(HISTORY);
   const localFps = makeLocalFps();
+  let lastSampleT = 0; // wall-clock of the last sparkline history point
 
   const meta = el("div", { class: "stats-overlay__grid stats-overlay__meta" });
   const grid = el("div", { class: "stats-overlay__grid" });
@@ -124,9 +126,18 @@ export function createStatsOverlay(): StatsOverlay {
     // Prefer the server's measured fps; fall back to a locally-computed displayed fps.
     const local = localFps(stats.framesDisplayed);
     const fps = stats.serverFpsSent ?? (Number.isNaN(local) ? undefined : local);
-    if (fps !== undefined) fpsHist.push(fps);
-    if (stats.serverBitrateBps !== undefined) bitrateHist.push(stats.serverBitrateBps);
-    if (stats.serverRttMs !== undefined) rttHist.push(stats.serverRttMs);
+
+    // `update()` fires on every displayed frame (~30 Hz), but a sparkline point should
+    // represent ~1 s so `HISTORY` points span ~30 s of wall-clock — otherwise the whole
+    // history scrolls off in a second. Gate the ring-buffer pushes to ~1 Hz; the numeric
+    // readouts below still refresh every frame.
+    const now = performance.now();
+    if (now - lastSampleT >= SAMPLE_INTERVAL_MS) {
+      lastSampleT = now;
+      if (fps !== undefined) fpsHist.push(fps);
+      if (stats.serverBitrateBps !== undefined) bitrateHist.push(stats.serverBitrateBps);
+      if (stats.serverRttMs !== undefined) rttHist.push(stats.serverRttMs);
+    }
 
     if (!isVisible) return; // keep the ring buffers warm, but skip the DOM churn while hidden
 
@@ -137,11 +148,10 @@ export function createStatsOverlay(): StatsOverlay {
     pair(meta, "size", stats.frameWidth && stats.frameHeight ? `${stats.frameWidth}×${stats.frameHeight}` : "—");
     pair(meta, "dpr", stats.renderPixelRatio !== undefined ? n1(stats.renderPixelRatio) : "—");
 
+    // Only the metrics WITHOUT a sparkline live here — fps / bitrate / rtt would just duplicate
+    // the sparkline rows below (which already carry their current textual value).
     clear(grid);
     row("transport", stats.transport === "webcodecs" ? "H.264" : stats.transport === "image" ? "image" : "—");
-    row("fps", n1(fps));
-    row("rtt", msFmt(stats.serverRttMs));
-    row("bitrate", mbps(stats.serverBitrateBps));
     row("encode", msFmt(stats.serverEncodeMs));
     row("dropped", String(stats.framesDropped + (stats.serverDropped ?? 0)));
     row("queue", String(stats.decodeQueueSize));

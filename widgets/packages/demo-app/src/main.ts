@@ -34,8 +34,10 @@ const viewerOpts = {
 
 const viewportEl = el("div", { class: "viewport" });
 // The stats overlay is mounted on the `.demo__view` wrapper as a sibling of `viewportEl`, so it
-// survives `remountViewer()` (which only clears `viewportEl`'s children).
+// survives `remountViewer()` (which only clears `viewportEl`'s children). `viewEl` is that
+// wrapper — we fullscreen IT (not just the viewport) so the overlay stays visible in fullscreen.
 const overlay: StatsOverlay = createStatsOverlay();
+let viewEl: HTMLElement;
 const controlsEl = el("div", {});
 const pillEl = el("span", { class: "pill", "data-tone": "connecting", text: "connecting" });
 const clientsEl = el("dd", { text: "—" });
@@ -83,7 +85,8 @@ function buildShell(): void {
     el("div", { class: "demo__spacer" }),
     pillEl,
   ]);
-  const view = el("div", { class: "demo__view" }, [viewportEl, overlay.el]);
+  viewEl = el("div", { class: "demo__view" }, [viewportEl, overlay.el]);
+  const view = viewEl;
   overlay.setVisible(viewerOpts.overlay);
   const status = el("div", { class: "group" }, [
     el("div", { class: "group__title", text: "Session" }),
@@ -365,7 +368,7 @@ function viewerGroup(): HTMLElement {
     field("Overlay", overlayToggle, "Toggle the on-canvas stats overlay (fps · rtt · measured bitrate + sparklines), pinned to the viewport's bottom-left corner."),
     el("div", { class: "btn-row" }, [
       el("button", { type: "button", text: "capture PNG", onclick: () => void capture() }),
-      el("button", { type: "button", text: "fullscreen", onclick: () => void viewportEl.requestFullscreen?.() }),
+      el("button", { type: "button", text: "fullscreen", onclick: () => void viewEl.requestFullscreen?.() }),
       el("button", { type: "button", text: "reconnect", onclick: () => void remountViewer() }),
     ]),
   ]);

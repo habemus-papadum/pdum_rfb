@@ -5,10 +5,9 @@ The session is deliberately ignorant of *how* bytes move: it only needs to
 captures exactly that surface, and :class:`WebSocketTransport` adapts a
 ``websockets`` connection to it.
 
-This is the additive seam behind roadmap §3: a future ``WebTransport`` or a
-Starlette/ASGI ``WebSocket`` adapter (mapping ``WebSocketDisconnect`` onto the
-``ConnectionClosed`` type the session already catches) is a drop-in here, with no
-change to the session, encoders, or sources.
+This is the additive transport seam: the Starlette/ASGI ``WebSocket`` adapter
+(mapping ``WebSocketDisconnect`` onto the ``ConnectionClosed`` type the session
+already catches) drops in here, with no change to the session, encoders, or sources.
 """
 
 from __future__ import annotations

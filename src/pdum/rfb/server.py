@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from http import HTTPStatus
 from pathlib import Path
@@ -43,6 +44,8 @@ from .protocol import (
 )
 from .session import RfbSession
 from .transport import WebSocketTransport
+
+log = logging.getLogger("pdum.rfb.server")
 
 
 def _h264_importable() -> bool:
@@ -283,12 +286,29 @@ class _StreamHost:
                 stats_interval=self.stats_interval,
             )
             self.display._register_session(session)
+            log.info(
+                "client %s connected to stream %r → %s%s %dx%d (%d viewer(s))",
+                client_id[:8],
+                self.name,
+                transport,
+                f"/{selection.codec}" if selection.codec else "",
+                width,
+                height,
+                len(self.display._sessions),
+            )
             closer = asyncio.create_task(_close_feed_on_disconnect(conn, feed))
             try:
                 await session.run()
             finally:
                 closer.cancel()
                 self.display._remove(client_id, feed, session)
+                log.info(
+                    "client %s disconnected from stream %r (%d frame(s) dropped this session; %d viewer(s) left)",
+                    client_id[:8],
+                    self.name,
+                    session.dropped,
+                    len(self.display._sessions),
+                )
         except websockets.ConnectionClosed:
             pass
 

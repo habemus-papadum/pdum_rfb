@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import logging
 import time
 from typing import Any, Callable
 
@@ -28,6 +29,8 @@ from .adaptive import AdaptiveQualityController
 from .metrics import SessionMetrics
 from .protocol import config_message, header_for, pack_binary_message, parse_control
 from .types import EncodedPayload, EncoderBackend, FrameSource, RawFrame
+
+log = logging.getLogger("pdum.rfb.session")
 
 try:  # A client disconnect is a normal lifecycle event, not an error.
     from websockets.exceptions import ConnectionClosed as _ConnectionClosed
@@ -80,6 +83,7 @@ class RfbSession:
         self.force_keyframe = True
         self.inflight: set[int] = set()
         self.dropped = 0
+        self._last_drop_log_t = -1e9  # rate-limit the "dropping frames" warning to ~1/s
         self.closed = False
         self._enc_size: tuple[int, int] | None = None
         self._send_times: dict[int, float] = {}
@@ -142,6 +146,7 @@ class RfbSession:
             # The client's decoder stalled and it rebuilt — stop waiting for frames it will
             # never display so the next encode can send it a fresh keyframe.
             self.decoder_resets += 1
+            log.info("client rebuilt its decoder (stall recovery) — clearing inflight + forcing keyframe")
             self._reset_inflight()
         elif kind == "event":
             await self.source.handle_event(data["event"])
@@ -264,11 +269,22 @@ class RfbSession:
                 # stalled decoder / old build). Clear inflight + force a keyframe and fall
                 # through to send *this* frame, instead of dropping forever (silent deadlock).
                 self.inflight_timeouts += 1
+                log.warning(
+                    "client unresponsive for %.1fs (wedged decoder?) — clearing inflight + forcing keyframe",
+                    now - oldest,
+                )
                 self._reset_inflight()
             else:
                 self.dropped += 1
                 self.force_keyframe = True
                 self.metrics.record_dropped(now=now)
+                # Rate-limited so a sustained backlog logs ~once/second, not per dropped frame.
+                if now - self._last_drop_log_t >= 1.0:
+                    log.warning(
+                        "client behind — dropping frames (%d dropped so far; next frame forced to keyframe)",
+                        self.dropped,
+                    )
+                    self._last_drop_log_t = now
                 return "dropped"
 
         if self._reconfig is not None:

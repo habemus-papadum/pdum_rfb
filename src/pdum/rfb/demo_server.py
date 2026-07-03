@@ -858,12 +858,33 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _ensure_pdum_logging(level: int = logging.INFO) -> None:
+    """Give the ``pdum.rfb`` logger its own stderr handler.
+
+    ``pdum-rfb demo --dev`` runs the app in uvicorn's reload *subprocess*, which never calls
+    :func:`run_demo` (where ``logging.basicConfig`` runs) — and uvicorn only configures its own
+    loggers, leaving ours to the root's WARNING-only last resort. Without this, the server's
+    INFO logs (connects, scene switches) and even our own diagnostics are invisible in dev.
+    We attach a handler to ``pdum.rfb`` (not root) and stop propagation, so uvicorn's output
+    isn't duplicated. Idempotent across reloads."""
+    lg = logging.getLogger("pdum.rfb")
+    if getattr(lg, "_pdum_dev_handler", False):
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(name)s: %(message)s", "%H:%M:%S"))
+    lg.addHandler(handler)
+    lg.setLevel(level)
+    lg.propagate = False
+    lg._pdum_dev_handler = True  # type: ignore[attr-defined]
+
+
 def make_dev_app() -> Any:
     """App factory for ``pdum-rfb demo --dev`` — uvicorn ``reload=True`` re-imports this on every
     Python change, so config is read from env (it survives the reload subprocess). API-only: in
     dev the SPA is served by Vite (with HMR), which proxies REST + WS back to this process."""
     import os
 
+    _ensure_pdum_logging(logging.DEBUG if os.environ.get("RFB_DEMO_VERBOSE") == "1" else logging.INFO)
     return build_demo_app(
         width=int(os.environ.get("RFB_DEMO_W", "1280")),
         height=int(os.environ.get("RFB_DEMO_H", "720")),
@@ -892,7 +913,9 @@ def _run_static(host: str, port: int, w: int, h: int, fps: int, bitrate: int | s
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
-def _run_dev(host: str, api_port: int, w: int, h: int, fps: int, bitrate: int | str, open_browser: bool) -> None:
+def _run_dev(
+    host: str, api_port: int, w: int, h: int, fps: int, bitrate: int | str, open_browser: bool, verbose: bool = False
+) -> None:
     """Live-reload dev/agentic mode: Vite dev server (TS HMR) for the SPA, proxying REST + WS to a
     uvicorn process run with ``reload=True`` (Python HMR). Needs the repo checkout + Node."""
     import os
@@ -920,6 +943,8 @@ def _run_dev(host: str, api_port: int, w: int, h: int, fps: int, bitrate: int | 
         _open_browser_when_ready(url, host, vite_port)
     # Config for the reloadable API factory — env so it survives uvicorn's reload subprocess.
     os.environ.update(RFB_DEMO_W=str(w), RFB_DEMO_H=str(h), RFB_DEMO_FPS=str(fps), RFB_DEMO_BITRATE=str(bitrate))
+    if verbose:
+        os.environ["RFB_DEMO_VERBOSE"] = "1"
     try:
         uvicorn.run(
             "pdum.rfb.demo_server:make_dev_app",
@@ -928,7 +953,7 @@ def _run_dev(host: str, api_port: int, w: int, h: int, fps: int, bitrate: int | 
             reload_dirs=[str(_repo_root() / "src" / "pdum")],
             host=host,
             port=api_port,
-            log_level="warning",
+            log_level="info",  # dev: surface the server's own logs (connections, drops) alongside Vite
         )
     finally:
         with contextlib.suppress(Exception):
@@ -960,7 +985,7 @@ def run_demo(
     w, h = _even(width), _even(height)
     api_port = _free_port(host) if port == 0 else port
     if dev:
-        _run_dev(host, api_port, w, h, fps, bitrate, open_browser)
+        _run_dev(host, api_port, w, h, fps, bitrate, open_browser, verbose)
     else:
         _run_static(host, api_port, w, h, fps, bitrate, open_browser)
 

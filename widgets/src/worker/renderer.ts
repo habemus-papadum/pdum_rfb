@@ -20,6 +20,13 @@ export class Renderer {
   frameW = 0;
   frameH = 0;
 
+  // A 1:1 copy of the last decoded frame, kept at native resolution so we can repaint on a
+  // display-only resize / fit change WITHOUT a decoder reset (the source VideoFrame is closed
+  // right after draw, so we can't reach it later). Lets a resize keep the picture up instead of
+  // going blank until the next frame.
+  private lastFrame: OffscreenCanvas | null = null;
+  private lastFrameCtx: OffscreenCanvasRenderingContext2D | null = null;
+
   constructor(public canvas: OffscreenCanvas) {}
 
   private context(): OffscreenCanvasRenderingContext2D {
@@ -39,9 +46,18 @@ export class Renderer {
 
   resize(width: number, height: number): void {
     if (width > 0 && height > 0) {
+      // Setting the backing size clears the canvas — repaint the retained frame immediately at
+      // the new size so a display resize doesn't flash blank (no decoder reset needed).
       this.canvas.width = width;
       this.canvas.height = height;
+      this.redraw();
     }
+  }
+
+  /** Repaint the last retained frame with the current size/fit (no-op draw if none yet). Used
+   *  after a resize or a fit change so the picture updates without waiting for the next frame. */
+  redraw(): void {
+    this.paint();
   }
 
   /** The geometry state for the *current* frame size (used by the event path too). */
@@ -59,13 +75,30 @@ export class Renderer {
   draw(src: CanvasImageSource, frameW: number, frameH: number): void {
     this.frameW = frameW;
     this.frameH = frameH;
+    this.retain(src, frameW, frameH);
+    this.paint();
+  }
+
+  /** Keep a native-resolution copy of the last frame for repaint-on-resize. */
+  private retain(src: CanvasImageSource, frameW: number, frameH: number): void {
+    if (!this.lastFrame || this.lastFrame.width !== frameW || this.lastFrame.height !== frameH) {
+      this.lastFrame = new OffscreenCanvas(frameW, frameH);
+      this.lastFrameCtx = this.lastFrame.getContext("2d", { colorSpace: this.colorSpace });
+    }
+    this.lastFrameCtx?.drawImage(src, 0, 0, frameW, frameH);
+  }
+
+  /** Paint the retained frame onto the canvas with the current size + fit geometry. */
+  private paint(): void {
     const ctx = this.context();
     // Clear to the background first so `contain` letterbox bars and any shrink on resize
     // don't show stale pixels. `fill`/`cover` overpaint it entirely.
     ctx.fillStyle = this.background;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const { dx, dy, dw, dh } = frameDestRect(this.viewportState());
-    ctx.drawImage(src, dx, dy, dw, dh);
+    if (this.lastFrame) {
+      const { dx, dy, dw, dh } = frameDestRect(this.viewportState());
+      ctx.drawImage(this.lastFrame, dx, dy, dw, dh);
+    }
   }
 
   readPixels(): ImageData {

@@ -335,6 +335,6 @@ Three layers verify the system with no display and no manual clicking:
   encoders. The internal per-connection `_ClientFeed` is the `FrameSource` the
   session pulls; `BaseFrameSource` remains for internal/test use.
 - **Transport.** The session only needs an object with `await send(...)` and async
-  iteration. A future logical-channel `Transport`/`Channel` abstraction (WebSocket
-  now, WebTransport later — see the addendum) can wrap this without touching the
-  encoder or source layers.
+  iteration. The `Transport`/`Channel` abstraction wraps this without touching the
+  encoder or source layers — the `websockets` listener and the ASGI/Starlette
+  front-end both ride the same seam.

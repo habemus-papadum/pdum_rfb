@@ -110,12 +110,25 @@ body {
 
 .demo__view {
   grid-area: view;
+  position: relative; /* positioning context for the on-canvas stats overlay (its sibling) */
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-md);
   min-width: 0;
   min-height: 0;
+}
+
+/* Fullscreen targets `.demo__view` (not the bare viewport) so the stats overlay — a sibling of
+   the viewport — stays visible. Drop the padding so the viewport fills the screen, and pin the
+   overlay to the true corner (no padding to clear anymore). */
+.demo__view:fullscreen {
+  padding: 0;
+  background: var(--viewport-bg);
+}
+.demo__view:fullscreen .stats-overlay {
+  left: 0.75rem;
+  bottom: 0.75rem;
 }
 
 .viewport {
@@ -150,6 +163,7 @@ body {
   border-left: 1px solid var(--hairline);
   background: var(--panel);
   overflow-y: auto;
+  overflow-x: hidden; /* never let an over-wide control (e.g. the framework seg) scroll the rail */
   padding: var(--space-sm) 0 var(--space-lg);
 }
 
@@ -187,6 +201,15 @@ body {
 
 .field--wide {
   grid-template-columns: 1fr;
+}
+
+/* Grid children default to min-width:auto (content size), which lets a wide control
+   (the framework segmented toggle) blow out the column and scroll the rail. Let them
+   shrink; the seg wraps to fit instead. */
+.field > select,
+.field > .seg,
+.field > input {
+  min-width: 0;
 }
 
 /* inline help "?" — a small quiet glyph that reveals a styled popover on hover/focus */
@@ -326,6 +349,7 @@ button.primary:hover {
 /* segmented control (fit / framework toggles) */
 .seg {
   display: inline-flex;
+  flex-wrap: wrap; /* wrap to a second row rather than overflow the rail (4-item framework toggle) */
   border: 1px solid var(--hairline);
 }
 
@@ -491,8 +515,11 @@ a {
    legible over any rendered frame. `pointer-events: none` so it never blocks canvas input. */
 .stats-overlay {
   position: absolute;
-  left: 0.75rem;
-  bottom: 0.75rem;
+  /* Pinned to the viewport's inner bottom-left corner. `.demo__view` is the positioning
+     context, so the offsets clear its padding (the gap around the viewport) to sit on the
+     dark canvas, not in the surface-colored margin. */
+  left: calc(var(--space-md) + 0.6rem);
+  bottom: calc(var(--space-md) + 0.6rem);
   z-index: 10;
   pointer-events: none;
   min-width: 12.5rem;

@@ -16,6 +16,9 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./worker": {
+      "import": "./dist/worker.js"
     }
   },
   "files": [
@@ -26,8 +29,9 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --emitDeclarationOnly -p tsconfig.json && vite build",
-    "demo:build": "vite build --config vite.demo.config.ts",
+    "build": "tsc --emitDeclarationOnly -p tsconfig.json && vite build && vite build --config vite.worker.config.ts",
+    "build:worker": "vite build --config vite.worker.config.ts",
+    "demo:build": "pnpm run build:worker && vite build --config vite.demo.config.ts",
     "demo:preview": "vite preview --config vite.demo.config.ts",
     "build:anywidget": "vite build --config vite.anywidget.config.ts && node -e \"require('fs').copyFileSync('packages/rfb-ui/src/rfb.css','../src/pdum/rfb/static/widget.css')\"",
     "build:demo": "pnpm --filter @habemus-papadum/rfb-demo-app build",

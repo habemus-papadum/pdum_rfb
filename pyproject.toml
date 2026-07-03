@@ -197,6 +197,7 @@ dev = [
     "typer>=0.12",
     "starlette>=0.37",  # the [asgi] adapter + the `pdum-rfb demo` control plane (TestClient in tests)
     "uvicorn>=0.30",  # serves the `pdum-rfb demo` web app
+    "marimo>=0.23.13",
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",

@@ -17,9 +17,12 @@ export interface WorkerInitOptions {
   fit?: FitMode;
   /** Letterbox fill for `contain` (any CSS color; default `"#000"`). */
   background?: string;
-  /** Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode).
-   *  Genuine errors are surfaced either way; this adds the play-by-play. Default `false`. */
+  /** Verbose client-side console logging (per-frame decode play-by-play). Genuine errors and
+   *  lifecycle notices surface either way; this adds the firehose. Default `false`. */
   debug?: boolean;
+  /** Lifecycle `notice()` logging (WS/negotiation/keyframe/backpressure/recovery/resize).
+   *  Default `true`. */
+  notice?: boolean;
 }
 
 export type MainToWorker =

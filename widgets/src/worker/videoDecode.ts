@@ -11,7 +11,7 @@ import type { VideoChunkHeader } from "../protocol";
 import type { Renderer } from "./renderer";
 import { StallWatchdog } from "./stallWatchdog";
 
-const noLog: Logger = { enabled: false, log: () => {}, error: () => {} };
+const noLog: Logger = { enabled: false, log: () => {}, notice: () => {}, error: () => {} };
 const defaultNow = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 /** Resilience wiring — kept as an options bag so the core args stay readable. */

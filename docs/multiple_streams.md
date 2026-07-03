@@ -11,7 +11,6 @@ This is distinct from two things it is sometimes confused with:
 - **Multi-client** (many viewers of *one* stream) already works — the push `Display`
   fans each frame out to every viewer with its own session and backpressure. Streams
   are the *other* axis: many independent framebuffers.
-- **WebTransport** is unrelated — streams work fine over plain WebSocket.
 
 A stream is just "a `Display` plus its encoder config", and routing is purely
 additive: sessions, encoders, backpressure, auth, and "still after settle" are all

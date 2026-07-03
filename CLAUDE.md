@@ -285,7 +285,7 @@ cross-language contract — keep the Python and TS sides in sync.
   seam; the **ASGI** front-end (`asgi.py`, opt-in `[asgi]`) already rides it — the
   per-connection lifecycle is transport-neutral (`_StreamHost._serve_connection`), so
   both the `websockets` listener (`_WsConn`) and a Starlette WebSocket (`_AsgiConn`)
-  share it. A WebTransport adapter would drop in the same way (still deferred).
+  share it.
 - **Streams:** `serve_server()` → a `Server` hub fronts several named `Display`s on
   one port (URL-path routing, `GET /streams`); `serve()` is the single-`"default"`-
   stream case and exposes the hub via `display.server`. See `docs/multiple_streams.md`.
@@ -293,16 +293,17 @@ cross-language contract — keep the Python and TS sides in sync.
 ## Project status & roadmap
 
 Image, CPU-H.264, and GPU NVENC paths work end-to-end and are verified headlessly.
-The four planned roadmap items are **done** (see `docs/roadmap.md`): **§2** "still
-after interaction settles" (`serve(still_after=)`, `docs/still_after_settle.md`),
-**§8** multiple streams (`serve_server()`, `docs/multiple_streams.md`), **§3** the
-opt-in **ASGI/Starlette** front-end (`docs/asgi.md`), and **§1** adaptive/metrics
-polish (fps lever + opt-in server→client `stats` push surfaced in the client
-`Stats`). Done earlier: per-session metrics + `GET /metrics`, offline PSNR benchmark,
-adaptive quality, the NVENC backends. **§4 framework & notebook adapters — done:**
-React/Svelte/Solid npm wrappers (`widgets/packages/*`) and the Jupyter/marimo
-**anywidget** (`pdum.rfb.notebook`, `[anywidget]` extra, `docs/notebook.md`). Tabled:
-AV1/HEVC (§5), codec/rendering upgrades (§6), WebTransport.
+The major planned features are **done** (no longer tracked in `docs/roadmap.md`):
+"still after interaction settles" (`serve(still_after=)`,
+`docs/still_after_settle.md`), multiple streams (`serve_server()`,
+`docs/multiple_streams.md`), the opt-in **ASGI/Starlette** front-end (`docs/asgi.md`),
+adaptive/metrics polish (fps lever + opt-in server→client `stats` push surfaced in the
+client `Stats`), per-session metrics + `GET /metrics`, the offline PSNR benchmark, the
+NVENC backends, and the **framework & notebook adapters** — React/Svelte/Solid npm
+wrappers (`widgets/packages/*`) and the Jupyter/marimo **anywidget**
+(`pdum.rfb.notebook`, `[anywidget]` extra, `docs/notebook.md`). The remaining open
+items are the short list in `docs/roadmap.md`: client-side viewport (crop/zoom/pan),
+resolution as an adaptive lever, and AV1/HEVC.
 
 ## Hard rules (from AGENTS.md — do not violate)
 

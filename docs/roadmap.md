@@ -1,198 +1,99 @@
 # Roadmap / What's Next
 
-The image, CPU-H.264, and GPU NVENC paths all work end-to-end and are verified
-headlessly (pytest + Vitest + Playwright; the GPU tier runs weekly on real
-hardware). **Multiple browser clients also already work** — the push `Display` fans
-every frame out to N viewers, each with its own `RfbSession`/encoder/backpressure.
+The image, CPU-H.264, GPU-NVENC (host + zero-copy CUDA + SDK), and Apple
+VideoToolbox paths all work end-to-end and are verified headlessly (pytest +
+Vitest + Playwright; the GPU tier runs weekly on real hardware). Multiple browser
+clients, multiple named streams, still-after-settle, the ASGI/Starlette front-end,
+adaptive quality/metrics, auto-reconnect, and the framework + notebook adapters are
+all shipped. Those are done and no longer tracked here.
 
-This page proposes where to go next; items carry a rough **benefit · difficulty**
-read to help triage. Items marked _(addendum)_ come from the
-[design addendum](proposals/completed/remote_framebuffer_addendum.md).
+What follows is the short list of things actually worth doing next. It is
+deliberately not exhaustive. Each item carries a rough **benefit · difficulty** read
+to help triage.
 
-## Current plan
+## 1. Client-side viewport: crop, zoom, and pan
 
-Agreed execution order — the section numbers below are **stable identifiers, not the
-work order**. We proceed one item at a time, committing at each milestone:
+_benefit: high · difficulty: moderate_
 
-1. ~~**§2** — "still after interaction settles"~~ ✅ **done** (`serve(still_after=)`;
-   see [Still after settle](still_after_settle.md))
-2. ~~**§8** — multiple streams per server (named displays)~~ ✅ **done**
-   (`serve_server()` / `display.server.add_stream(...)`; see
-   [Multiple streams](multiple_streams.md))
-3. ~~**§3** — ASGI / Starlette adapter~~ ✅ **done** (`[asgi]` extra,
-   `pdum.rfb.asgi.rfb_endpoint`; WebTransport stays deferred; see [ASGI](asgi.md))
-4. ~~**§1** — adaptive / metrics remaining polish~~ ✅ **done** (fps lever,
-   server→client `stats` push surfaced in the client `Stats`; resolution-scale left
-   to the publisher — see §1 below)
+This is **entirely a client concern** — the server does not zoom and never needs to
+know the client's zoom/pan. The publisher owns the framebuffer; the client decides how
+to fit that frame into its canvas and where the viewer is looking, and does its own
+coordinate transforms so input events map back to frame space. Keeping the transform
+on the client is the whole point: one shared encoded stream, N viewers each framing it
+however they like, no per-client server render.
 
-All four planned items are done. Remaining open ideas live in their sections below
-(notably §5 AV1/HEVC, §6 codec upgrades, and the WebTransport half of §3), tabled
-until prioritized.
+Today the client's sizing is rigid — a small fixed set of fit modes. The work is to
+make it **arbitrary**:
 
-**Done:** §1, §2, §3, §4, §7, §8 (§4 = React/Svelte/Solid npm wrappers + the
-Jupyter/marimo anywidget). **Tabled** (revisit later): **§5** remaining
-(AV1 / HEVC / zero-copy interop) and **§6** (rendering & codec upgrades).
+- A general viewport transform (crop rect + zoom + pan) rather than fixed fit. The
+  geometry seam already exists: `viewport.ts` reserves `zoom`/`panX`/`panY` (identity
+  today) and `backingToFrame`/`frameDestRect` already round-trip event coordinates, so
+  gestures can drive zoom/pan without any wire change.
+- Simple named presets on top of the general transform — `fit`, `cover`, `fill`,
+  `1:1`, "center on point" — so the common cases stay one-liners.
 
-## 1. Measure & adapt the software encoder ✅ _(done)_
+The scaling/compositing method should be **pluggable**, not baked in. The worker
+composites decoded `VideoFrame`s with `drawImage` onto the transferred
+`OffscreenCanvas` today; a zoomed/cropped viewport is a natural place to add a
+WebGL (and later WebGPU) compositor that uploads the frame to a texture and samples the
+ROI on the GPU. Pick the renderer by capability; `drawImage` stays the floor. **Measure
+first** — `drawImage` of a hardware `VideoFrame` is already fast, so the GPU path only
+pays off once zoom/pan or profiling shows compositing is a real cost.
 
-- **Per-session metrics** — `metrics.py` (`SessionMetrics`): encode_ms, payload
-  bytes, in-flight, ACK RTT, decode-queue depth, fps, bitrate; exposed via
-  `session.metrics_snapshot()` and `GET /metrics` (`GET /streams/<name>/metrics`).
-- **Offline benchmark** — `python -m pdum.rfb.benchmark`: image vs H.264 across
-  patterns/resolutions with **real PSNR** (decodes the output back).
-- **Adaptive quality** — `adaptive.py` (`AdaptiveQualityController`), opt-in via
-  `serve(adaptive=True)` / `--adaptive`: three levers in order — bitrate, then **fps**
-  (rebuilds the encoder at the new rate), then in-flight — on congestion, recovering
-  when healthy, with a cooldown; emits `set_quality`.
-- **Client surfacing** ✅ — opt-in server→client `stats` push
-  (`serve(stats_interval=…)` / `--stats-interval`): the browser folds authoritative
-  RTT / fps / bitrate / encode-time / adaptive targets into its `Stats`
-  (`serverRttMs`, `targetFps`, …) via `onStats`; the worker now acts on `set_quality`
-  and `stats` instead of ignoring them.
+## 2. Resolution as an adaptive lever
 
-Remaining (open): **resolution-scale adaptation** is deliberately left to the
-publisher — in the push model you own the framebuffer resolution, so the clean place
-to drop it is the render loop (publish a smaller array; the encoder rebuilds and the
-browser re-`configure()`s). A server-driven hint could be added later if a real need
-appears.
+_benefit: medium · difficulty: moderate_
 
-## 2. "Still after interaction settles" ✅ _(done)_ _(addendum §1)_
+`AdaptiveQualityController` (`adaptive.py`) has three levers — bitrate, fps, then
+in-flight — but **not resolution**. In the push model the publisher owns the
+framebuffer size, so resolution-scale adaptation was deliberately left to the render
+loop. That's a real gap: on a congested link, dropping to a smaller encode is often
+the best quality-per-bit move, and every client re-`configure()`s cleanly on a resize
+already (the encoder rebuild + keyframe path is well-trodden).
 
-Stream lossy JPEG/H.264 while the user interacts, then — once no new frame has been
-published for `still_after` seconds — re-send each viewer a high-quality still of the
-resting frame: a **lossless PNG** on the image path, a clean **IDR** on the video
-path. Opt in with `serve(still_after=0.15)`; zero cost while interacting, no
-client-side changes. Implemented as an optional `encode_still()` encoder capability
-fed by `Display`'s `still_frame()`. See [Still after settle](still_after_settle.md).
+Add a server-driven **downscale hint** (a fourth lever, or a `set_quality` field the
+publisher can honor) so the loop can shrink the encoded frame under pressure and
+recover when healthy — without hand-rolling it in every app.
 
-## 3. Logical-channel transport: ASGI now, WebTransport later — ASGI ✅ _(done)_ _(addendum §2)_
+## 3. AV1 / HEVC codecs
 
-This is about the *transport*, **not** multi-client (which already works over plain
-WebSocket — see the intro). The **seam existed** — `transport.py`'s `Channel` +
-`WebSocketTransport`, a session that only needs `send` + async iteration, and a
-transport-neutral `AuthContext` — so the per-connection lifecycle was refactored to a
-transport-neutral `_StreamHost._serve_connection(conn)` and both front-ends share it.
+_benefit: medium · difficulty: high_
 
-- **ASGI / Starlette WebSocket adapter** ✅ — _benefit: high · difficulty: moderate._
-  Shipped as the opt-in `[asgi]` extra + `pdum.rfb.asgi` (`rfb_endpoint`,
-  `rfb_hub_endpoint`): mount the stream same-origin inside an existing
-  Starlette/FastAPI app and reuse its session/OAuth cookie (`AuthContext.cookies`).
-  A second front-end over the same `Display`/`RfbSession` core — the standalone
-  `serve()` path (and its zero-extra-deps `websockets` listener) is unchanged. The
-  adapter translates `WebSocketDisconnect` onto the `ConnectionClosed` the session
-  already catches; the app owns the loop, so the `Display` is built at startup and
-  the publish loop runs as a background task. See [ASGI](asgi.md).
-- **WebTransport (HTTP/3)** — _benefit: modest for sparse viz · difficulty: high._
-  Real QUIC streams per logical lane (video / control / events / telemetry) plus
-  unreliable **datagrams** for latest-wins events/acks, removing head-of-line
-  blocking. Needs an HTTP/3 server stack (e.g. `aioquic`), TLS certs, and is
-  Chromium-only on the client. Worth it only if HOL blocking actually bites (high
-  frame rates, many lanes) — it is **not** a prerequisite for multi-client (done) or
-  multiple streams (§8, which works fine over WebSocket).
+Better compression at the same bitrate. The encoder registry + capability negotiation
+already model this cleanly (`register_video_encoder`, `select_transport`), and the
+browser decodes via WebCodecs. Two fronts: `av1_nvenc`/HEVC on the GPU paths, and a
+CPU AV1 encoder (libaom / SVT-AV1) mirroring the libx264 backend. Gate the client on
+`VideoDecoder.isConfigSupported` exactly like the H.264 path. Also unlocks the 10-bit /
+HDR pipeline `types.ColorSpace` already models (`bit_depth`, `bt2020`/`pq`/`hlg` are
+expressible but not yet wired through a 10-bit encode/decode chain).
 
-```text
-WebSocketTransport:   app-level channel IDs + priority queue over one socket (today)
-WebTransportTransport: real QUIC streams for channels, datagrams for latest-wins
-                       events/acks (reduces head-of-line blocking)
-```
+## 4. Record to MP4 (server-side tap + client-side batteries)
 
-## 4. Framework & notebook adapters — **✅ done (React/Svelte/Solid wrappers + anywidget)**
+_benefit: high · difficulty: moderate_
 
-The core is framework-agnostic by design; thin, optional wrappers ride on it:
+A first-class "record what I'm publishing / viewing to an MP4" convenience. Today
+producing a demo clip means hand-rolling a muxer around the publish loop; this should be
+a one-liner. Two variants, deliberately symmetric:
 
-- **✅ Framework wrappers** — separate npm packages `@habemus-papadum/rfb-react`,
-  `-svelte`, `-solid`, each with a **headless** primitive (`useRemoteFramebuffer` /
-  `createRemoteFramebuffer`) and a **batteries** `<RemoteFramebuffer>` component
-  (status/HUD/latency badge/toolbar; themeable via CSS vars + slots/render-props). They
-  live under `widgets/packages/*` (pnpm workspace), peer-dep the core, and release in
-  version lockstep. See `docs/guide_javascript.md#framework-integration`.
-- **✅ Jupyter/marimo widget (anywidget)** — a single inlined-worker ESM built into the
-  wheel (`src/pdum/rfb/static/widget.js`, from `widgets/anywidget/`) + `pdum.rfb.notebook`
-  (`RfbCanvas`/`RfbViewer` + `publish_loop`) + `Display.widget()`. Works both locally
-  (`ws://` port) and remote/HTTPS (same-origin `wss://` via the `asgi.py` hub endpoint +
-  `base_path`). One line from a notebook; `[anywidget]` extra. See `docs/notebook.md`.
+- **Server-side, on the rendering interface.** A convenience on `Display` (e.g.
+  `display.record("out.mp4")` → a context manager / handle with `.stop()`) that taps the
+  same published-frame stream the sessions pull from and muxes it to a file — independent
+  of any connected browser, so it works headless (demos, screenshots, CI artifacts,
+  golden-frame capture). It **reuses the H.264 encoder** but muxes to a real MP4
+  container. Note this is the one place AVCC/MP4 is correct: the wire invariant ("Annex B
+  only, never route H.264 through an mp4 muxer") is about the *WebSocket* payload — a file
+  recording wants exactly the AVCC-in-MP4 the wire forbids, via a separate PyAV mux path.
+  Honor the real monotonic timestamps that already propagate source → encoder so variable
+  cadence (sparse `still_after` scenes included) records with correct frame timing. The
+  image transport can fall back to encoding stills into the same container.
+- **Client-side, in the batteries wrappers.** Record exactly what the *viewer* sees —
+  fit/zoom/pan and all — by `captureStream()`-ing the display canvas into a
+  `MediaRecorder` (webm/mp4 per browser support), exposed as a `startRecording()` /
+  `stopRecording(): Promise<Blob>` on `RemoteFramebufferView` and surfaced as a control in
+  the `<RemoteFramebuffer>` batteries chrome (a sibling to the existing `capture PNG`
+  button). Lives in the batteries tier, not the headless primitive. A later refinement
+  could mux the already-decoded `EncodedVideoChunk`s directly (no re-encode) when the
+  container/codec line up.
 
-## 5. NVIDIA NVENC backend ✅ _(host-memory, zero-copy CUDA, and PyAV-free SDK paths done)_ · **⏸ remaining tabled**
-
-- **Encoder** — `encoders/nvenc_cpu.py` (`NvencCpuEncoder`): hardware H.264 via
-  **PyAV's `h264_nvenc`** (its bundled ffmpeg is built with NVENC), emitting the
-  same low-latency Annex B as the libx264 path. Registered as `"nvenc_cpu"`; `serve()`
-  auto-detects via `nvenc_cpu_available()` (OS + `h264_nvenc` + a real GPU open, cached
-  with retry) and prefers it, with `--no-nvenc` / `has_nvenc=False` to opt out.
-- **Why PyAV, not PyNvVideoCodec** — NVIDIA's `PyNvVideoCodec` publishes no
-  `cp314` wheel and no sdist, so it cannot install on Python 3.14+. PyAV's NVENC
-  needs no extra Python package (only the host NVIDIA driver), so it is the
-  pragmatic host-memory backend.
-
-- **Zero-copy CUDA path** ✅ — `encoders/nvenc_gpu_pyav.py` (`NvencGpuPyavEncoder`,
-  registered `"nvenc_gpu_pyav"`) + `gpu.py`: a CuPy/DLPack NV12 (or RGB) device buffer
-  is fed straight to `h264_nvenc` via `from_dlpack` with **no host copy**. Opt in
-  with `serve(gpu=True)` and `publish()` a CuPy tensor; ~2.4–4.3× lower per-frame
-  latency than the host path (1080p 2.5 ms vs 7.3 ms). **Needs PyAV ≥ 18** (the
-  encode-side `hw_frames_ctx` wiring lands in 18.0 — gated by
-  `gpu.cuda_zerocopy_available()`); a pure-Python monkey-patch is impossible on
-  17.x, so `< 18` builds PyAV from source. See `docs/gpu_zerocopy.md` and
-  `python -m pdum.rfb.benchmark --gpu`.
-- **PyAV-free NVENC SDK path** ✅ — `encoders/nvenc_gpu_pdum.py` (`NvencGpuPdumEncoder`,
-  registered `"nvenc_gpu_pdum"`) rides the sibling package `habemus-papadum-nvenc`
-  (`pdum.nvenc`, built from `packages/nvenc/`): a thin pybind11 binding over
-  NVIDIA's Video Codec SDK encoder, **no PyAV at all** — so it sidesteps the
-  unreleased-PyAV-18 problem entirely. `serve(gpu=True)` **prefers** it (gated by
-  `nvenc_gpu_pdum_available()`), falling back to `nvenc_gpu_pyav`. It's the fastest path
-  measured (1080p ~2.3 ms). See `docs/proposals/completed/nvenc_sdk_evaluation.md`.
-
-Remaining: NVENC AV1 (`av1_nvenc`) and HEVC; a zero-copy OpenGL/CUDA-interop source;
-true zero-copy device input via `RegisterResource` (the SDK path does one intra-GPU
-copy today). GPU CI now exists as the weekly self-hosted `gpu-tests` workflow.
-
-## 6. Rendering & codec upgrades — **⏸ tabled**
-
-- `VideoFrame → WebGL/WebGPU` texture instead of `drawImage` for cheaper
-  composition (measure first).
-- **AV1** (`av01...`) via libaom/SVT-AV1 + WebCodecs for better compression at the
-  same bitrate.
-- ✅ **Auto-reconnect with backoff** — the worker rebuilds a dropped WebSocket
-  (exponential backoff + jitter, re-runs the hello/viewport handshake; skips deliberate
-  4401/4404 rejects), so a server restart / network blip resumes without a page refresh
-  (`widgets/src/reconnect.ts`, e2e `reconnect.spec.ts`). A proper keyframe-after-idle policy
-  is still open.
-
-## 7. Packaging & release ✅ _(pipeline in place)_
-
-The `release` workflow (`.github/workflows/release.yml`, a human-triggered
-`workflow_dispatch`) bumps every version file in lockstep, tags `vX.Y.Z`, and publishes all
-packages — `habemus-papadum-rfb` + native `-nvenc`/`-vtenc` to PyPI and
-`@habemus-papadum/rfb-widgets` + wrappers to npm — then cuts a GitHub release that redeploys
-the docs. The widget Vitest + Playwright e2e already run in CI (`ci.yml`). See
-[Repository & Development](development.md#releasing-the-pipeline).
-
-Remaining polish: a packaged non-`blob:` worker subpath export for the widgets (for
-strict-CSP sites), and broader GPU-wheel coverage (aarch64, more manylinux tags).
-
-## 8. Multiple streams per server (named displays) ✅ _(done)_ _(benefit: high · difficulty: moderate)_
-
-Host several framebuffers from one port — different cameras/viewports of a
-simulation, a dashboard of independent plots, or a per-user view — each an
-independent `Display` clients attach to by URL path, discoverable via a REST
-listing. Distinct from multi-client (many viewers of *one* stream) and from
-WebTransport (§3): this works over plain WebSocket. As shipped:
-
-- a **`Server`/hub** (`serve_server()`) owns the websockets listener + a
-  `{name: _StreamHost}` registry, each `_StreamHost` being a `Display` plus its
-  encoder config;
-- **path routing**: `ws://host/<name>` selects the stream; no path → the `"default"`
-  stream, so `serve(w, h)` and `RemoteFramebufferView({url})` are unchanged; an
-  unknown stream closes with application code `4404`;
-- the per-connection encoder config (`has_h264`/`has_nvenc`/`gpu`/`bitrate`/
-  `adaptive`/`still_after`/`authenticate`) lives **on each stream**, so streams can
-  differ (one GPU, one image; per-stream auth);
-- **REST**: `GET /streams` → `[{name, width, height, fps, clients}]`,
-  `GET /streams/<name>/metrics`; `AuthContext.stream` carries the stream name for
-  per-stream authz;
-- the one-liner holds: `serve(w, h)` returns the default stream with
-  `display.server` reachable to `add_stream(...)`; `serve_server()` builds a hub with
-  no default.
-
-See [Multiple streams](multiple_streams.md). (Per-*client* viewport rendering from a
-single shared scene is a harder, app-coupled variant — `_ClientFeed.viewport` is
-already recorded toward it.)
+The two share nothing but the intent; ship whichever is more useful first (the server tap
+is the more broadly useful one for demos and headless capture).

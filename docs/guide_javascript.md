@@ -253,25 +253,34 @@ By default the worker is **inlined** into the published bundle (Vite
 with zero worker configuration. The cost is that it constructs the worker from a
 `blob:` URL, which requires the CSP directive `worker-src blob:`.
 
-For strict-CSP sites that disallow `blob:` workers, supply your own `workerFactory`
-that constructs the worker from a real, cacheable asset:
+For strict-CSP sites that disallow `blob:` workers, the package ships the same worker
+as a standalone, self-contained ES module at the **`/worker` subpath export**
+(`@habemus-papadum/rfb-widgets/worker`). Point `workerFactory` at it via whatever
+asset-URL mechanism your bundler provides, and the worker loads from a real, cacheable
+URL under `worker-src 'self'` — no `blob:` needed:
 
 ```ts
+// Vite: `?url` yields the emitted asset's URL.
+import rfbWorkerUrl from "@habemus-papadum/rfb-widgets/worker?url";
+
 new RemoteFramebufferView(el, {
   url,
-  workerFactory: () =>
-    new Worker(new URL("./my-rfb-worker.ts", import.meta.url), { type: "module" }),
+  workerFactory: () => new Worker(rfbWorkerUrl, { type: "module" }),
 });
 ```
 
-(The `new URL(..., import.meta.url)` form is statically detected by Vite,
-webpack 5, Rollup, esbuild, and Parcel.)
+```ts
+// webpack 5 / Rollup / Parcel: the `new URL(..., import.meta.url)` form is
+// statically detected and emits the worker as a real asset.
+new RemoteFramebufferView(el, {
+  url,
+  workerFactory: () =>
+    new Worker(new URL("@habemus-papadum/rfb-widgets/worker", import.meta.url), { type: "module" }),
+});
+```
 
-> The published package currently ships **only** the self-contained inlined bundle
-> (`dist/index.js`); it does not yet expose a standalone `worker` entry point. To
-> build a non-`blob:` worker today, copy `src/worker/entry.ts` from this repo into
-> your app and point `workerFactory` at it. A packaged worker subpath export is on
-> the [roadmap](roadmap.md).
+The worker is versioned in lockstep with the main entry (same package), so it never
+drifts from the client that drives it. You no longer need to vendor `src/worker/entry.ts`.
 
 ## Advanced: protocol & helpers
 

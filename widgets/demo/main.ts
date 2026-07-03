@@ -1,4 +1,9 @@
 import { RemoteFramebufferView, type ConnectionState, type FitMode, type Stats } from "../src/index";
+// The shipped, self-contained worker asset (the `@habemus-papadum/rfb-widgets/worker`
+// subpath export). `?url` makes Vite emit it as a real, cacheable file and hand us its
+// URL — the strict-CSP path (`worker-src 'self'`, no `blob:`). `?worker=external`
+// selects it so the e2e proves the packaged worker decodes.
+import packagedWorkerUrl from "../dist/worker.js?url";
 
 const params = new URLSearchParams(location.search);
 // Defaults to the `pdum.rfb.server` CLI default port; override with ?ws=...
@@ -6,6 +11,9 @@ const wsUrl = params.get("ws") ?? `ws://${location.hostname}:8765`;
 const transport = params.get("transport") ?? "auto";
 const fit = (params.get("fit") as FitMode | null) ?? undefined;
 const debug = params.get("debug") === "1";
+// `?worker=external` → construct the worker from the packaged `dist/worker.js` URL
+// (a non-`blob:` module worker) instead of the default inlined `blob:` worker.
+const externalWorker = params.get("worker") === "external";
 
 const stage = document.getElementById("stage") as HTMLElement;
 const statsEl = document.getElementById("stats") as HTMLElement;
@@ -51,6 +59,7 @@ const view = new RemoteFramebufferView(stage, {
   imageOnly: transport === "image",
   fit,
   debug,
+  workerFactory: externalWorker ? () => new Worker(packagedWorkerUrl, { type: "module" }) : undefined,
   onStats: renderHud,
   onState: (st) => {
     connState = st;

@@ -123,7 +123,3 @@ The adapter presents the exact surface the session already speaks
 translates a `WebSocketDisconnect` onto the `ConnectionClosed` the session already
 treats as a normal end-of-life — which is why the negotiation, encoder, and session
 code are **byte-for-byte the same** across both front-ends.
-
-The other transport on the roadmap, **WebTransport (HTTP/3)**, would slot into the
-same seam; it stays deferred (Chromium-only, modest benefit for sparse viz) — see the
-[roadmap](roadmap.md).

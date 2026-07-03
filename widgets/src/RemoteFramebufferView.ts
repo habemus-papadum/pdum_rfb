@@ -10,6 +10,7 @@ import {
   normalizeWheelEvent,
 } from "./events";
 import { makeLogger, type Logger } from "./debug";
+import { computeStatus, createStatusOverlay, type StatusOverlayHandle, type StatusRenderer } from "./statusOverlay";
 import type { ConnectionState, MainToWorker, Stats, WorkerToMain } from "./types";
 import type { FitMode } from "./viewport";
 import { createInlineWorker } from "./workerFactory";
@@ -31,12 +32,21 @@ export interface RfbViewOptions {
   background?: string;
   /** Auth credential (e.g. a Google OAuth ID token) sent to the server in `hello`. */
   token?: string;
-  /** Verbose client-side console logging (WS lifecycle, negotiation, keyframes, decode).
-   *  Genuine errors surface either way; this adds the play-by-play. Default `false`. */
+  /** Verbose client-side console logging (per-frame decode play-by-play). Genuine errors and
+   *  lifecycle notices surface either way; this adds the firehose. Default `false`. */
   debug?: boolean;
+  /** Lifecycle `notice()` logging — WS open/close/reconnect, negotiation, keyframe requests,
+   *  backpressure, decoder reset/recovery, resize. Rare + actionable, not per-frame. Default
+   *  `true`; set `false` for a silent console (errors still show). */
+  notice?: boolean;
   onState?: (state: ConnectionState) => void;
   onStats?: (stats: Stats) => void;
   onError?: (err: Error) => void;
+  /** On-canvas status overlay (connecting / reconnecting / disconnected, and the brief gap
+   *  after a resize while the decoder resets and awaits a keyframe). `false` disables it; a
+   *  render function fully customizes its DOM. Default: a built-in spinner + label. Needs a
+   *  positioned host (a container target, or a canvas with a parent) — otherwise it no-ops. */
+  statusOverlay?: false | StatusRenderer;
 }
 
 const EMPTY_STATS: Stats = {
@@ -64,13 +74,20 @@ export class RemoteFramebufferView {
   private _stats: Stats = { ...EMPTY_STATS };
   private log: Logger;
 
+  // Status overlay: shown over the canvas during connect / reconnect / disconnect (and until the
+  // first frame arrives). A display resize repaints the retained frame in place — no blank — so
+  // it needs no overlay state of its own.
+  private overlayHost: HTMLElement | null = null;
+  private overlay: StatusOverlayHandle | null = null;
+
   constructor(target: HTMLCanvasElement | HTMLElement, options: RfbViewOptions) {
     this.options = options;
-    this.log = makeLogger(options.debug ?? false, "view");
+    this.log = makeLogger(options.debug ?? false, "view", options.notice ?? true);
     this.log.log("init", { url: options.url, fit: options.fit, imageOnly: options.imageOnly });
     this.dpr = options.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1;
     this.canvas = this.resolveCanvas(target);
     this.canvas.tabIndex = this.canvas.tabIndex >= 0 ? this.canvas.tabIndex : 0;
+    this.setupOverlay();
 
     const rect = this.canvas.getBoundingClientRect();
     const cssW = rect.width || this.canvas.clientWidth || 320;
@@ -102,6 +119,7 @@ export class RemoteFramebufferView {
         fit: options.fit,
         background: options.background,
         debug: options.debug,
+        notice: options.notice,
       },
     };
     this.worker.postMessage(init, [offscreen]);
@@ -141,6 +159,7 @@ export class RemoteFramebufferView {
     this.disposed = true;
     this.resizeObserver?.disconnect();
     this.detachListeners();
+    this.overlay?.destroy();
     this.post({ type: "dispose" });
     this.worker.terminate();
     this.captureWaiters.clear();
@@ -149,13 +168,35 @@ export class RemoteFramebufferView {
   // --- internals ----------------------------------------------------------
 
   private resolveCanvas(target: HTMLCanvasElement | HTMLElement): HTMLCanvasElement {
-    if (target instanceof HTMLCanvasElement) return target;
+    if (target instanceof HTMLCanvasElement) {
+      this.overlayHost = target.parentElement; // overlay (if any) sits over the canvas in its parent
+      return target;
+    }
     const canvas = target.ownerDocument.createElement("canvas");
     canvas.style.width = "100%";
     canvas.style.height = "100%";
     canvas.style.display = "block";
     target.appendChild(canvas);
+    this.overlayHost = target; // we own this container — overlay is a sibling of the canvas in it
     return canvas;
+  }
+
+  /** Mount the on-canvas status overlay (unless disabled or no positioned host is available). */
+  private setupOverlay(): void {
+    if (this.options.statusOverlay === false || !this.overlayHost) return;
+    // The overlay is absolutely positioned; give it a positioned offset parent if the host is
+    // still `static` (relative doesn't change flow, so this is layout-safe).
+    if (getComputedStyle(this.overlayHost).position === "static") {
+      this.overlayHost.style.position = "relative";
+    }
+    const render = typeof this.options.statusOverlay === "function" ? this.options.statusOverlay : undefined;
+    this.overlay = createStatusOverlay(this.overlayHost, render);
+    this.refreshStatus();
+  }
+
+  /** Recompute + apply the overlay status from the current connection state / frame count. */
+  private refreshStatus(): void {
+    this.overlay?.update(computeStatus(this._state, this._stats.framesDisplayed));
   }
 
   private post(msg: MainToWorker): void {
@@ -235,10 +276,12 @@ export class RemoteFramebufferView {
       case "state":
         this._state = msg.state;
         this.log.log("state", msg.state);
+        this.refreshStatus();
         this.options.onState?.(msg.state);
         break;
       case "stats":
         this._stats = msg.stats;
+        this.refreshStatus();
         this.options.onStats?.(msg.stats);
         break;
       case "capture-result": {

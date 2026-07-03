@@ -66,8 +66,13 @@ function send(msg: HelloMsg | AckMsg | RequestKeyframeMsg | SetViewportMsg | obj
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+let lastKeyframeReason = "";
 function requestKeyframe(reason: string): void {
-  dbg.log("keyframe", "request:", reason);
+  // Notice the first request of each distinct reason (actionable), but demote consecutive
+  // repeats (e.g. "awaiting keyframe" firing on every dropped delta) to the debug stream.
+  if (reason !== lastKeyframeReason) dbg.notice("keyframe", "request:", reason);
+  else dbg.log("keyframe", "request:", reason);
+  lastKeyframeReason = reason;
   send({ type: "request_keyframe", reason } satisfies RequestKeyframeMsg);
 }
 
@@ -119,7 +124,7 @@ function handleControl(control: { type: string; [k: string]: unknown }): void {
   // render DPR + color space; `set_quality` and `stats` carry adaptive targets /
   // server-truth metrics we fold into Stats so onStats sees authoritative metrics.
   if (control.type === "config") {
-    dbg.log("config", {
+    dbg.notice("negotiated", {
       transport: control.transport,
       codec: control.codec,
       pixel_ratio: control.pixel_ratio,
@@ -174,7 +179,7 @@ async function startConnection(url: string): Promise<void> {
   post({ type: "state", state: reconnectAttempts > 0 ? "reconnecting" : "connecting" });
 
   ws.onopen = async () => {
-    dbg.log("ws", "open");
+    dbg.notice("ws", "open");
     reconnectAttempts = 0; // a successful connect resets the backoff ladder
     post({ type: "state", state: "open" });
     video?.reset();
@@ -216,7 +221,7 @@ async function startConnection(url: string): Promise<void> {
   };
 
   ws.onclose = (ev: CloseEvent) => {
-    dbg.log("ws", "closed", { code: ev.code, reason: ev.reason });
+    dbg.notice("ws", "closed", { code: ev.code, reason: ev.reason });
     // Our own teardown or a deliberate server reject (auth/unknown-stream) is terminal;
     // anything else (reload, crash, network blip) is transient — reconnect with backoff.
     if (disposed || isPermanentClose(ev.code)) {
@@ -237,7 +242,7 @@ function scheduleReconnect(): void {
   if (disposed || wsUrl === null || reconnectTimer !== null) return;
   const delay = reconnectDelay(reconnectAttempts);
   reconnectAttempts += 1;
-  dbg.log("ws", "reconnect scheduled", { attempt: reconnectAttempts, delayMs: delay });
+  dbg.notice("ws", "reconnect scheduled", { attempt: reconnectAttempts, delayMs: delay });
   post({ type: "state", state: "reconnecting" });
   reconnectTimer = self.setTimeout(() => {
     reconnectTimer = null;
@@ -268,7 +273,7 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
   switch (msg.type) {
     case "init": {
       initOptions = msg.options ?? {};
-      dbg = makeLogger(!!initOptions.debug, "worker");
+      dbg = makeLogger(!!initOptions.debug, "worker", initOptions.notice ?? true);
       dbg.log("init", { backing: [msg.backingWidth, msg.backingHeight], dpr: msg.devicePixelRatio });
       cssWidth = msg.cssWidth;
       cssHeight = msg.cssHeight;
@@ -293,7 +298,7 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         dbg,
         {
           onDecoderReset: () => {
-            dbg.log("recover", "-> decoder_reset (asking server to clear inflight)");
+            dbg.notice("recover", "decoder reset — asking server to clear inflight");
             send({ type: "decoder_reset" });
           },
           onRecovered: () => {
@@ -316,16 +321,22 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       if (renderer) {
         if (msg.fit) renderer.fit = msg.fit;
         if (msg.background !== undefined) renderer.background = msg.background;
+        renderer.redraw(); // apply the new fit/background to the current frame immediately
       }
       break;
     case "resize":
+      dbg.notice("resize", { backing: [msg.backingWidth, msg.backingHeight], css: [msg.cssWidth, msg.cssHeight] });
       cssWidth = msg.cssWidth;
       cssHeight = msg.cssHeight;
       backingWidth = msg.backingWidth;
       backingHeight = msg.backingHeight;
       pixelRatio = msg.pixelRatio;
+      // A display-only resize (CSS/DPR): the incoming stream resolution is unchanged, so the
+      // decoder keeps running and we just repaint the retained frame at the new canvas size —
+      // no reset, no keyframe request, no blank. If the server chooses to resize its framebuffer
+      // (match_client policy), the client reconfigures reactively when the new-size keyframe
+      // arrives. `set_viewport` stays informational (event-coordinate mapping + that policy).
       renderer?.resize(msg.backingWidth, msg.backingHeight);
-      video?.reset();
       send({
         type: "set_viewport",
         width: msg.cssWidth,
@@ -334,7 +345,6 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         pheight: msg.backingHeight,
         ratio: msg.pixelRatio,
       });
-      requestKeyframe("viewport resized");
       break;
     case "capture":
       handleCapture(msg.id, msg.format);
