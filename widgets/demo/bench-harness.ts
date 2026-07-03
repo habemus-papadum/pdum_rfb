@@ -2,12 +2,18 @@
 // cost of the display-backend draw paths so the "Canvas2D is the default, GPU is opt-in"
 // hunch in docs/proposals/completed/client_display_backend.md can be MEASURED, not guessed.
 //
-// It answers two questions:
+// It answers three questions:
 //   1. Mode A (managed present): how much does setFrame()+present() cost per frame on each of
 //      Canvas2D / WebGL2 / WebGPU, over a known moving frame sequence?
 //   2. Mode B (frame-as-texture): how much does upload-into-caller-texture + a representative
 //      composite draw cost on WebGL2 / WebGPU — i.e. is the decode-straight-to-GPU-texture
 //      path's overhead worth it vs Mode A present?
+//   3. mode=transfer (the other half of "is Mode B worth it?"): what does the cross-thread hop
+//      Mode B requires cost — a decode worker builds each frame and TRANSFERS it to main, main
+//      uploads it into the caller texture. Times the postMessage Transferable handoff latency
+//      and the main-thread upload(), against an off-main baseline (frame built ON main, no
+//      transfer) so the delta is exactly what the transfer/upload pays for the
+//      composite-into-your-own-scene capability. See runModeTransfer + benchDecodeWorker.ts.
 //
 // Metrics per run (all in milliseconds, main-thread wall-clock via performance.now()):
 //   - submitMs {mean,median,p95,min,max}: the headline — time around the draw calls
@@ -30,9 +36,10 @@ import type { SurfacePreference } from "../src/types";
 import { presentGeometry, type FitMode } from "../src/viewport";
 import { createDisplaySurface } from "../src/worker/surfaceFactory";
 import { WebglFrameTexture, WebgpuFrameTexture } from "../src/index";
+import { makeFrame, makePool } from "./benchFrames";
 
 const params = new URLSearchParams(location.search);
-const mode = (params.get("mode") ?? "A").toUpperCase(); // "A" present | "B" frame-as-texture
+const mode = (params.get("mode") ?? "A").toUpperCase(); // "A" present | "B" frame-as-texture | "TRANSFER"
 const requested = (params.get("surface") as SurfacePreference | null) ?? "2d"; // Mode A backend
 const feedKind = params.get("feed") ?? "webgl"; // Mode B: "webgl" | "webgpu"
 const sourceKind = params.get("source") ?? "videoframe"; // "videoframe" (sync) | "bitmap" (async)
@@ -81,6 +88,11 @@ interface BenchResult {
   flushMs?: number;
   gpuMs?: Summary | null;
   gpuNote?: string;
+  // mode=transfer only:
+  transferMs?: Summary; // worker→main postMessage(Transferable) one-way handoff latency
+  uploadMs?: Summary; // main-thread upload() of the TRANSFERRED frame
+  baselineUploadMs?: Summary; // main-thread upload() of a frame built ON main (no transfer)
+  crossOriginIsolated?: boolean; // false → performance.now() is coarsened (see gpuNote)
   userAgent: string;
 }
 
@@ -106,41 +118,8 @@ function expose(r: Partial<BenchResult> & { backend: string; mode: string }): vo
   if (out) out.textContent = JSON.stringify(full, null, 2);
 }
 
-// ---- a known, deterministic, MOVING frame sequence -----------------------------------------
-// Distinct content per pool slot (a moving white box + varying gradient + speckle) so the
-// driver can't elide a redundant upload, mirroring a real changing stream.
-function makePool(n: number, w: number, h: number): OffscreenCanvas[] {
-  const pool: OffscreenCanvas[] = [];
-  for (let i = 0; i < n; i++) {
-    const c = new OffscreenCanvas(w, h);
-    const ctx = c.getContext("2d")!;
-    const g = ctx.createLinearGradient(0, 0, w, h);
-    g.addColorStop(0, `hsl(${(i * 37) % 360} 80% 45%)`);
-    g.addColorStop(1, `hsl(${(i * 37 + 140) % 360} 80% 20%)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    const bw = Math.max(4, (w * 0.2) | 0);
-    const bh = Math.max(4, (h * 0.2) | 0);
-    const bx = ((i / n) * (w - bw)) | 0;
-    ctx.fillStyle = "white";
-    ctx.fillRect(bx, (h * 0.4) | 0, bw, bh);
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    for (let k = 0; k < 300; k++) {
-      const x = ((Math.sin(i * 1.3 + k * 2.1) * 0.5 + 0.5) * w) | 0;
-      const y = ((Math.cos(i * 0.7 + k * 1.7) * 0.5 + 0.5) * h) | 0;
-      ctx.fillRect(x, y, 3, 3);
-    }
-    pool.push(c);
-  }
-  return pool;
-}
-
+// ---- a known, deterministic, MOVING frame sequence (shared with the transfer worker) -------
 const pool = makePool(poolSize, frameW, frameH);
-
-async function makeFrame(src: OffscreenCanvas, ts: number): Promise<VideoFrame | ImageBitmap> {
-  if (sourceKind === "bitmap") return createImageBitmap(src);
-  return new VideoFrame(src, { timestamp: ts });
-}
 
 // ---- Mode A: managed present through a DisplaySurface --------------------------------------
 async function runModeA(): Promise<void> {
@@ -156,7 +135,7 @@ async function runModeA(): Promise<void> {
   const submit: number[] = [];
   for (let i = 0; i < warmup + frames; i++) {
     const c0 = performance.now();
-    const frame = await makeFrame(pool[i % pool.length], i * 1000);
+    const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
     const c1 = performance.now();
     surface.setFrame(frame, frameW, frameH);
     surface.present(geom, background);
@@ -184,7 +163,7 @@ async function runModeA(): Promise<void> {
     if (timed.enableGpuTiming()) {
       const gs: number[] = [];
       for (let i = 0; i < 30; i++) {
-        const frame = await makeFrame(pool[i % pool.length], i * 1000);
+        const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
         surface.setFrame(frame, frameW, frameH);
         const ms = await timed.presentTimed(geom, background);
         (frame as { close?: () => void }).close?.();
@@ -258,7 +237,7 @@ async function runModeBWebgl(): Promise<void> {
   const submit: number[] = [];
   for (let i = 0; i < warmup + frames; i++) {
     const c0 = performance.now();
-    const frame = await makeFrame(pool[i % pool.length], i * 1000);
+    const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
     const c1 = performance.now();
     up.upload(frame, frameW, frameH); // takes ownership + closes the frame
     drawQuad();
@@ -363,7 +342,7 @@ async function runModeBWebgpu(): Promise<void> {
   const submit: number[] = [];
   for (let i = 0; i < warmup + frames; i++) {
     const c0 = performance.now();
-    const frame = await makeFrame(pool[i % pool.length], i * 1000);
+    const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
     const c1 = performance.now();
     up.upload(frame, frameW, frameH);
     const enc = composite(false);
@@ -383,7 +362,7 @@ async function runModeBWebgpu(): Promise<void> {
   if (querySet && resolveBuf && readBuf) {
     try {
       for (let i = 0; i < 30; i++) {
-        const frame = await makeFrame(pool[i % pool.length], i * 1000);
+        const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
         up.upload(frame, frameW, frameH);
         const enc = composite(true);
         enc.resolveQuerySet(querySet, 0, 2, resolveBuf, 0);
@@ -415,9 +394,139 @@ async function runModeBWebgpu(): Promise<void> {
   });
 }
 
+// ---- mode=transfer: the worker→main frame handoff + main-thread upload ----------------------
+// A "caller uploader" seam over the two Mode B texture uploaders so the ping-pong loop is
+// backend-agnostic: it uploads a frame (taking ownership, exactly as FrameTextureFeed does) and
+// can force a final GPU drain. The COMPOSITE isn't re-timed here — that's Mode B's job; this
+// mode isolates the two costs the *present* benchmark left unmeasured: the cross-thread handoff
+// and the main-thread upload().
+interface CallerUploader {
+  backend: string;
+  upload(frame: VideoFrame | ImageBitmap, w: number, h: number): void;
+  drain(): Promise<void>;
+  dispose(): void;
+}
+
+async function makeCallerUploader(): Promise<CallerUploader | { skip: string }> {
+  if (feedKind === "webgpu") {
+    const gpu = (navigator as unknown as { gpu?: GPU }).gpu;
+    const adapter = gpu ? await gpu.requestAdapter() : null;
+    if (!adapter) return { skip: "no WebGPU adapter" };
+    const device = await adapter.requestDevice();
+    const up = new WebgpuFrameTexture(device);
+    return {
+      backend: "webgpu",
+      upload: (frame, w, h) => up.upload(frame, w, h), // copyExternalImageToTexture (queue op)
+      drain: () => device.queue.onSubmittedWorkDone(),
+      dispose: () => up.dispose(),
+    };
+  }
+  const canvas = new OffscreenCanvas(frameW, frameH);
+  const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true });
+  if (!gl) return { skip: "no WebGL2 context" };
+  const up = new WebglFrameTexture(gl);
+  return {
+    backend: "webgl",
+    upload: (frame, w, h) => up.upload(frame, w, h), // texImage2D (synchronous copy + close)
+    drain: async () => {
+      const px = new Uint8Array(4);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // force GPU sync
+    },
+    dispose: () => up.dispose(),
+  };
+}
+
+interface TransferMsg {
+  type: "frame";
+  frame: VideoFrame | ImageBitmap;
+  frameW: number;
+  frameH: number;
+  i: number;
+  postAbs: number; // performance.now() + performance.timeOrigin at the worker post site
+  createMs: number;
+}
+
+async function runModeTransfer(): Promise<void> {
+  const uploader = await makeCallerUploader();
+  if ("skip" in uploader) {
+    expose({ mode: "TRANSFER", backend: "none", skipped: true, reason: uploader.skip });
+    return;
+  }
+
+  // Off-main BASELINE: frame built on THIS thread, upload only (no cross-thread hop). The
+  // reference the transfer upload is measured against.
+  const baselineUpload: number[] = [];
+  for (let i = 0; i < warmup + frames; i++) {
+    const frame = await makeFrame(pool[i % pool.length], i * 1000, sourceKind);
+    const u0 = performance.now();
+    uploader.upload(frame, frameW, frameH);
+    const u1 = performance.now();
+    if (i >= warmup) baselineUpload.push(u1 - u0);
+  }
+
+  // TRANSFER: the worker builds each frame and transfers it; main receives + uploads. Ping-pong
+  // (request → produce → transfer) keeps exactly one frame in flight so transferMs is the pure
+  // handoff, not queue-drain latency.
+  const worker = new Worker(new URL("./benchDecodeWorker.ts", import.meta.url), { type: "module" });
+  await new Promise<void>((resolve) => {
+    worker.onmessage = () => resolve();
+    worker.postMessage({ type: "init", frameW, frameH, poolSize, sourceKind });
+  });
+  const nextFrame = (i: number) =>
+    new Promise<TransferMsg>((resolve) => {
+      worker.onmessage = (ev: MessageEvent<TransferMsg>) => resolve(ev.data);
+      worker.postMessage({ type: "next", i });
+    });
+
+  const transfer: number[] = [];
+  const upload: number[] = [];
+  const create: number[] = [];
+  for (let i = 0; i < warmup + frames; i++) {
+    const m = await nextFrame(i);
+    const recvAbs = performance.now() + performance.timeOrigin;
+    const u0 = performance.now();
+    uploader.upload(m.frame, m.frameW, m.frameH);
+    const u1 = performance.now();
+    if (i >= warmup) {
+      // Clamp: cross-thread clock coarsening/jitter (no cross-origin isolation) can make a
+      // sub-resolution handoff read slightly negative.
+      transfer.push(Math.max(0, recvAbs - m.postAbs));
+      upload.push(u1 - u0);
+      create.push(m.createMs);
+    }
+  }
+
+  const f0 = performance.now();
+  await uploader.drain();
+  const flushMs = performance.now() - f0;
+  worker.terminate();
+  uploader.dispose();
+
+  const coi = crossOriginIsolated;
+  expose({
+    mode: "TRANSFER",
+    backend: uploader.backend,
+    transferMs: summarize(transfer),
+    uploadMs: summarize(upload),
+    baselineUploadMs: summarize(baselineUpload),
+    createMs: summarize(create), // worker-side frame construction
+    flushMs,
+    gpuMs: null,
+    crossOriginIsolated: coi,
+    gpuNote:
+      `worker→main ${sourceKind} transfer handoff + main-thread upload. ` +
+      (coi
+        ? "cross-origin isolated: performance.now() is high-resolution."
+        : "NOT cross-origin isolated: performance.now() is coarsened (~100µs) + jittered, so a sub-100µs " +
+          "handoff reads as 0 / a coarse step — read transferMs as an aggregate ceiling, not a per-frame truth."),
+  });
+}
+
 async function main(): Promise<void> {
   try {
-    if (mode === "B") {
+    if (mode === "TRANSFER") {
+      await runModeTransfer();
+    } else if (mode === "B") {
       if (feedKind === "webgpu") await runModeBWebgpu();
       else await runModeBWebgl();
     } else {
