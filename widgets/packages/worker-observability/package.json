@@ -1,0 +1,23 @@
+{
+  "name": "@habemus-papadum/worker-observability",
+  "version": "0.0.0",
+  "description": "Framework-agnostic bridge that makes a Web Worker's logs + state observable from the main thread (and thus from agentic browser tooling). PRIVATE / experimental.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./main": "./src/main.ts"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

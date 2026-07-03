@@ -81,8 +81,12 @@ function reparent(): void {
   if (original) original.appendChild(el); // move back where it was
 }
 
-// Debug hooks consumed by tests/e2e/anywidget.spec.ts (mirrors demo/main.ts __rfb).
-(globalThis as unknown as { __rfb: unknown }).__rfb = {
+// Debug hooks consumed by tests/e2e/anywidget*.spec.ts (mirrors demo/main.ts __rfb). The view
+// mounted by the anywidget already installed the observability registry at `window.__rfb`
+// (`.logs`, `.setDebug`, `.instances`); DECORATE it with these harness hooks rather than
+// replacing it, so both surfaces coexist.
+const g = globalThis as unknown as { __rfb?: Record<string, unknown> };
+g.__rfb = Object.assign(g.__rfb ?? {}, {
   state: () => model.get("state"),
   stats: () => model.get("stats"),
   lastError: () => model.get("last_error"),
@@ -90,4 +94,4 @@ function reparent(): void {
   mainCanvasCapture,
   reparent,
   cleanup,
-};
+});

@@ -3,9 +3,11 @@
 // transferred OffscreenCanvas, and handles ACK/backpressure. The main thread
 // only captures DOM events and forwards them here.
 
+import { installWorkerObservability, type WorkerObservability } from "@habemus-papadum/worker-observability/worker";
+
 import { BackpressureController, KeyframeGate } from "../backpressure";
 import { probeCapabilities } from "../capabilities";
-import { makeLogger, type Logger } from "../debug";
+import { type Logger } from "../debug";
 import type {
   AckMsg,
   HelloMsg,
@@ -44,7 +46,20 @@ let pixelRatio = 1;
 // echoed on pointer/wheel events so a publisher can recover logical coordinates.
 let frameDpr = 1;
 let initOptions: WorkerInitOptions = {};
-let dbg: Logger = makeLogger(false, "worker");
+// Observability: a stable logger whose every emitted line is FORWARDED to the main thread (the
+// worker's own console.* is invisible to the Chrome MCP browser tools), plus a runtime
+// `set_debug` handler and a heartbeat. Installed quiet at module load; reinstalled at `init`
+// with the caller's debug/notice. `dbg` is the stable facade — set_debug swaps its behaviour
+// underneath, so references handed to the VideoPipeline flip too. See
+// docs/agent_observable_web_workers.md.
+let obs: WorkerObservability = installWorkerObservability({
+  channel: "rfb",
+  tag: "rfb:worker",
+  debug: false,
+  post: (m) => self.postMessage(m),
+});
+let dbg: Logger = obs.logger;
+let stopHeartbeat: (() => void) | null = null;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 // Auto-reconnect state. The server dropping us (a `--dev` reload, a crash, a network blip)
@@ -62,6 +77,22 @@ let stats: Stats = {
   decodeQueueSize: 0,
   transport: "none",
 };
+
+// Heartbeat: one periodic summary line (forwarded to main) instead of per-frame spam. Emitted
+// on the verbose (debug) tier and skipped when idle, so it's free unless someone flips debug on
+// to watch the stream's health — the "is it healthy right now?" line.
+let hbPrev = { displayed: 0, t: 0 };
+function heartbeatSummary(): string | null {
+  const now = Date.now();
+  const dd = stats.framesDisplayed - hbPrev.displayed;
+  const dt = hbPrev.t ? (now - hbPrev.t) / 1000 : 0;
+  hbPrev = { displayed: stats.framesDisplayed, t: now };
+  if (dd <= 0) return null; // nothing flowing → stay quiet
+  const fps = dt > 0 ? dd / dt : 0;
+  const surf = stats.surface ? `/${stats.surface}` : "";
+  const rtt = typeof stats.serverRttMs === "number" ? `${stats.serverRttMs.toFixed(1)}ms` : "—";
+  return `fps ${fps.toFixed(1)} displayed ${stats.framesDisplayed} dropped ${stats.framesDropped} queue ${stats.decodeQueueSize} · ${stats.transport}${surf} · rtt ${rtt} seq ${stats.lastDisplayedSeq}`;
+}
 
 function post(msg: WorkerToMain, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
@@ -340,17 +371,30 @@ async function buildRenderer(msg: Extract<MainToWorker, { type: "init" }>): Prom
   );
   // Stall watchdog: a decoder that stops emitting output must not brick the viewer.
   watchdogTimer = self.setInterval(() => video?.checkStall(), 500);
+  // Cadence heartbeat: a periodic health line (debug-gated, forwarded to main).
+  stopHeartbeat?.();
+  stopHeartbeat = obs.startHeartbeat(heartbeatSummary, 5000);
   post({ type: "ready" });
   post({ type: "stats", stats: { ...stats } }); // surface the chosen backend immediately
   void startConnection(msg.url);
 }
 
 self.onmessage = (ev: MessageEvent<MainToWorker>) => {
+  // Observability control (runtime `set_debug` from `window.__rfb.setDebug`) — not an rfb
+  // protocol message; consume it and return before the typed switch.
+  if (obs.handleMessage(ev.data)) return;
   const msg = ev.data;
   switch (msg.type) {
     case "init": {
       initOptions = msg.options ?? {};
-      dbg = makeLogger(!!initOptions.debug, "worker", initOptions.notice ?? true);
+      obs = installWorkerObservability({
+        channel: "rfb",
+        tag: "rfb:worker",
+        debug: !!initOptions.debug,
+        notice: initOptions.notice ?? true,
+        post: (m) => self.postMessage(m),
+      });
+      dbg = obs.logger;
       dbg.log("init", { backing: [msg.backingWidth, msg.backingHeight], dpr: msg.devicePixelRatio });
       cssWidth = msg.cssWidth ?? 0;
       cssHeight = msg.cssHeight ?? 0;
@@ -416,6 +460,10 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       if (watchdogTimer !== null) {
         clearInterval(watchdogTimer);
         watchdogTimer = null;
+      }
+      if (stopHeartbeat) {
+        stopHeartbeat();
+        stopHeartbeat = null;
       }
       video?.close();
       sink?.dispose();
