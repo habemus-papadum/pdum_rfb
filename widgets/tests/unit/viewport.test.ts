@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { backingToFrame, fitScales, frameDestRect, presentGeometry, type ViewportState } from "../../src/viewport";
+import {
+  backingToFrame,
+  centerOnFrame,
+  clampZoom,
+  effectiveScales,
+  fitScales,
+  frameDestRect,
+  panByBacking,
+  presentGeometry,
+  presetFraming,
+  zoomAround,
+  type ViewportState,
+} from "../../src/viewport";
 
 const state = (over: Partial<ViewportState>): ViewportState => ({
   frameW: 1280,
@@ -124,5 +136,113 @@ describe("backingToFrame", () => {
     expect(r.x).toBeCloseTo(100);
     expect(r.y).toBeCloseTo(50);
     expect(r.inside).toBe(true);
+  });
+});
+
+// --- viewport transform (crop / zoom / pan) --------------------------------
+
+describe("zoom + pan geometry", () => {
+  it("omitting the transform is identity (matches the fit-only path exactly)", () => {
+    const v = state({ frameW: 800, frameH: 600, backingW: 1280, backingH: 720, fit: "contain" });
+    // zoom:1 / pan:0 must equal the no-transform result on every accessor.
+    expect(frameDestRect({ ...v, zoom: 1, panX: 0, panY: 0 })).toEqual(frameDestRect(v));
+    expect(presentGeometry({ ...v, zoom: 1, panX: 0, panY: 0 })).toEqual(presentGeometry(v));
+  });
+
+  it("effectiveScales multiplies the fit scale by zoom", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 1280, backingH: 720, fit: "contain", zoom: 2 });
+    expect(effectiveScales(v)).toEqual({ scaleX: 2, scaleY: 2 });
+  });
+
+  it("zoom scales the dest rect about the canvas center", () => {
+    // 1:1 frame/backing, zoom 2 -> a 2560x1440 rect centered on the 1280x720 canvas.
+    const v = state({ frameW: 1280, frameH: 720, backingW: 1280, backingH: 720, fit: "contain", zoom: 2 });
+    expect(frameDestRect(v)).toEqual({ dx: -640, dy: -360, dw: 2560, dh: 1440 });
+    // The canvas center still maps to the frame center under a centered zoom.
+    const c = backingToFrame(v, 640, 360);
+    expect(c.x).toBeCloseTo(640);
+    expect(c.y).toBeCloseTo(360);
+  });
+
+  it("pan translates the dest rect by backing px", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 1280, backingH: 720, fit: "fill", panX: 100, panY: -40 });
+    expect(frameDestRect(v)).toEqual({ dx: 100, dy: -40, dw: 1280, dh: 720 });
+  });
+
+  it("backingToFrame stays the exact inverse under zoom + pan (round-trip)", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 900, backingH: 640, fit: "contain", zoom: 3, panX: 55, panY: -30 });
+    const { dx, dy, dw, dh } = frameDestRect(v);
+    // Pick a frame point; its backing position, mapped back, returns it.
+    const bx = dx + (712 / v.frameW) * dw;
+    const by = dy + (330 / v.frameH) * dh;
+    const back = backingToFrame(v, bx, by);
+    expect(back.x).toBeCloseTo(712);
+    expect(back.y).toBeCloseTo(330);
+    expect(back.inside).toBe(true);
+  });
+
+  it("presentGeometry keeps a whole-frame src and a zoom/pan-aware dst", () => {
+    const v = state({ frameW: 640, frameH: 480, backingW: 640, backingH: 480, fit: "fill", zoom: 2, panX: 10, panY: 20 });
+    const { src, dst } = presentGeometry(v);
+    expect(src).toEqual({ x: 0, y: 0, w: 640, h: 480 });
+    // fill scale 1 * zoom 2 -> 1280x960, centered (-320,-240) + pan (10,20).
+    expect(dst).toEqual({ x: -310, y: -220, w: 1280, h: 960 });
+  });
+});
+
+describe("transform helpers (gestures)", () => {
+  it("clampZoom bounds the zoom and rejects non-finite", () => {
+    expect(clampZoom(1000, 0.5, 8)).toBe(8);
+    expect(clampZoom(0.01, 0.5, 8)).toBe(0.5);
+    expect(clampZoom(Number.NaN)).toBe(1);
+    expect(clampZoom(2, 0.5, 8)).toBe(2);
+  });
+
+  it("zoomAround keeps the frame point under the cursor anchored", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 1280, backingH: 720, fit: "fill", zoom: 1, panX: 0, panY: 0 });
+    const bx = 300;
+    const by = 500;
+    const before = backingToFrame(v, bx, by); // frame point under the cursor now
+    const t = zoomAround(v, 4, bx, by);
+    // Apply the new transform and re-map the same backing point.
+    const after = backingToFrame({ ...v, ...t }, bx, by);
+    expect(t.zoom).toBe(4);
+    expect(after.x).toBeCloseTo(before.x);
+    expect(after.y).toBeCloseTo(before.y);
+  });
+
+  it("centerOnFrame puts a frame point at the canvas center", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 1000, backingH: 800, fit: "contain", zoom: 2 });
+    const t = centerOnFrame(v, 200, 150);
+    const mapped = backingToFrame({ ...v, ...t }, v.backingW / 2, v.backingH / 2);
+    expect(mapped.x).toBeCloseTo(200);
+    expect(mapped.y).toBeCloseTo(150);
+  });
+
+  it("panByBacking accumulates the pan offset", () => {
+    const v = state({ zoom: 2, panX: 10, panY: 20 });
+    expect(panByBacking(v, 5, -8)).toEqual({ zoom: 2, panX: 15, panY: 12 });
+  });
+});
+
+describe("presets", () => {
+  it("fit / cover / fill reset to that fit at identity transform", () => {
+    const v = state({ frameW: 800, frameH: 600, backingW: 1280, backingH: 720, zoom: 3, panX: 40 });
+    expect(presetFraming(v, "fit")).toEqual({ fit: "contain", zoom: 1, panX: 0, panY: 0 });
+    expect(presetFraming(v, "cover")).toEqual({ fit: "cover", zoom: 1, panX: 0, panY: 0 });
+    expect(presetFraming(v, "fill")).toEqual({ fit: "fill", zoom: 1, panX: 0, panY: 0 });
+  });
+
+  it("one-to-one yields an effective scale of 1 (native device pixels)", () => {
+    // 1280x720 frame into a 640x360 backing: contain scale 0.5, so 1:1 zoom = 2 -> effective 1.
+    const v = state({ frameW: 1280, frameH: 720, backingW: 640, backingH: 360 });
+    const framing = presetFraming(v, "one-to-one");
+    const eff = effectiveScales({ ...v, ...framing });
+    expect(eff.scaleX).toBeCloseTo(1);
+    expect(eff.scaleY).toBeCloseTo(1);
+    // The frame is centered and overflows the smaller canvas (dw == frameW at scale 1).
+    const { dw, dh } = frameDestRect({ ...v, ...framing });
+    expect(dw).toBeCloseTo(1280);
+    expect(dh).toBeCloseTo(720);
   });
 });

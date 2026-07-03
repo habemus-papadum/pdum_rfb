@@ -29,8 +29,9 @@ the canvas." No fit, no zoom, no pan at this layer; those are item 2.
 > hands the decoded frame to the caller as a GPU texture in their own WebGL2/WebGPU
 > context (a decode worker transfers frames to the main thread), so they composite it
 > into their own hardware scene — minimap, overlay, blends. Verified end-to-end (29 e2e
-> across two projects). Remaining follow-ups (batteries backend-switch UI, decode-straight-
-> to-GPU-texture) are polish; see the proposal's phase tracker.
+> across two projects). The batteries **backend-switch UI** now ships too (item 2 —
+> `setSurface` + the chrome control); the remaining follow-up (decode-straight-to-GPU-texture)
+> is polish; see the proposal's phase tracker.
 
 Why its own item: a compositing flow is useful for more than zoom/pan — the real
 payoff of a GPU draw path is that the frame becomes a **first-class input to a
@@ -56,6 +57,21 @@ Design and phasing: **[client display backend proposal](proposals/active/client_
 ## 2. Core UI viewport: crop, zoom, and pan
 
 _benefit: high · difficulty: moderate_
+
+> **Status: shipped.** `viewport.ts` grew the general zoom/pan transform — `frameDestRect`
+> scales/pans, `presentGeometry` returns the zoom/pan-aware `{src,dst}` the item-1 backend
+> consumes, and `backingToFrame` is its exact inverse so events stay correct under any
+> zoom/pan — plus pure preset/gesture helpers (`presetFraming` for `fit`/`cover`/`fill`/
+> `one-to-one`, `zoomAround`, `panByBacking`, `centerOnFrame`, `clampZoom`).
+> `RemoteFramebufferView` gained the viewport API (`setViewport` / `zoomBy` / `applyPreset` /
+> `resetView` / `getViewport`), opt-in gestures (`gestures: true` — wheel-zoom, middle/
+> right-drag pan, pinch, re-presenting the retained frame with no wire traffic), and a
+> **live backend switch** (`setSurface` — rebuilds the view, since a canvas context type is
+> immutable, the deferred item-1/§12 follow-up). The **batteries chrome** (anywidget +
+> React/Svelte/Solid, shared via `rfb-ui`) adds a backend selector + zoom controls next to
+> `capture PNG`, and the `pdum-rfb demo` viewer exposes both. Verified: 24 viewport unit
+> tests + zoom/pan present-correctness and live-switch e2e across all three backends
+> (2d/webgl/webgpu). See the proposal §9/§12.
 
 The UI layer built **on top of** the display backend (item 1). This is **entirely a
 client concern** — the server does not zoom and never needs to know the client's

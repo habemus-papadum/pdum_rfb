@@ -3,6 +3,7 @@ import {
   type ConnectionState,
   type FitMode,
   type Stats,
+  type SurfaceKind,
   type SurfacePreference,
 } from "../src/index";
 // The shipped, self-contained worker asset (the `@habemus-papadum/rfb-widgets/worker`
@@ -63,11 +64,16 @@ function renderHud(s: Stats): void {
   statsEl.textContent = rows.map(([k, v]) => `${k.padEnd(15)}${v}`).join("\n");
 }
 
+// ?gestures=1 turns on wheel-zoom / drag-pan / pinch for manual poking; the e2e drives the
+// transform via the imperative __rfb hooks below instead (deterministic).
+const gestures = params.get("gestures") === "1";
+
 const view = new RemoteFramebufferView(stage, {
   url: wsUrl,
   imageOnly: transport === "image",
   fit,
   surface,
+  gestures,
   debug,
   workerFactory: externalWorker ? () => new Worker(packagedWorkerUrl, { type: "module" }) : undefined,
   onStats: renderHud,
@@ -82,6 +88,11 @@ const view = new RemoteFramebufferView(stage, {
 interface RfbDebug {
   state: () => string;
   stats: () => unknown;
+  surface: () => SurfaceKind | undefined;
+  setSurface: (kind: SurfacePreference) => void;
+  setViewport: (partial: { fit?: FitMode; zoom?: number; panX?: number; panY?: number }) => void;
+  getViewport: () => unknown;
+  zoomBy: (factor: number, cssX?: number, cssY?: number) => void;
   capture: () => Promise<{
     width: number;
     height: number;
@@ -92,6 +103,11 @@ interface RfbDebug {
 (globalThis as unknown as { __rfb: RfbDebug }).__rfb = {
   state: () => view.state,
   stats: () => view.stats,
+  surface: () => view.surface,
+  setSurface: (kind) => view.setSurface(kind),
+  setViewport: (partial) => view.setViewport(partial),
+  getViewport: () => view.getViewport(),
+  zoomBy: (factor, cssX, cssY) => view.zoomBy(factor, cssX, cssY),
   capture: async () => {
     const img = (await view.capture("imagedata")) as ImageData;
     return {

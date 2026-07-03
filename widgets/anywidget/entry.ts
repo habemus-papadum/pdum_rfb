@@ -3,7 +3,7 @@
 // + chrome traits off the model, and reacts to trait changes. Built by
 // vite.anywidget.config.ts into ../src/pdum/rfb/static/widget.js (loaded as anywidget `_esm`).
 
-import { RemoteFramebufferView, type ConnectionState, type Stats } from "../src/index";
+import { RemoteFramebufferView, type ConnectionState, type Stats, type SurfacePreference } from "../src/index";
 import { type AnyModel, mountChrome } from "./chrome";
 
 /** Build the WebSocket URL from the model traits. Priority: explicit `url` > same-origin
@@ -53,6 +53,11 @@ export default {
       },
       fullscreen: () => void el.requestFullscreen?.(),
       reconnect: () => build(),
+      // Viewport / backend controls (client-side; drive the view directly, no model trait).
+      setSurface: (kind: SurfacePreference) => view?.setSurface(kind),
+      zoomIn: () => view?.zoomBy(1.25),
+      zoomOut: () => view?.zoomBy(1 / 1.25),
+      resetView: () => view?.resetView(),
     };
     const chrome = mountChrome(el, model, controls);
 
@@ -82,7 +87,10 @@ export default {
         imageOnly: !!model.get("image_only"),
         fit: model.get("fit") || undefined,
         background: model.get("background") || undefined,
+        surface: model.get("surface") || undefined,
+        gestures: true, // batteries chrome: wheel-zoom, drag-pan, pinch
         debug: true, // TEMP-DEBUG
+        onViewport: (framing) => chrome.setViewport(framing),
         onState: (s: ConnectionState) => {
           el.dataset.state = s;
           model.set("state", s);

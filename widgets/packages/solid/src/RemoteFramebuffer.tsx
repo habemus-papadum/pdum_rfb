@@ -1,6 +1,6 @@
-import { type Accessor, type JSX, Show, createSignal, mergeProps, splitProps } from "solid-js";
-import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
-import { formatBadge, formatStatsRows, statusLabel } from "@habemus-papadum/rfb-ui";
+import { type Accessor, type JSX, For, Show, createSignal, mergeProps, splitProps } from "solid-js";
+import type { ConnectionState, Stats, SurfaceKind, SurfacePreference } from "@habemus-papadum/rfb-widgets";
+import { formatBadge, formatStatsRows, statusLabel, SURFACE_CHOICES } from "@habemus-papadum/rfb-ui";
 import { type RfbSolidOptions, createRemoteFramebuffer } from "./createRemoteFramebuffer";
 
 /** Reactive context handed to every render-prop so custom chrome can drive the view. */
@@ -16,6 +16,14 @@ export interface ChromeContext {
   toggleHud: () => void;
   fullscreen: () => void;
   setImageOnly: (v: boolean) => void;
+  /** Active display backend (after any fallback). */
+  surface: Accessor<SurfaceKind | undefined>;
+  /** Switch the display backend live (rebuilds the view + reconnects the stream). */
+  setSurface: (kind: SurfacePreference) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  /** Reset to fit (zoom 1, no pan). */
+  resetView: () => void;
 }
 
 export interface RemoteFramebufferProps extends RfbSolidOptions {
@@ -67,12 +75,21 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
   const [hudOpen, setHudOpen] = createSignal<boolean>(!!local.hud);
   let rootEl!: HTMLDivElement;
 
-  const fb = createRemoteFramebuffer(() => ({ ...options, imageOnly: imageOnly() }));
-  const { state, stats, error, capture, reconnect } = fb;
+  const fb = createRemoteFramebuffer(() => ({
+    ...options,
+    imageOnly: imageOnly(),
+    // Batteries default: enable crop/zoom/pan gestures (the toolbar has zoom controls too).
+    gestures: options.gestures ?? true,
+  }));
+  const { state, stats, error, capture, reconnect, view } = fb;
 
   const toggleHud = () => setHudOpen((v) => !v);
   const fullscreen = () => void rootEl?.requestFullscreen?.();
   const screenshot = async () => downloadBlob((await capture("blob")) as Blob, "framebuffer.png");
+  const setSurface = (kind: SurfacePreference) => view()?.setSurface(kind);
+  const zoomIn = () => view()?.zoomBy(1.25);
+  const zoomOut = () => view()?.zoomBy(1 / 1.25);
+  const resetView = () => view()?.resetView();
 
   const ctx: ChromeContext = {
     state,
@@ -86,6 +103,11 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
     toggleHud,
     fullscreen,
     setImageOnly,
+    surface: () => stats().surface,
+    setSurface,
+    zoomIn,
+    zoomOut,
+    resetView,
   };
 
   return (
@@ -122,6 +144,30 @@ export function RemoteFramebuffer(props: RemoteFramebufferProps): JSX.Element {
             </button>
             <button type="button" class="rfb-button" title="Fullscreen" onClick={fullscreen}>
               ⛶
+            </button>
+            <div class="rfb-toolbar-sep" />
+            <select
+              class="rfb-select"
+              title="Display backend (rebuilds + reconnects)"
+              value={stats().surface ?? "2d"}
+              onChange={(e) => setSurface(e.currentTarget.value as SurfacePreference)}
+            >
+              <For each={SURFACE_CHOICES}>
+                {(c) => (
+                  <option value={c.value} title={c.title}>
+                    {c.label}
+                  </option>
+                )}
+              </For>
+            </select>
+            <button type="button" class="rfb-button" title="Zoom out" onClick={zoomOut}>
+              −
+            </button>
+            <button type="button" class="rfb-button" title="Zoom in" onClick={zoomIn}>
+              +
+            </button>
+            <button type="button" class="rfb-button" title="Fit / reset view" onClick={resetView}>
+              ⤢
             </button>
           </div>
         )}

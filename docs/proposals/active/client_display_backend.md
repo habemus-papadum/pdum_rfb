@@ -481,19 +481,31 @@ drawn*.
 
 ## 10. How the viewport (roadmap item 2) plugs in
 
+> **Landed (roadmap item 2).** The seam held exactly as predicted below — one refinement:
+> zoom/pan are expressed as an **over-large `dst`** (a whole-frame `src`, a `dst` that can
+> exceed the canvas), the same convention `cover` already used to show a cropped sub-rect,
+> so every backend clips the overflow (Canvas2D `drawImage`, GL `viewport`, WebGPU
+> clip-space) and no new draw code was needed. `frameDestRect`/`presentGeometry` became
+> zoom/pan-aware, `backingToFrame` stayed its exact inverse, and the pure helpers
+> (`zoomAround`, `panByBacking`, `centerOnFrame`, `presetFraming`, `clampZoom`) live beside
+> them. Gestures + the imperative API live in `RemoteFramebufferView`; present is
+> edge-triggered per gesture (re-present the retained frame), not an rAF loop — cheap enough
+> for the single-worker default.
+
 Proof the seam fits the next layer, not part of this one:
 
 - Item 2's transform (crop rect + zoom + pan on top of fit) is *entirely* the
-  `{src,dst}` `PresentGeometry`: fit picks `src = whole frame`; zoom/pan pick a sub-
-  `src`; "center on point" and 1:1 are presets computing `src`. `viewport.ts`'s reserved
-  `zoom`/`panX`/`panY` feed `presentGeometry`.
+  `{src,dst}` `PresentGeometry`: fit and zoom/pan alike feed `presentGeometry`; the whole
+  frame is the `src` and `dst = frameDestRect` carries the fit·zoom scale + centering + pan
+  (over-large, the backend clips). "center on point" and 1:1 are presets computing the
+  transform. `viewport.ts`'s `zoom`/`panX`/`panY` feed it.
 - Event mapping stays correct for free: `backingToFrame` is the exact inverse of
-  `presentGeometry`, so a click maps through whatever src/dst is current — the invariant
+  `frameDestRect`, so a click maps through whatever zoom/pan is current — the invariant
   the HiDPI bug violated, now covering zoom/pan too.
 - Gestures live in `RemoteFramebufferView` (or the batteries chrome); they only mutate
-  viewport state and let the present loop redraw. No backend or wire change.
+  viewport state and re-present the retained frame. No backend or wire change.
 
-So item 2 is "compute a richer `{src,dst}` and drive it with gestures" — no new draw
+So item 2 was "compute a richer `{src,dst}` and drive it with gestures" — no new draw
 code, because the draw path is this layer. (Mode B apps do their own framing and don't
 use item 2's viewport at all.)
 
@@ -542,13 +554,22 @@ blocking — consistent with how the GPU encoder tier is verified.
 
 ---
 
-## 12. The batteries backend-switch (future, noted for completeness)
+## 12. The batteries backend-switch (shipped with roadmap item 2)
 
-A batteries-tier control that switches the display methodology (image / WebGL / WebGPU)
-at runtime is *out of scope for items 1 and 2*. It drops in later as a control in the
-`<RemoteFramebuffer>` chrome that calls `view.setSurface(kind)` — tear down the old
-surface, build the new one, re-`setFrame` the retained frame. The seam is what makes
-that small.
+A batteries-tier control that switches the display methodology (2D / WebGL / WebGPU /
+auto) at runtime — now `view.setSurface(kind)`, exposed as a backend selector in every
+`<RemoteFramebuffer>` chrome (anywidget + React/Svelte/Solid) and the `pdum-rfb demo`.
+
+**One correction to the original sketch.** "Tear down the old surface, build the new one,
+re-`setFrame` the retained frame" is *not* possible on the same canvas: **a canvas's
+context type is immutable** (a canvas that yielded `2d` can never yield `webgl2`), and the
+retained frame lives inside the worker that owns the surface. So `setSurface` **rebuilds the
+whole view** — it discards the (transferred, one-shot) canvas, creates a fresh one, spins up
+a new worker with the new `surface` preference, and **reconnects the stream** (a brief
+reconnect flash; the current fit/zoom/pan carry over via the init options). This means the
+switch only works when the view **owns its canvas** (a container target, as the batteries
+wrappers use) — a caller-provided `<canvas>` is already context-bound. The seam still made
+it small: only the rebuild plumbing was new, not any draw code.
 
 ---
 
@@ -591,10 +612,12 @@ Each phase is independently shippable and leaves the tree green.
   VideoFrame; WebGL + WebGPU) and a `FrameTextureFeed` **streaming** e2e (worker→transfer→
   upload→sample). Orientation contract: the frame texture's UV origin is the frame
   top-left (§7.1).
-- **(Roadmap item 2) — viewport UI.** Zoom/pan/crop `{src,dst}`, presets, gestures,
-  event inverse-map — all on top of P1–P3, no new draw code.
-- **Future** — batteries backend-switch (§12); decode-straight-to-GPU-texture ingest if
-  profiling shows the `CanvasImageSource` hop costs (measure first).
+- **(Roadmap item 2) ✅ — viewport UI.** Zoom/pan/crop `{src,dst}`, presets, gestures,
+  event inverse-map, and the batteries **backend-switch** (§12, `setSurface`) — all on top
+  of P1–P3, no new draw code. Verified: 24 viewport unit tests + zoom/pan and live-switch
+  e2e across 2d/webgl/webgpu.
+- **Future** — decode-straight-to-GPU-texture ingest if profiling shows the
+  `CanvasImageSource` hop costs (measure first).
 
 P1 alone is worth landing: it untangles `Renderer` and gives `viewport.ts` the
 `{src,dst}` primitive — the actual blocker for item 2 — before any GPU backend exists.

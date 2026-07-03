@@ -5,7 +5,7 @@
 // runtime is lazy-loaded (dynamic import) so the initial bundle only pays for the one picked.
 
 import { RemoteFramebufferView, type RfbViewOptions } from "@habemus-papadum/rfb-widgets";
-import type { FitMode } from "@habemus-papadum/rfb-widgets";
+import type { FitMode, SurfacePreference, ViewPreset } from "@habemus-papadum/rfb-widgets";
 
 export type Framework = "vanilla" | "react" | "svelte" | "solid";
 
@@ -19,6 +19,12 @@ export const FRAMEWORKS: { id: Framework; label: string }[] = [
 export interface ViewerHandle {
   framework: Framework;
   setFit(fit: FitMode, background?: string): void;
+  /** Switch the display backend live (rebuilds the view + reconnects). */
+  setSurface(kind: SurfacePreference): void;
+  /** Multiply the current zoom (about the viewport center). */
+  zoomBy(factor: number): void;
+  /** Apply a named viewport preset (fit / cover / fill / one-to-one). */
+  preset(p: ViewPreset): void;
   capture(): Promise<Blob>;
   dispose(): void;
 }
@@ -40,6 +46,9 @@ export async function mountViewer(
     return {
       framework,
       setFit: (fit, bg) => view?.setFit(fit, bg),
+      setSurface: (kind) => view?.setSurface(kind),
+      zoomBy: (factor) => view?.zoomBy(factor),
+      preset: (p) => view?.applyPreset(p),
       capture: async () => (await view!.capture("blob")) as Blob,
       dispose: () => root.unmount(),
     };
@@ -57,6 +66,9 @@ export async function mountViewer(
     return {
       framework,
       setFit: (fit, bg) => view?.setFit(fit, bg),
+      setSurface: (kind) => view?.setSurface(kind),
+      zoomBy: (factor) => view?.zoomBy(factor),
+      preset: (p) => view?.applyPreset(p),
       capture: async () => (await view!.capture("blob")) as Blob,
       dispose: () => unmount(app),
     };
@@ -67,6 +79,9 @@ export async function mountViewer(
     return {
       framework,
       setFit: (fit, bg) => handle.view().setFit(fit, bg),
+      setSurface: (kind) => handle.view().setSurface(kind),
+      zoomBy: (factor) => handle.view().zoomBy(factor),
+      preset: (p) => handle.view().applyPreset(p),
       capture: async () => (await handle.view().capture("blob")) as Blob,
       dispose: () => handle.dispose(),
     };
@@ -75,6 +90,9 @@ export async function mountViewer(
   return {
     framework,
     setFit: (fit, bg) => view.setFit(fit, bg),
+    setSurface: (kind) => view.setSurface(kind),
+    zoomBy: (factor) => view.zoomBy(factor),
+    preset: (p) => view.applyPreset(p),
     capture: async () => (await view.capture("blob")) as Blob,
     dispose: () => view.dispose(),
   };

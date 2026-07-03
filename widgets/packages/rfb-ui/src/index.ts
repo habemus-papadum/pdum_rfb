@@ -4,7 +4,7 @@
 // This package is PRIVATE: its code is bundled into each wrapper's dist, so wrappers only
 // devDepend it (never a runtime/peer dep).
 
-import type { ConnectionState, Stats } from "@habemus-papadum/rfb-widgets";
+import type { ConnectionState, Stats, SurfacePreference } from "@habemus-papadum/rfb-widgets";
 
 export type StatTone = "connecting" | "open" | "closed" | "error";
 export type StatRow = readonly [label: string, value: string];
@@ -56,6 +56,27 @@ export function formatStatsRows(state: ConnectionState, s: Stats): StatRow[] {
     ["target bitrate", mbps(s.targetBitrate)],
     ["target fps", n1(s.targetFps)],
   ];
+}
+
+// --- viewport / backend controls (batteries tier) --------------------------
+
+/** The display-backend choices offered by the batteries backend-switch control. A canvas's
+ *  context type is immutable, so picking one TEARS DOWN and REBUILDS the view (reconnecting
+ *  the stream) via `RemoteFramebufferView.setSurface` — this list is the menu, the caveat
+ *  is documented in `docs/guide_javascript.md`. */
+export const SURFACE_CHOICES: readonly { value: SurfacePreference; label: string; title: string }[] = [
+  { value: "2d", label: "2D", title: "Canvas2D — the always-available floor" },
+  { value: "webgl", label: "WebGL", title: "WebGL2 GPU draw path" },
+  { value: "webgpu", label: "WebGPU", title: "WebGPU GPU draw path (where an adapter exists)" },
+  { value: "auto", label: "Auto", title: "Prefer the GPU tiers, fall back to Canvas2D" },
+];
+
+/** The multiplicative step a single zoom-in / zoom-out click applies. */
+export const ZOOM_STEP = 1.25;
+
+/** Render a zoom multiplier as a percentage label (e.g. 1.5 -> "150%"). */
+export function formatZoom(zoom: number): string {
+  return `${Math.round(zoom * 100)}%`;
 }
 
 /** Compact always-on badge: transport · fps · rtt (blanks omitted until the server pushes them). */

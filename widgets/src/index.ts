@@ -38,8 +38,32 @@ export type { Capabilities } from "./capabilities";
 
 export { BackpressureController, KeyframeGate } from "./backpressure";
 
-export { frameDestRect, backingToFrame, fitScales, presentGeometry } from "./viewport";
-export type { FitMode, ViewportState, DestRect, Rect, PresentGeometry } from "./viewport";
+export {
+  frameDestRect,
+  backingToFrame,
+  fitScales,
+  effectiveScales,
+  presentGeometry,
+  clampZoom,
+  transformOf,
+  zoomAround,
+  panByBacking,
+  centerOnFrame,
+  presetFraming,
+  IDENTITY_TRANSFORM,
+  DEFAULT_MIN_ZOOM,
+  DEFAULT_MAX_ZOOM,
+} from "./viewport";
+export type {
+  FitMode,
+  ViewportState,
+  DestRect,
+  Rect,
+  PresentGeometry,
+  ViewportTransform,
+  ViewportFraming,
+  ViewPreset,
+} from "./viewport";
 
 export {
   normalizePointerEvent,
