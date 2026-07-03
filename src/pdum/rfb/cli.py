@@ -421,9 +421,9 @@ else:
         return dev if dev.is_file() else None
 
     def _run_notebook_demo(kind: str, work_dir: str, open_browser: bool) -> None:
-        """Copy the bundled demo notebook to a working dir and launch its notebook tool."""
+        """Copy the bundled demo notebook to a working dir and hand off to its notebook tool."""
+        import os
         import shutil
-        import subprocess
         import tempfile
 
         fname = "jupyter-demo.ipynb" if kind == "jupyter" else "marimo-demo.py"
@@ -443,15 +443,20 @@ else:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / fname
         shutil.copyfile(src, dest)  # copy out of (read-only) site-packages so the notebook is editable
-        print(f"pdum-rfb {kind}-demo → {dest}\nRun the cells top-to-bottom; Ctrl-C here stops the server.")
+        print(f"pdum-rfb {kind}-demo → {dest}\nRun the cells top-to-bottom; Ctrl-C stops the server.")
         if kind == "jupyter":
             cmd = ["jupyter", "lab", str(dest)] + ([] if open_browser else ["--no-browser"])
         else:
             cmd = ["marimo", "edit", str(dest)] + ([] if open_browser else ["--headless"])
+        # execvp REPLACES this process with the notebook tool, rather than spawning it as a child.
+        # That hands the terminal — crucially, stdin — straight to jupyter/marimo, so their Ctrl-C
+        # "shut down? [y/N]" prompts read the real TTY (a subprocess child inherits a stdin that
+        # the parent is also fielding SIGINT on, and the confirm prompt hangs / gets no answer).
         try:
-            raise SystemExit(subprocess.call(cmd))
-        except KeyboardInterrupt:
-            pass
+            os.execvp(cmd[0], cmd)
+        except OSError as e:  # pragma: no cover - launcher present (find_spec passed) but not on PATH
+            sys.stderr.write(f"failed to launch {cmd[0]}: {e}\n")
+            raise SystemExit(1) from e
 
     @app.command("jupyter-demo")
     def jupyter_demo(

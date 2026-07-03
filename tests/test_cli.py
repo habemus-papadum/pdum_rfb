@@ -7,7 +7,7 @@ GPU-less CI as well as on a GPU box.
 
 from __future__ import annotations
 
-import subprocess
+import os
 
 import pytest
 
@@ -29,24 +29,23 @@ def test_notebook_assets_resolve():
     ("kind", "fname", "launcher"),
     [("jupyter", "jupyter-demo.ipynb", ["jupyter", "lab"]), ("marimo", "marimo-demo.py", ["marimo", "edit"])],
 )
-def test_run_notebook_demo_copies_and_launches(tmp_path, monkeypatch, kind, fname, launcher):
-    # Pretend the launcher is installed and stub the blocking server call.
+def test_run_notebook_demo_copies_and_execs(tmp_path, monkeypatch, kind, fname, launcher):
+    # Pretend the launcher is installed and stub the process-replacing exec.
     monkeypatch.setattr("importlib.util.find_spec", lambda _m: object())
     captured: dict[str, list[str]] = {}
 
-    def fake_call(cmd: list[str]) -> int:
-        captured["cmd"] = cmd
-        return 0
+    def fake_execvp(file: str, args: list[str]) -> None:
+        captured["file"] = file
+        captured["args"] = args
 
-    monkeypatch.setattr(subprocess, "call", fake_call)
+    monkeypatch.setattr(os, "execvp", fake_execvp)
 
-    with pytest.raises(SystemExit) as exc:
-        cli._run_notebook_demo(kind, str(tmp_path), open_browser=False)
-    assert exc.value.code == 0
+    cli._run_notebook_demo(kind, str(tmp_path), open_browser=False)
 
     assert (tmp_path / fname).is_file()  # copied out to the working dir
-    assert captured["cmd"][:2] == launcher and captured["cmd"][2].endswith(fname)
-    assert captured["cmd"][-1] in ("--no-browser", "--headless")  # --no-open honored
+    assert captured["file"] == launcher[0]
+    assert captured["args"][:2] == launcher and captured["args"][2].endswith(fname)
+    assert captured["args"][-1] in ("--no-browser", "--headless")  # --no-open honored
 
 
 def test_notebook_demo_missing_launcher_errors(tmp_path, monkeypatch):

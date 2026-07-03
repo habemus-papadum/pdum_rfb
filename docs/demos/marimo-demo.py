@@ -24,23 +24,28 @@ def _(mo):
         process, no Node, no GPU — just **CPU encoding and NumPy**.
 
         Install with `uv add 'habemus-papadum-rfb[anywidget]'`.
+
+        ## Why the buttons?
+
+        marimo is **reactive** — it re-runs cells whenever their inputs change. A bare
+        `await rfb.serve(port=0)` in a cell would rebind a **new** port on every re-run, and
+        the viewer would keep chasing a socket that just moved (you'd see `ERR_CONNECTION_REFUSED`
+        spam and a blank canvas). So the server is created **once** and stashed in `mo.state`,
+        gated behind a button; the viewer connects only once it's up. Click **Start server**,
+        then toggle **Show viewer**. **Tear down** stops the render loop and closes the socket.
         """
     )
     return
 
 
 @app.cell
-async def _():
+def _():
     import itertools
 
     import numpy as np
 
     import pdum.rfb as rfb
     from pdum.rfb.notebook import publish_loop
-
-    # marimo runs an event loop, so a cell can be `async` and use top-level await.
-    # Plain CPU / image path: no GPU, no H.264 tuning, no frame-rate knobs. Just NumPy.
-    display = await rfb.serve(320, 240, port=0)
 
     counter = itertools.count()
 
@@ -53,18 +58,56 @@ async def _():
         frame[90:150, x : x + 60] = (240, 120, 40)  # a moving orange block
         return frame
 
-    # Push ~10 frames/sec on a background task; the cell returns immediately. Return `task`
-    # so it stays referenced (asyncio holds only a weak ref) and is reachable for teardown.
-    task = publish_loop(display, render, fps=10)
-    display.ws_url
-    return display, task
+    return publish_loop, render, rfb
 
 
 @app.cell
-def _(display, mo):
-    # Same process — the viewer connects back to the server over the WebSocket. Frames flow
-    # over that socket, never through marimo's protocol. mo.ui.anywidget lets marimo track it.
-    mo.ui.anywidget(display.widget())
+def _(mo):
+    # The running server lives in mo.state so it survives marimo's reactive re-runs: created
+    # exactly once, torn down on demand. This is what keeps the port stable for the viewer.
+    get_server, set_server = mo.state(None)
+    return get_server, set_server
+
+
+@app.cell
+def _(mo):
+    start_button = mo.ui.run_button(label="Start server")
+    stop_button = mo.ui.run_button(label="Tear down")
+    show = mo.ui.switch(value=True, label="Show viewer")
+    mo.hstack([start_button, stop_button, show], justify="start", gap=1)
+    return show, start_button, stop_button
+
+
+@app.cell
+async def _(get_server, publish_loop, render, rfb, set_server, start_button, stop_button):
+    # Reacts to the two buttons. Reading get_server() here guards against a double-start and
+    # lets us tear the right thing down; setting state re-renders the viewer cell (not this one,
+    # so there's no self-loop). stats_interval=1.0 → the server pushes per-second metrics the
+    # viewer folds into its Stats (fps / rtt / bitrate).
+    _srv = get_server()
+    if start_button.value and _srv is None:
+        _display = await rfb.serve(320, 240, port=0, stats_interval=1.0)
+        _task = publish_loop(_display, render, fps=10)
+        set_server({"display": _display, "task": _task})
+    elif stop_button.value and _srv is not None:
+        _srv["task"].cancel()
+        await _srv["display"].aclose()
+        set_server(None)
+    return
+
+
+@app.cell
+def _(get_server, mo, show):
+    # Same process — the viewer connects back to the server over the WebSocket. Frames flow over
+    # that socket, never through marimo's protocol. Shown only once the server is actually up.
+    _srv = get_server()
+    if _srv is None:
+        _out = mo.md("**No server yet.** Click **Start server** above.")
+    elif not show.value:
+        _out = mo.md(f"Server up at `{_srv['display'].ws_url}` — toggle **Show viewer** to connect.")
+    else:
+        _out = mo.ui.anywidget(_srv["display"].widget())
+    _out
     return
 
 
@@ -84,29 +127,10 @@ def _(mo):
           usually **isn't** directly reachable from your browser. You'd mount the ASGI hub
           same-origin and pass `base_path=` (see [the notebook guide](../notebook.md)), or set
           up SSH / port forwarding.
-        - **Headless execution** (e.g. `marimo export html`): no browser connects at all — the
-          cells simply wire everything up, and no live view appears. That's expected.
+        - **Headless execution** (e.g. `marimo export html`): no button is clicked, so no server
+          starts and no view appears — the notebook just renders its controls. That's expected.
         """
     )
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # marimo runs every cell on load, so gate teardown behind a button — otherwise the server
-    # would close the instant the notebook opens. Headless (`export html`) never clicks it, so
-    # the teardown cell below stops cleanly via mo.stop and the run exits 0.
-    stop_button = mo.ui.run_button(label="Stop server")
-    stop_button
-    return (stop_button,)
-
-
-@app.cell
-async def _(display, mo, stop_button, task):
-    mo.stop(not stop_button.value, mo.md("Click **Stop server** above to tear down."))
-    task.cancel()
-    await display.aclose()
-    mo.md("Server stopped.")
     return
 
 
