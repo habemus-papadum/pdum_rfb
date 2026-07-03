@@ -97,7 +97,17 @@ Add a server-driven **downscale hint** (a fourth lever, or a `set_quality` field
 publisher can honor) so the loop can shrink the encoded frame under pressure and
 recover when healthy — without hand-rolling it in every app.
 
-Agreed -- so this would be an event in the poll setup?
+> **Status: landed.** `AdaptiveQualityController` gained a fourth lever —
+> `QualityTarget.scale` (`min_scale`/`scale_step`), engaged only under *sustained*
+> pressure once bitrate, fps, and in-flight are all floored, and recovered when healthy.
+> Because the publisher owns the framebuffer size, the session can't apply it; instead it
+> surfaces a typed **`DownscaleHint`** (`scale`, suggested even `width`/`height`) through
+> `Display.poll_events()` — symmetric with how input events flow — that the render loop
+> reads and honors by publishing a smaller frame (the encoder rebuild + browser
+> re-`configure()` on resize is the existing path). The `Display` aggregates across
+> viewers (the most-congested viewer's scale wins; it relaxes when that viewer recovers or
+> leaves). Opt-in via `serve(adaptive=True)`. See `docs/guide_python.md` (Adaptive
+> quality → Resolution as a fourth lever).
 
 ## 4. AV1 / HEVC codecs
 
@@ -141,3 +151,17 @@ a one-liner. Two variants, deliberately symmetric:
 
 The two share nothing but the intent; ship whichever is more useful first (the server tap
 is the more broadly useful one for demos and headless capture).
+
+> **Status: server-side tap landed; client-side batteries still open.** `Display.record("out.mp4")`
+> ships — a started `Recording` handle (async context manager + `await rec.stop()`) that taps
+> the same published-frame stream the viewer sessions pull from (a non-viewer `_taps` entry, so
+> it never inflates `client_count` or the adaptive aggregation), encodes with **libx264**, and
+> muxes to real **AVCC-in-MP4** via a *separate* PyAV path — never touching the Annex-B wire
+> payload. It honors the real monotonic per-frame timestamps, so variable cadence (sparse
+> `still_after` scenes included) records with correct VFR timing; RGB(A) host frames are
+> supported (GPU frames are downloaded), and a mid-stream resize is scaled to the initial size.
+> Gated on PyAV (`[h264]`) and lazy-imported. Lives in `pdum.rfb.recording`; verified by
+> re-decoding the produced MP4 with PyAV. **Remaining:** the **client-side** `MediaRecorder`
+> half (record exactly what the *viewer* sees — fit/zoom/pan — via `captureStream()`, surfaced
+> as `startRecording()`/`stopRecording()` in the batteries chrome) is a separate follow-up in
+> the widgets tier.

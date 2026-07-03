@@ -36,9 +36,10 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 import numpy as np
 
 from .auth import Principal
-from .types import EventDict, InputEvent, RawFrame
+from .types import DownscaleHint, EventDict, InputEvent, RawFrame
 
 if TYPE_CHECKING:  # pragma: no cover
+    from .recording import Recording
     from .session import RfbSession
 
 
@@ -140,6 +141,11 @@ class Display:
     ) -> None:
         self.width = int(width)
         self.height = int(height)
+        # The initial (native/full-resolution) size, kept fixed even as publish() resizes
+        # width/height. It is the base a DownscaleHint scales off, so an absolute scale
+        # never compounds when the render loop honors the hint by publishing smaller.
+        self._base_width = int(width)
+        self._base_height = int(height)
         self.fps = fps
         self._clock = clock or time.monotonic
         self._start = self._clock()
@@ -170,8 +176,17 @@ class Display:
         self._feeds: set[_ClientFeed] = set()
         self._sessions: set[RfbSession] = set()
         self._clients: dict[str, _ClientFeed] = {}
+        # Frame taps that are *not* viewers: server-side recordings (see record()). They are
+        # woken by publish() like feeds but excluded from client_count and the adaptive
+        # downscale aggregation.
+        self._taps: set[Any] = set()
 
-        self._events: deque[InputEvent] = deque(maxlen=event_queue_size)
+        # Adaptive resolution (serve(adaptive=True)): the effective render scale is the
+        # minimum any connected viewer's controller currently wants (the most-congested
+        # viewer wins); a change enqueues a DownscaleHint through poll_events().
+        self._effective_scale = 1.0
+
+        self._events: deque[InputEvent | DownscaleHint] = deque(maxlen=event_queue_size)
         self._events_signal = asyncio.Event()
 
         self._record_events = record_events or event_log is not None
@@ -300,6 +315,8 @@ class Display:
         self._version += 1
         for feed in self._feeds:
             feed._wake()
+        for tap in self._taps:
+            tap._wake()
 
     def _own_copy(self, data: Any, memory: str) -> Any:
         """Copy ``data`` into a server-owned buffer (``own_frames`` mode) so the caller may
@@ -351,18 +368,84 @@ class Display:
         pool.append(buf)
         return buf
 
+    # --- recording ---------------------------------------------------------
+
+    def record(
+        self,
+        path: str | Path,
+        *,
+        fps: int | None = None,
+        bitrate: int | None = None,
+        crf: int | None = None,
+        preset: str = "veryfast",
+    ) -> Recording:
+        """Record the published-frame stream to a real **MP4** file (server-side tap).
+
+        Returns a started :class:`~pdum.rfb.recording.Recording` — an async context
+        manager / handle with :meth:`~pdum.rfb.recording.Recording.stop`. It taps the
+        same latest-frame stream the viewer sessions pull from, so it is **independent
+        of any connected browser** and works fully headless (demos, CI artifacts,
+        golden-frame capture). Frames are H.264-encoded (libx264) and muxed to
+        **AVCC-in-MP4** via a **separate** PyAV path — this is the one place AVCC/MP4 is
+        correct; it never touches the Annex-B WebSocket payload.
+
+        The real, monotonic per-frame timestamps are honored, so a variable-cadence
+        publisher (sparse ``still_after`` scenes included) records with correct frame
+        timing. Call it on the event-loop thread; it starts a background encode task.
+
+        ::
+
+            async with display.record("out.mp4"):
+                for _ in range(300):
+                    display.publish(render()); await asyncio.sleep(1 / 30)
+            # file finalized on exit — or use rec = display.record(...); await rec.stop()
+
+        Parameters
+        ----------
+        path:
+            Output ``.mp4`` file path.
+        fps:
+            Advisory frame rate for the encoder's rate control (default: the display's
+            ``fps``). The *actual* timing comes from the frames' real timestamps.
+        bitrate:
+            Target bitrate in bits/s (average). Mutually exclusive with ``crf``; if
+            neither is given, a sensible constant-quality ``crf`` is used.
+        crf:
+            Constant Rate Factor (0–51, lower = better) for constant-quality encoding.
+        preset:
+            libx264 speed/quality preset (default ``"veryfast"``).
+
+        Raises
+        ------
+        RuntimeError
+            If PyAV (the ``[h264]`` extra) is not installed.
+        """
+        from .recording import Recording
+
+        rec = Recording(self, path, fps=fps or self.fps, bitrate=bitrate, crf=crf, preset=preset)
+        rec._start_task()
+        return rec
+
     # --- events ------------------------------------------------------------
 
-    def poll_events(self) -> list[InputEvent]:
-        """Drain and return all input events received since the last poll."""
+    def poll_events(self) -> list[InputEvent | DownscaleHint]:
+        """Drain and return everything queued since the last poll.
+
+        The list is ordinarily :class:`~pdum.rfb.types.InputEvent`\\ s (input from all
+        connected viewers). With ``serve(adaptive=True)`` it may also carry a
+        :class:`~pdum.rfb.types.DownscaleHint` — a server-driven resolution suggestion —
+        interleaved in arrival order; tell them apart with ``isinstance``.
+        """
         out = list(self._events)
         self._events.clear()
         return out
 
-    async def events(self) -> AsyncIterator[InputEvent]:
-        """Async-iterate input events (alternative to :meth:`poll_events`).
+    async def events(self) -> AsyncIterator[InputEvent | DownscaleHint]:
+        """Async-iterate queued events (alternative to :meth:`poll_events`).
 
-        Use one or the other — both drain the same queue.
+        Yields :class:`~pdum.rfb.types.InputEvent`\\ s and, under
+        ``serve(adaptive=True)``, :class:`~pdum.rfb.types.DownscaleHint`\\ s. Use this or
+        :meth:`poll_events` — both drain the same queue.
         """
         while not self._closed:
             if self._events:
@@ -510,6 +593,8 @@ class Display:
         self._closed = True
         for feed in list(self._feeds):
             feed.close()
+        for tap in list(self._taps):
+            tap.close()
         self._events_signal.set()
 
     async def aclose(self) -> None:
@@ -532,6 +617,34 @@ class Display:
                 with self._event_log.open("a") as fh:
                     fh.write(json.dumps(event) + "\n")
 
+    def _add_tap(self, tap: Any) -> None:
+        """Register a non-viewer frame tap (e.g. a :class:`Recording`); publish() wakes it."""
+        self._taps.add(tap)
+
+    def _remove_tap(self, tap: Any) -> None:
+        self._taps.discard(tap)
+
+    def _recompute_render_hint(self) -> None:
+        """Recompute the aggregate adaptive render scale and enqueue a
+        :class:`~pdum.rfb.types.DownscaleHint` when it changes.
+
+        The effective scale is the **minimum** any connected viewer's controller wants,
+        so one congested viewer downscales the shared stream for everyone; when that
+        viewer recovers or disconnects the scale climbs back and a recovery hint fires.
+        No-op unless the value actually changed (de-duped, so it never spams the queue).
+        """
+        effective = min((f.render_scale for f in self._feeds), default=1.0)
+        if effective == self._effective_scale:
+            return
+        self._effective_scale = effective
+        w = max(2, round(self._base_width * effective))
+        h = max(2, round(self._base_height * effective))
+        w -= w % 2
+        h -= h % 2
+        received_us = int((self._clock() - self._start) * 1_000_000)
+        self._events.append(DownscaleHint(scale=effective, width=w, height=h, received_us=received_us))
+        self._events_signal.set()
+
     def _make_feed(self, client_id: str, principal: Principal | None) -> _ClientFeed:
         feed = _ClientFeed(self, client_id, principal)
         self._feeds.add(feed)
@@ -546,6 +659,8 @@ class Display:
         self._clients.pop(client_id, None)
         if session is not None:
             self._sessions.discard(session)
+        # A viewer leaving can relax the aggregate downscale (its congestion is gone).
+        self._recompute_render_hint()
 
 
 class _ClientFeed:
@@ -557,7 +672,17 @@ class _ClientFeed:
     sees a dense sequence starting at its own keyframe.
     """
 
-    __slots__ = ("_display", "client_id", "principal", "_seq", "_last_seen", "_event", "_closed", "viewport")
+    __slots__ = (
+        "_display",
+        "client_id",
+        "principal",
+        "_seq",
+        "_last_seen",
+        "_event",
+        "_closed",
+        "viewport",
+        "render_scale",
+    )
 
     def __init__(self, display: Display, client_id: str, principal: Principal | None) -> None:
         self._display = display
@@ -568,9 +693,24 @@ class _ClientFeed:
         self._event = asyncio.Event()
         self._closed = False
         self.viewport: tuple[int, int, float] | None = None
+        # This viewer's controller's current recommended render scale (adaptive resolution
+        # lever). The Display aggregates the minimum across viewers into a DownscaleHint.
+        self.render_scale = 1.0
 
     def _wake(self) -> None:
         self._event.set()
+
+    def suggest_render_scale(self, scale: float) -> None:
+        """Record this viewer's controller-recommended render scale and re-aggregate.
+
+        Called by :class:`~pdum.rfb.session.RfbSession` when its adaptive controller
+        moves the resolution lever; the Display folds it into a shared
+        :class:`~pdum.rfb.types.DownscaleHint`."""
+        scale = max(0.0, min(1.0, float(scale)))
+        if scale == self.render_scale:
+            return
+        self.render_scale = scale
+        self._display._recompute_render_hint()
 
     def close(self) -> None:
         """Stop this feed so the session's encode loop unparks and exits."""

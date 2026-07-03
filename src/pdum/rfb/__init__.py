@@ -35,7 +35,16 @@ from .protocol import (
 )
 from .session import RfbSession
 from .transport import Channel, WebSocketTransport
-from .types import DISPLAY_P3, SRGB, ColorSpace, EncodedPayload, EncoderBackend, InputEvent, RawFrame
+from .types import (
+    DISPLAY_P3,
+    SRGB,
+    ColorSpace,
+    DownscaleHint,
+    EncodedPayload,
+    EncoderBackend,
+    InputEvent,
+    RawFrame,
+)
 
 __version__ = "0.2.1+dev"
 
@@ -51,10 +60,12 @@ __all__ = [
     "SRGB",
     "NvencGpuPyavEncoder",  # lazy
     "Display",
+    "DownscaleHint",
     "EncodedPayload",
     "EncoderBackend",
     "ImageEncoder",
     "InputEvent",
+    "Recording",  # lazy
     "NvencCpuEncoder",  # lazy
     "Principal",
     "H264CpuEncoder",  # lazy
@@ -89,6 +100,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .encoders.h264_cpu import H264CpuEncoder, h264_available
     from .encoders.nvenc_cpu import NvencCpuEncoder, nvenc_cpu_available
     from .encoders.nvenc_gpu_pyav import NvencGpuPyavEncoder, nvenc_gpu_pyav_available
+    from .recording import Recording
     from .server import Server, serve, serve_server
 
 
@@ -115,4 +127,8 @@ def __getattr__(name: str):
         from . import server
 
         return getattr(server, name)
+    if name == "Recording":
+        from .recording import Recording
+
+        return Recording
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
