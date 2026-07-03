@@ -147,13 +147,16 @@ body {
   display: block;
 }
 
-/* The framework wrappers' batteries chrome (`.rfb-root`) themed to the warm palette. */
+/* The batteries chrome (`.rfb-root` + its on-canvas `.rfb-toolbar`) themed to the warm palette.
+   Square corners (`--rfb-radius: 0`) to match the demo's hairline aesthetic; `.viewport` already
+   supplies the border + dark backing. */
 .viewport .rfb-root {
   width: 100%;
   height: 100%;
   --rfb-bg: var(--viewport-bg);
   --rfb-fg: #f3efe6;
   --rfb-accent: var(--hairline);
+  --rfb-radius: 0;
 }
 
 /* --- control rail --------------------------------------------------------- */
