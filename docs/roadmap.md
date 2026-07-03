@@ -31,70 +31,29 @@ in the linked docs, not here:
   WebGPU present, with real WebGPU GPU-timing. Finding: per-frame *present* cost is
   negligible and ~equal across backends, so Canvas2D stays the default and GPU pays for
   compositing/zoom, not a faster present. → proposal §15.
+- **Client-side browser recording** — `startRecording(options?)` / `stopRecording(): Promise<Blob>`
+  via `canvas.captureStream()` → `MediaRecorder`, on the main-thread present path
+  (`MainThreadPresentView`; `canRecord` reports where it's supported — Mode A's OffscreenCanvas
+  can't `captureStream`), with a record toggle in the batteries chrome + demo.
+  → [JS guide](guide_javascript.md#recording-what-the-viewer-sees).
+- **Agent-friendly frontend observability** — a standalone, reusable **private** package
+  `@habemus-papadum/worker-observability` (worker→main log bridge so worker logs reach the
+  Chrome-MCP-readable main console, a `window.__rfb` registry + state snapshots, runtime
+  `setDebug`, heartbeat), adopted by rfb. Principles for reuse in any Web-Worker project:
+  [agent-observable web workers](agent_observable_web_workers.md).
+- **Draw-path transfer measurement** — the worker→main transfer + upload half of the bench:
+  the cross-thread hop is free over decode, so Mode B's frame-as-texture adds no measurable
+  submit-side cost. → proposal §15.1.
+- **Demo chrome + wheel-zoom** — the `pdum-rfb demo` now mounts the full batteries toolbar
+  (capture/zoom/fit/backend icons, root-caused: it had mounted the bare core view with no
+  chrome); wheel-zoom sensitivity halved.
 
 ---
 
 What follows is the short list of what's actually left. It is deliberately not
 exhaustive. Each item carries a rough **benefit · difficulty** read to help triage.
 
-## 1. Record to MP4 — the client-side (browser) half
-
-**Status: shipped.**
-
-The server-side tap's symmetric counterpart: record exactly what the **viewer** sees —
-fit/zoom/pan and all — in the browser. `captureStream()` the display canvas into a
-`MediaRecorder` (WebM/MP4 per browser support), exposed as `startRecording(options?)` /
-`stopRecording(): Promise<Blob>` and surfaced as a **record toggle** in the
-`<RemoteFramebuffer>` batteries chrome (a sibling to the `capture PNG` button, on every
-wrapper + the anywidget) and in the `pdum-rfb demo`. Lives in the **batteries tier**.
-
-Because `HTMLCanvasElement.captureStream()` needs a real on-screen canvas, recording is
-implemented on **`MainThreadPresentView`** (the path that owns a main-thread `<canvas>`; the
-anywidget default). The default `RemoteFramebufferView` (Mode A) transfers its canvas to the
-decode worker, so `canRecord` is `false` there and `startRecording()` throws an actionable
-error (`RECORDING_UNSUPPORTED_MESSAGE`). Shared `MediaRecorder` logic lives in
-`widgets/src/recording.ts`; see the [JavaScript guide](guide_javascript.md#recording-what-the-viewer-sees).
-A later refinement could mux the already-decoded `EncodedVideoChunk`s directly (no re-encode)
-when the container/codec line up.
-
-## 2. Agent-friendly frontend observability
-
-_benefit: high · difficulty: moderate_
-
-The marimo bug was only findable via ad-hoc `window.__rfb*` hooks that were then removed;
-productize them as first-class, **runtime-toggleable, off-by-default** features (zero
-console spam in normal use, flippable from the console without a rebuild). Full write-up:
-[marimo proposal §7](proposals/active/marimo_rendering_fix.md) + the existing
-[agentic frontend debugging guide](agentic_frontend_debugging.md). The pieces:
-
-- **Forward worker logs to the main thread.** Worker `console.*` is invisible to the
-  browser MCP tools (they only see main-thread/page logs). Add a log sink that
-  `postMessage`s each line to main, where it's re-logged (now readable) **and** pushed into
-  a bounded ring buffer on `window.__rfb.logs`. Gated by the debug flag → free when off.
-- **A `window.__rfb` registry + state snapshot.** Each view registers itself; expose
-  `window.__rfb.stats()` / `.state()` / `.surface()` / `.capture()` so an agent or human can
-  interrogate a live view from the console (the productized form of the temp hooks).
-- **Runtime debug toggle.** `window.__rfb.setDebug(true)` posts `{type:"set_debug"}` to the
-  worker (rebuilds its logger) — no rebuild, no kernel restart. One discoverability `notice`
-  line on first construct names the handle. Optional `?debug=1` / `localStorage.rfbDebug`.
-- **A cadence heartbeat** — one periodic summary line (fps/dropped/queue/RTT) instead of
-  per-frame spam, forwarded from the worker to main.
-
-This is the natural home for the stall-watchdog / detach-reattach lessons the debugging
-guide already documents, and it directly serves the agent+human pairing loop
-(`pdum-rfb demo --dev`).
-
-## 3. Finish the draw-path measurement: the worker→main transfer cost
-
-_benefit: low · difficulty: moderate_
-
-The draw-path benchmark answered the *present* side (negligible on every backend) but not
-the other half of "is Mode B worth it?": the cross-thread `VideoFrame` **transfer + upload**
-cost (worker decode → transfer to main → texture upload), which needs a real
-decode-under-load harness rather than a synthetic frame loop. Measuring it closes the
-`surface: "auto"` story and the proposal's last open §15 follow-up.
-
-## 4. marimo auto-start UX (small)
+## 1. marimo auto-start UX (small)
 
 _benefit: low · difficulty: low_
 
