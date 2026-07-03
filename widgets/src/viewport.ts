@@ -33,6 +33,26 @@ export interface DestRect {
   dh: number;
 }
 
+/** A rectangle in some pixel space: frame px for a source rect, backing px for a
+ *  destination rect. The `{x,y,w,h}` shape both `src` and `dst` share in a
+ *  `PresentGeometry`. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The whole composite primitive a display backend draws: sample `src` (a region of
+ *  the current frame, frame px) into `dst` (a region of the backing store, backing
+ *  px). It subsumes fit (whole-frame `src`) AND, later, zoom/pan/crop (a sub-rect
+ *  `src`, roadmap item 2). Every backend — Canvas2D `drawImage`, a WebGL textured
+ *  quad, a WebGPU sampled quad — can execute it. */
+export interface PresentGeometry {
+  src: Rect;
+  dst: Rect;
+}
+
 /** Per-axis scale factors (frame device px -> backing device px) for the fit mode. */
 export function fitScales(v: ViewportState): { scaleX: number; scaleY: number } {
   const sx = v.frameW > 0 ? v.backingW / v.frameW : 1;
@@ -81,4 +101,19 @@ export function backingToFrame(
   const y = dh > 0 ? ((by - dy) / dh) * v.frameH : 0;
   const inside = x >= 0 && x < v.frameW && y >= 0 && y < v.frameH;
   return { x, y, inside };
+}
+
+/**
+ * The `{ src, dst }` a display backend draws for this fit state. Today `src` is always
+ * the whole frame and `dst` is `frameDestRect`, so this reproduces the current
+ * letterbox/cover exactly; `backingToFrame` is its inverse (a backing point → frame
+ * px). A future zoom/pan/crop iteration (roadmap item 2) narrows `src` to a sub-rect,
+ * and `backingToFrame` follows the same transform so clicks stay accurate.
+ */
+export function presentGeometry(v: ViewportState): PresentGeometry {
+  const { dx, dy, dw, dh } = frameDestRect(v);
+  return {
+    src: { x: 0, y: 0, w: v.frameW, h: v.frameH },
+    dst: { x: dx, y: dy, w: dw, h: dh },
+  };
 }

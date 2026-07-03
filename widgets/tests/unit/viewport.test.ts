@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backingToFrame, fitScales, frameDestRect, type ViewportState } from "../../src/viewport";
+import { backingToFrame, fitScales, frameDestRect, presentGeometry, type ViewportState } from "../../src/viewport";
 
 const state = (over: Partial<ViewportState>): ViewportState => ({
   frameW: 1280,
@@ -36,6 +36,37 @@ describe("frameDestRect", () => {
     const { scaleX, scaleY } = fitScales(state({ frameW: 800, frameH: 600, backingW: 1280, backingH: 720, fit: "fill" }));
     expect(scaleX).toBeCloseTo(1.6);
     expect(scaleY).toBeCloseTo(1.2);
+  });
+});
+
+describe("presentGeometry", () => {
+  it("uses the whole frame as src and frameDestRect as dst (reproduces today's fit exactly)", () => {
+    for (const fit of ["fill", "contain", "cover"] as const) {
+      const v = state({ frameW: 800, frameH: 600, backingW: 1280, backingH: 720, fit });
+      const { src, dst } = presentGeometry(v);
+      // src is always the full frame in the fit-only (no zoom/pan) case
+      expect(src).toEqual({ x: 0, y: 0, w: 800, h: 600 });
+      // dst mirrors frameDestRect, just in {x,y,w,h} shape
+      const d = frameDestRect(v);
+      expect(dst).toEqual({ x: d.dx, y: d.dy, w: d.dw, h: d.dh });
+    }
+  });
+
+  it("dst letterboxes a 16:9 frame into a 4:3 backing (matches frameDestRect)", () => {
+    const v = state({ backingW: 640, backingH: 480, fit: "contain" });
+    expect(presentGeometry(v).dst).toEqual({ x: 0, y: 60, w: 640, h: 360 });
+  });
+
+  it("backingToFrame inverts the dst rect (src corners round-trip)", () => {
+    const v = state({ frameW: 1280, frameH: 720, backingW: 900, backingH: 900, fit: "contain" });
+    const { dst } = presentGeometry(v);
+    // frame origin maps to the dst top-left; frame bottom-right to dst bottom-right
+    const tl = backingToFrame(v, dst.x, dst.y);
+    const br = backingToFrame(v, dst.x + dst.w, dst.y + dst.h);
+    expect(tl.x).toBeCloseTo(0);
+    expect(tl.y).toBeCloseTo(0);
+    expect(br.x).toBeCloseTo(1280);
+    expect(br.y).toBeCloseTo(720);
   });
 });
 

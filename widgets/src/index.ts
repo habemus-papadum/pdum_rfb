@@ -32,8 +32,8 @@ export type { Capabilities } from "./capabilities";
 
 export { BackpressureController, KeyframeGate } from "./backpressure";
 
-export { frameDestRect, backingToFrame, fitScales } from "./viewport";
-export type { FitMode, ViewportState, DestRect } from "./viewport";
+export { frameDestRect, backingToFrame, fitScales, presentGeometry } from "./viewport";
+export type { FitMode, ViewportState, DestRect, Rect, PresentGeometry } from "./viewport";
 
 export {
   normalizePointerEvent,

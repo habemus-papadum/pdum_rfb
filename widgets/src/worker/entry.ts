@@ -360,6 +360,7 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         watchdogTimer = null;
       }
       video?.close();
+      renderer?.dispose();
       try {
         ws?.close();
       } catch {

@@ -11,16 +11,51 @@ What follows is the short list of things actually worth doing next. It is
 deliberately not exhaustive. Each item carries a rough **benefit · difficulty** read
 to help triage.
 
-## 1. Client-side viewport: crop, zoom, and pan
+## 1. Client display backend: a pluggable draw path (Canvas2D / WebGL / WebGPU)
+
+_benefit: high · difficulty: high_
+
+The low-level layer *under* the viewport: the thing that turns a decoded frame into
+pixels on the canvas, with **no presentation opinion of its own**. Today that draw path
+is hard-coded — the worker composites a decoded `VideoFrame` with `drawImage` onto the
+transferred `OffscreenCanvas` (`widgets/src/worker/renderer.ts`). The work is to make
+the draw path **pluggable**: a small `DisplaySurface` seam with three interchangeable
+backends — Canvas2D (today's floor), WebGL2, and WebGPU — selected by capability, each
+just "sample this source region of the current frame into that destination region of
+the canvas." No fit, no zoom, no pan at this layer; those are item 2.
+
+Why its own item: a compositing flow is useful for more than zoom/pan — the real
+payoff of a GPU draw path is that the frame becomes a **first-class input to a
+client-side hardware scene** (composite it with a minimap, a WebGL/WebGPU GUI overlay,
+custom blends — all rendered on the client), not merely a faster `drawImage`. That is
+lower-level functionality than the UI core and deserves to stand on its own. Note the
+browser's decode memory model shapes this: you **cannot** decode into memory you own
+(WebCodecs owns the `VideoFrame`), so the model is "own/participate in the *present*
+texture," not "provide the decode buffer" — the proposal works this through per backend.
+
+Two things make it real work rather than a mechanical swap: **(a)** the
+retain-last-frame-and-repaint-on-resize resilience (trivial for the 2D copy today,
+genuinely harder as a GL/WebGPU texture) — resolved by keeping full retention on
+Canvas2D/WebGL and *deliberately relaxing it for WebGPU*, surfacing the rare, self-
+healing resize gap through the existing status overlay rather than paying per-frame
+cost; and **(b)** decoupling present cadence from decode cadence so a present loop can
+redraw the retained frame at display refresh. **Measure first** — `drawImage` of a
+hardware `VideoFrame` is already fast, so Canvas2D stays the default and a GPU path is
+opt-in / auto-only-when-it-pays.
+
+Design and phasing: **[client display backend proposal](proposals/active/client_display_backend.md)**.
+
+## 2. Core UI viewport: crop, zoom, and pan
 
 _benefit: high · difficulty: moderate_
 
-This is **entirely a client concern** — the server does not zoom and never needs to
-know the client's zoom/pan. The publisher owns the framebuffer; the client decides how
-to fit that frame into its canvas and where the viewer is looking, and does its own
-coordinate transforms so input events map back to frame space. Keeping the transform
-on the client is the whole point: one shared encoded stream, N viewers each framing it
-however they like, no per-client server render.
+The UI layer built **on top of** the display backend (item 1). This is **entirely a
+client concern** — the server does not zoom and never needs to know the client's
+zoom/pan. The publisher owns the framebuffer; the client decides how to fit that frame
+into its canvas and where the viewer is looking, and does its own coordinate transforms
+so input events map back to frame space. Keeping the transform on the client is the
+whole point: one shared encoded stream, N viewers each framing it however they like, no
+per-client server render.
 
 Today the client's sizing is rigid — a small fixed set of fit modes. The work is to
 make it **arbitrary**:
@@ -28,19 +63,18 @@ make it **arbitrary**:
 - A general viewport transform (crop rect + zoom + pan) rather than fixed fit. The
   geometry seam already exists: `viewport.ts` reserves `zoom`/`panX`/`panY` (identity
   today) and `backingToFrame`/`frameDestRect` already round-trip event coordinates, so
-  gestures can drive zoom/pan without any wire change.
+  gestures can drive zoom/pan without any wire change. It expresses the transform as the
+  `{ src, dst }` present-geometry the item-1 backend consumes.
 - Simple named presets on top of the general transform — `fit`, `cover`, `fill`,
   `1:1`, "center on point" — so the common cases stay one-liners.
+- Gestures (wheel-zoom, drag-pan, pinch) that only mutate viewport state and let the
+  backend's present loop redraw — no new draw code, no wire change.
 
-The scaling/compositing method should be **pluggable**, not baked in. The worker
-composites decoded `VideoFrame`s with `drawImage` onto the transferred
-`OffscreenCanvas` today; a zoomed/cropped viewport is a natural place to add a
-WebGL (and later WebGPU) compositor that uploads the frame to a texture and samples the
-ROI on the GPU. Pick the renderer by capability; `drawImage` stays the floor. **Measure
-first** — `drawImage` of a hardware `VideoFrame` is already fast, so the GPU path only
-pays off once zoom/pan or profiling shows compositing is a real cost.
+This lands after item 1 gives it the `{ src, dst }` primitive and the present loop; see
+the same **[display backend proposal](proposals/active/client_display_backend.md)** (§9)
+for how the two layers meet.
 
-## 2. Resolution as an adaptive lever
+## 3. Resolution as an adaptive lever
 
 _benefit: medium · difficulty: moderate_
 
@@ -55,7 +89,9 @@ Add a server-driven **downscale hint** (a fourth lever, or a `set_quality` field
 publisher can honor) so the loop can shrink the encoded frame under pressure and
 recover when healthy — without hand-rolling it in every app.
 
-## 3. AV1 / HEVC codecs
+Agreed -- so this would be an event in the poll setup?
+
+## 4. AV1 / HEVC codecs
 
 _benefit: medium · difficulty: high_
 
@@ -67,7 +103,7 @@ CPU AV1 encoder (libaom / SVT-AV1) mirroring the libx264 backend. Gate the clien
 HDR pipeline `types.ColorSpace` already models (`bit_depth`, `bt2020`/`pq`/`hlg` are
 expressible but not yet wired through a 10-bit encode/decode chain).
 
-## 4. Record to MP4 (server-side tap + client-side batteries)
+## 5. Record to MP4 (server-side tap + client-side batteries)
 
 _benefit: high · difficulty: moderate_
 
