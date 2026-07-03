@@ -78,7 +78,10 @@ pixel-moving is a deferred GPU/compositor blit, not main-thread work. So the def
 is already a GPU blit. Reach for `"webgl"`/`"webgpu"` (or `FrameTextureFeed`, below) when you
 need the frame as a **texture in your own scene** (compositing, overlays, later zoom/pan) —
 that is the reason the GPU paths exist, not a faster present. Absolute GPU throughput is
-workload- and hardware-specific; run the benchmark on your target to compare there.
+workload- and hardware-specific; run the benchmark on your target to compare there. The
+worker→main frame **transfer + upload** that `FrameTextureFeed` (Mode B) adds is measured too
+(proposal *Measurements* §15.1): the cross-thread handoff is a handle move below the timer
+floor, and uploading a transferred frame costs the same as an on-thread one.
 
 **Debug logging.** `debug: true` turns on a tagged console play-by-play from the main
 thread and the decode worker — `[rfb:worker] ws / config / keyframe / frame` and

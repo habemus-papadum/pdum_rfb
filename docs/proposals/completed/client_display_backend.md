@@ -664,14 +664,19 @@ a repeatable, headless benchmark instead of intuition.
 **Harness.** `widgets/bench-harness.html` + `widgets/demo/bench-harness.ts` — a server-free,
 main-thread page (mirrors `surface-harness.ts`) that renders a **known, deterministic moving
 frame sequence** (a rotating pool of distinct gradient + moving-box + speckle frames, so the
-driver can't elide a redundant upload) through a chosen path and publishes timings on
-`window.__bench`. Query params: `mode=A|B`, `surface=2d|webgl|webgpu` (Mode A),
-`feed=webgl|webgpu` (Mode B), `source=videoframe|bitmap`, `frame=WxH`, `frames`, `warmup`.
-Specs: `widgets/tests/e2e/bench.spec.ts` (chromium: Mode A `{2d, webgl}` + Mode B `{webgl}`)
-and `widgets/tests/e2e/bench-webgpu.spec.ts` (the gated `chromium-webgpu` project: Mode A/B
-`{webgpu}`). Run: `pnpm -C widgets e2e bench.spec.ts --project=chromium` and
-`… bench-webgpu.spec.ts --project=chromium-webgpu`; the table is printed and attached to the
-run.
+driver can't elide a redundant upload; the generator is `widgets/demo/benchFrames.ts`, shared
+with the transfer worker) through a chosen path and publishes timings on `window.__bench`.
+Query params: `mode=A|B|transfer`, `surface=2d|webgl|webgpu` (Mode A), `feed=webgl|webgpu`
+(Mode B / transfer caller), `source=videoframe|bitmap`, `frame=WxH`, `frames`, `warmup`.
+Specs: `widgets/tests/e2e/bench.spec.ts` (chromium: Mode A `{2d, webgl}` + Mode B `{webgl}`),
+`widgets/tests/e2e/bench-webgpu.spec.ts` (the gated `chromium-webgpu` project: Mode A/B
+`{webgpu}`), and — for the worker→main transfer half (§15.1) — `bench-transfer.spec.ts`
+(chromium, webgl caller) + `bench-transfer-webgpu.spec.ts` (chromium-webgpu, webgpu caller).
+Run: `pnpm -C widgets e2e bench.spec.ts --project=chromium`,
+`… bench-webgpu.spec.ts --project=chromium-webgpu`,
+`… bench-transfer.spec.ts --project=chromium`, and
+`… bench-transfer-webgpu.spec.ts --project=chromium-webgpu`; each table is printed and attached
+to the run.
 
 **Metrics** (main-thread wall-clock, `performance.now()`): `submitMs` = time around the
 draw calls (`setFrame`+`present` for Mode A; caller `upload`+composite for Mode B) — the CPU
@@ -716,9 +721,9 @@ backlog — the caveat applies in full; do not read these as GPU cost.
   `drawImage`"; it's "the frame is a first-class texture in your scene" (§1, §6).
 - **Mode B upload+composite is in the same negligible submit band as Mode A present**, so the
   "decode-straight-to-GPU-texture" open item (§13 Future) is not blocked by any *submit*-side
-  overhead. The unmeasured piece is the **cross-thread `VideoFrame` transfer** (worker→main)
-  Mode B requires; it is a handle move, not a pixel copy (§9), and belongs in a follow-up that
-  times the transfer end-to-end under a real decode load.
+  overhead. The remaining piece — the **cross-thread `VideoFrame` transfer** (worker→main) Mode
+  B requires — is now measured in **§15.1** (below): it is a handle move, not a pixel copy (§9),
+  and the receive-side upload costs the same as an on-thread one.
 - **The WebGPU `timestamp-query` path works for BOTH modes** — Mode B (via the caller's own
   render pass) and Mode A (via an opt-in, benchmark-only timer surgically added to
   `WebgpuSurface`: `enableGpuTiming()` + `presentTimed()` wrap the *internal* present render
@@ -730,3 +735,62 @@ backlog — the caveat applies in full; do not read these as GPU cost.
 
 The absolute GPU/raster cost (the drain and `gpuMs` columns) must be re-measured on real
 hardware; the harness makes that a one-command run on any target.
+
+### 15.1 The worker→main transfer + upload (the other half)
+
+The present benchmark above times the *draw*; it does not time the **cross-thread hop** Mode B
+(`FrameTextureFeed`) adds ahead of the caller's upload. `mode=transfer` closes that: a decode
+worker (`widgets/demo/benchDecodeWorker.ts`) builds each frame from the *same* deterministic
+pool and **`postMessage`-transfers** it to main — the exact `postMessage(frame, [frame])`
+handoff `worker/transferSink.ts` performs — and main uploads it into the caller texture
+(`WebglFrameTexture` / `WebgpuFrameTexture`). It reports, per frame (ms):
+
+- `transferMs` — one-way worker→main **Transferable handoff latency**. Measured across threads
+  via `performance.now() + performance.timeOrigin` (an epoch-comparable absolute time; each
+  context has its own `timeOrigin`), stamped at the worker post site, differenced at the main
+  receive site (negatives clamped to 0).
+- `uploadMs` — the main-thread **`upload()`** of the *transferred* frame.
+- `baselineUploadMs` — the same `upload()` of a frame built **on main** (no transfer). The
+  off-main reference `uploadMs` is compared against, so the delta is exactly what the transfer
+  costs the upload.
+- `createMs` (worker-side frame construction) and `flushMs` (final GPU drain) for context.
+
+> **⚠️ Read this before quoting `transferMs`.** Two caveats stack. (1) **SwiftShader** — as
+> above, `upload`/drain absolutes are a software rasteriser, not real-GPU numbers. (2) **Timer
+> coarsening** — the preview server is **not cross-origin isolated** (`crossOriginIsolated ===
+> false`, reported in the result), so `performance.now()` is clamped to ~100 µs and jittered. A
+> Transferable is a *handle move* (sub-100 µs), so per-sample `transferMs` quantises to `0` or a
+> single coarse step — **read the mean as an aggregate ceiling, not a per-frame truth.** A true
+> per-frame handoff number needs a COOP/COEP (`crossOriginIsolated`) hardware run.
+
+Measured here (Apple Silicon, headless SwiftShader, 1280×720, VideoFrame source, `COI=false`):
+
+| caller | transfer→main (mean) | upload xfer (mean) | upload baseline (mean) | worker create (mean) | GPU drain (amortized)¹ |
+|---|---|---|---|---|---|
+| webgl (chromium) | 0.107 ms² | 0.033 ms | 0.035 ms | 0.008 ms | ~6.6 ms/frame |
+| webgpu (chromium-webgpu) | 0.000 ms² | 0.037 ms | 0.033 ms | 0.010 ms | ~11 ms/frame |
+
+¹ `flushMs ÷ uploads` (uploads = baseline + transfer = `2·(warmup+frames)`); software-raster
+backlog, **not** GPU cost — the SwiftShader caveat applies in full.
+² Both readings are *at or below* the coarsening floor: the webgl run caught one ~0.1 ms clock
+step, the webgpu run read `0.0`. That the two disagree by a whole quantum **is itself the
+evidence** we are measuring clock granularity, not real handoff cost.
+
+**What it says (portable conclusions):**
+
+- **Uploading a transferred frame costs the same as uploading a locally-built one** — `uploadMs`
+  and `baselineUploadMs` match within the timer noise (0.033 vs 0.035 webgl; 0.037 vs 0.033
+  webgpu). The transfer does **not** make the subsequent upload pricier: a transferred
+  `VideoFrame` is a GPU-backed handle, and `texImage2D` / `copyExternalImageToTexture` treat it
+  identically to one created on the caller's thread.
+- **The handoff itself is below the measurable floor** without cross-origin isolation — a handle
+  move, not a pixel copy (§9). Its apparent cost (≤ one ~0.1 ms clock tick) is lost in timer
+  quantisation; the honest statement is "too small to measure here," with a real number waiting
+  on a `crossOriginIsolated` hardware run.
+- **So Mode B's transfer/upload *does* pay for the composite-into-your-own-scene capability.**
+  The cross-thread hop adds no measurable submit-side cost over Mode A present, and the receive
+  upload equals an on-thread one — the frame-as-first-class-texture capability (§1, §6) is
+  effectively free on the CPU submit path. This is the concrete close of the §13 *Future* /
+  `surface: "auto"` open item: nothing in the transfer path argues against Mode B or against a
+  later decode-straight-to-GPU-texture ingest; the only cost that still needs a hardware
+  re-measure is the deferred GPU/raster drain, same as §15.
