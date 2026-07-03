@@ -145,6 +145,45 @@ owns its canvas — i.e. you constructed it with a **container** element (as the
 wrappers do), not a caller-provided `<canvas>` (whose context is already bound). The
 batteries chrome exposes this as a backend dropdown next to `capture PNG`.
 
+### Recording what the viewer sees
+
+Record the live view — **exactly what's on screen, fit/zoom/pan and all** — to a video file in
+the browser. This is the client-side counterpart to the server-side `Display.record(...)` tap
+(the [Python guide](guide_python.md)): the display canvas is captured with
+`HTMLCanvasElement.captureStream()` and encoded by a `MediaRecorder` (WebM/MP4 per browser
+support).
+
+```ts
+import { MainThreadPresentView, recordingSupported } from "@habemus-papadum/rfb-widgets";
+
+const view = new MainThreadPresentView(container, { url: "wss://…" });
+if (view.canRecord) {
+  view.startRecording({ frameRate: 30 });          // optional: mimeType, videoBitsPerSecond, timeslice
+  // …later…
+  const blob = await view.stopRecording();          // a WebM (or MP4) Blob of what was shown
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(blob),
+    download: "framebuffer.webm",
+  });
+  a.click();
+}
+```
+
+> **`captureStream()` needs a real on-screen canvas.** Recording is only available on a view
+> that owns a main-thread `<canvas>` — **`MainThreadPresentView`** (the anywidget's default
+> present path). The default `RemoteFramebufferView` (Mode A) transfers its canvas to the
+> decode worker via `transferControlToOffscreen()`, so the main thread has no drawable surface
+> to capture, and `OffscreenCanvas.captureStream()` is not portable. On that view `canRecord`
+> is `false` and `startRecording()` throws `RECORDING_UNSUPPORTED_MESSAGE` — guard with
+> `view.canRecord`.
+
+API: `view.canRecord` (capability gate — MediaRecorder + a main-thread canvas), `view.isRecording`,
+`view.startRecording(options?)`, and `view.stopRecording(): Promise<Blob>`. `dispose()` cancels an
+in-progress recording. Helpers `recordingSupported()` and `pickRecordingMimeType(preferred?)` are
+exported for feature-detection. The batteries chrome surfaces this as a **record toggle** next to
+`capture PNG` (disabled when the active view can't record). Sparse/on-demand scenes record sparse
+frames — the view redraws (and thus the stream captures) on each displayed frame.
+
 ### Frame-as-texture (Mode B): composite the stream into your own scene
 
 `RemoteFramebufferView` owns a canvas and *presents* the frame for you (Mode A). When you
@@ -189,7 +228,9 @@ Methods/getters: `view.state`, `view.stats`, `view.surface`, `view.lastCaptureSe
 `view.capture("imagedata" | "blob")` (a debug/test hook that reads back the
 current canvas pixels); the viewport controls `view.setFit`, `view.setViewport`,
 `view.zoomBy`, `view.applyPreset`, `view.resetView`, `view.getViewport`, and
-`view.setSurface`; and `view.dispose()`.
+`view.setSurface`; recording (`MainThreadPresentView` only) `view.canRecord`,
+`view.startRecording`, `view.stopRecording` (see [Recording](#recording-what-the-viewer-sees));
+and `view.dispose()`.
 
 ## Framework integration
 
@@ -201,8 +242,8 @@ idiomatic wrappers for the big three. Each ships **two tiers**:
   CSS — you render and style everything.
 - **Tier 2 — batteries.** A `<RemoteFramebuffer>` component with a status pill, a compact
   latency badge, a toggleable stats HUD, an error banner, and a toolbar
-  (screenshot / fullscreen / transport toggle / HUD toggle, a **display-backend selector**,
-  and **zoom `+` / `−` / fit** controls; crop/zoom/pan gestures are on). Opt-in stylesheet,
+  (screenshot / **record** / fullscreen / transport toggle / HUD toggle, a **display-backend
+  selector**, and **zoom `+` / `−` / fit** controls; crop/zoom/pan gestures are on). Opt-in stylesheet,
   fully themeable (see [Theming](#theming-the-batteries-component)).
 
 | Framework | Package | Tier 1 | Tier 2 |

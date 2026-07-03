@@ -28,6 +28,12 @@ import {
   normalizeWheelEvent,
 } from "./events";
 import type { NormalizedEvent } from "./eventTypes";
+import {
+  recordingSupported,
+  startCanvasRecording,
+  type CanvasRecordingSession,
+  type RecordingOptions,
+} from "./recording";
 import type { ConnectionState, MainToWorker, Stats, WorkerInitOptions, WorkerToMain } from "./types";
 import { backingToFrame, presentGeometry, type FitMode, type ViewportState } from "./viewport";
 import { createInlineWorker } from "./workerFactory";
@@ -93,6 +99,10 @@ export class MainThreadPresentView {
 
   private resizeObserver?: ResizeObserver;
   private disposed = false;
+
+  // Client-side recording of what this on-screen canvas shows (fit/zoom/pan and all). Null when
+  // idle. This view owns a real <canvas>, so captureStream()/MediaRecorder work directly.
+  private recording: CanvasRecordingSession | null = null;
 
   private _state: ConnectionState = "connecting";
   private _stats: Stats = { ...EMPTY_STATS };
@@ -171,9 +181,45 @@ export class MainThreadPresentView {
     return Promise.resolve(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
   }
 
+  /** Whether client-side recording is available: this view owns a real on-screen canvas, so it
+   *  only needs the browser to support `MediaRecorder` + `HTMLCanvasElement.captureStream`. */
+  get canRecord(): boolean {
+    return recordingSupported();
+  }
+
+  /** True while a recording is in progress (between `startRecording()` and `stopRecording()`). */
+  get isRecording(): boolean {
+    return this.recording?.active ?? false;
+  }
+
+  /**
+   * Start recording exactly what this on-screen canvas shows (the current fit/zoom/pan) via
+   * `canvas.captureStream()` → `MediaRecorder`. Idempotent while active. Throws if the browser
+   * lacks MediaRecorder/captureStream (guard with {@link canRecord}). Pair with {@link stopRecording}.
+   */
+  startRecording(options?: RecordingOptions): void {
+    if (this.disposed) throw new Error("MainThreadPresentView is disposed");
+    if (this.recording?.active) return;
+    this.recording = startCanvasRecording(this.canvas, options);
+    this.log.notice("record", "started", { mimeType: this.recording.mimeType });
+  }
+
+  /** Stop the active recording and resolve with the finalized video Blob (WebM/MP4 per support).
+   *  Rejects if no recording is in progress. */
+  async stopRecording(): Promise<Blob> {
+    const rec = this.recording;
+    if (!rec) return Promise.reject(new Error("no recording in progress"));
+    this.recording = null;
+    const blob = await rec.stop();
+    this.log.notice("record", "stopped", { bytes: blob.size, type: blob.type });
+    return blob;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.recording?.cancel();
+    this.recording = null;
     this.resizeObserver?.disconnect();
     this.detachListeners();
     this.worker.postMessage({ type: "dispose" } satisfies MainToWorker);

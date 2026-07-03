@@ -9,13 +9,14 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       // Multi-page: the demo + the anywidget e2e harness + the display-surface conformance
-      // harness + the draw-path benchmark harness.
+      // harness + the draw-path benchmark harness + the recording harness.
       input: {
         index: "index.html",
         anywidget: "anywidget-harness.html",
         surfaceHarness: "surface-harness.html",
         feedHarness: "feed-harness.html",
         benchHarness: "bench-harness.html",
+        recordHarness: "record-harness.html",
       },
     },
   },

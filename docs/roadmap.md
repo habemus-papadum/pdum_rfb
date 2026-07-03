@@ -39,17 +39,23 @@ exhaustive. Each item carries a rough **benefit · difficulty** read to help tri
 
 ## 1. Record to MP4 — the client-side (browser) half
 
-_benefit: high · difficulty: moderate_
+**Status: shipped.**
 
-The server-side tap shipped; this is its symmetric counterpart: record exactly what the
-**viewer** sees — fit/zoom/pan and all — in the browser. `captureStream()` the display
-canvas into a `MediaRecorder` (webm/mp4 per browser support), exposed as
-`startRecording()` / `stopRecording(): Promise<Blob>` on `RemoteFramebufferView` and
-surfaced as a control in the `<RemoteFramebuffer>` batteries chrome (a sibling to the
-existing `capture PNG` button). Lives in the **batteries tier**, not the headless
-primitive. A later refinement could mux the already-decoded `EncodedVideoChunk`s directly
-(no re-encode) when the container/codec line up. Note: the zoom/pan viewport now shipped,
-so "what the viewer sees" is a genuinely richer target than a plain fit.
+The server-side tap's symmetric counterpart: record exactly what the **viewer** sees —
+fit/zoom/pan and all — in the browser. `captureStream()` the display canvas into a
+`MediaRecorder` (WebM/MP4 per browser support), exposed as `startRecording(options?)` /
+`stopRecording(): Promise<Blob>` and surfaced as a **record toggle** in the
+`<RemoteFramebuffer>` batteries chrome (a sibling to the `capture PNG` button, on every
+wrapper + the anywidget) and in the `pdum-rfb demo`. Lives in the **batteries tier**.
+
+Because `HTMLCanvasElement.captureStream()` needs a real on-screen canvas, recording is
+implemented on **`MainThreadPresentView`** (the path that owns a main-thread `<canvas>`; the
+anywidget default). The default `RemoteFramebufferView` (Mode A) transfers its canvas to the
+decode worker, so `canRecord` is `false` there and `startRecording()` throws an actionable
+error (`RECORDING_UNSUPPORTED_MESSAGE`). Shared `MediaRecorder` logic lives in
+`widgets/src/recording.ts`; see the [JavaScript guide](guide_javascript.md#recording-what-the-viewer-sees).
+A later refinement could mux the already-decoded `EncodedVideoChunk`s directly (no re-encode)
+when the container/codec line up.
 
 ## 2. Agent-friendly frontend observability
 

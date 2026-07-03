@@ -78,6 +78,13 @@ export default {
       resetView: () => {
         if (view instanceof RemoteFramebufferView) view.resetView();
       },
+      // Recording of what the viewer sees. Only the main-thread present path owns a real canvas
+      // to captureStream(); the Mode-A path reports canRecord=false and the toggle disables.
+      canRecord: () => !!view?.canRecord,
+      isRecording: () => !!view?.isRecording,
+      startRecording: () => view?.startRecording(),
+      stopRecording: () =>
+        view ? view.stopRecording() : Promise.reject(new Error("RemoteFramebuffer is not ready yet")),
     };
     const chrome = mountChrome(el, model, controls);
 
@@ -143,6 +150,7 @@ export default {
             onViewport: (framing) => chrome.setViewport(framing),
           });
       chrome.setError(null);
+      chrome.refresh(); // sync record capability to the freshly built view (main-thread vs Mode A)
     }
 
     // Connect-time traits rebuild the view; chrome-only traits just toggle DOM.
