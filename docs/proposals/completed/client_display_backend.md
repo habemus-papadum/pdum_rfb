@@ -1,6 +1,8 @@
 # Client display backend: a pluggable draw path (Canvas2D / WebGL / WebGPU)
 
-> **Status: in progress.** Splits roadmap item 1 (formerly "client-side viewport:
+> **Status: COMPLETE — shipped and verified** (this doc is now a historical design
+> record; the follow-up work it spun off is tracked in [roadmap](../../roadmap.md) v2).
+> Split roadmap item 1 (formerly "client-side viewport:
 > crop, zoom, pan") into two layers: **(1)** this low-level *display backend* — the
 > thing that turns a decoded frame into pixels, with the draw path (`drawImage` /
 > WebGL / WebGPU) chosen by capability and no presentation policy of its own; and
@@ -30,9 +32,11 @@
 > by a Mode B conformance harness (the caller composites the frame texture, both source
 > types, WebGL + WebGPU) and a `FrameTextureFeed` streaming e2e.
 >
-> **The whole of roadmap item 1 (both modes, all three backends) is now landed and
-> verified** (29 e2e across two projects + 69 unit). The remaining `docs/roadmap.md`
-> item-1 follow-ups are polish, listed in §13 "Future".
+> **The whole of the display backend (both modes, all three backends) shipped, and the
+> viewport UI + batteries backend-switch chrome (the old layer-2 / roadmap item 2) shipped
+> on top of it** — all verified (81 unit + 42 e2e across two Playwright projects). The
+> remaining follow-ups (client-side browser recording, agent-observability, the worker→main
+> transfer-cost measurement) moved to `docs/roadmap.md` v2.
 >
 > **Plan adaptations (recorded):** (1) Web Workers have **no `requestAnimationFrame`**,
 > and Mode A present runs in the worker — so P3's "rAF present loop" is really the

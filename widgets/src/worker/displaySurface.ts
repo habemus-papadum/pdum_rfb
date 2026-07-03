@@ -1,6 +1,6 @@
 // The pluggable client draw path (Mode A: managed present). Canvas2D is the only
 // backend today (canvas2dSurface.ts); WebGL2 / WebGPU slot in behind this same
-// interface — see docs/proposals/active/client_display_backend.md.
+// interface — see docs/proposals/completed/client_display_backend.md.
 //
 // The surface is PRESENTATION-FREE: it retains the current decoded frame in a
 // BACKEND-NATIVE buffer and paints a `{ src, dst }` region of it. It knows nothing

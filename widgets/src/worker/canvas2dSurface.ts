@@ -1,7 +1,7 @@
 // Canvas2D display backend: the floor draw path (always available). Retains the last
 // decoded frame as a native-resolution OffscreenCanvas copy and presents a `{src,dst}`
 // region of it with drawImage. See displaySurface.ts for the contract and
-// docs/proposals/active/client_display_backend.md for how WebGL2/WebGPU slot in beside it.
+// docs/proposals/completed/client_display_backend.md for how WebGL2/WebGPU slot in beside it.
 
 import type { PresentGeometry } from "../viewport";
 import type { DisplaySurface } from "./displaySurface";

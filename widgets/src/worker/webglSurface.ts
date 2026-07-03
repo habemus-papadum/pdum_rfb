@@ -3,7 +3,7 @@
 // to the Canvas2D floor (canvas2dSurface.ts) — the e2e asserts both produce the same
 // readback — but the frame lives on the GPU, which is the groundwork for Mode B compositing
 // and WebGPU. See displaySurface.ts for the contract and
-// docs/proposals/active/client_display_backend.md.
+// docs/proposals/completed/client_display_backend.md.
 //
 // Coordinate conventions (the fiddly part, pinned by tests/e2e/surface-conformance.spec.ts):
 //   - Upload with UNPACK_FLIP_Y_WEBGL = true, so frame row 0 (top) lands at texture t=1.

@@ -166,7 +166,7 @@ candidates, each with a concrete next test:
   detection.
 - **Robust/structural — and this is the interesting one:** stop relying on
   `transferControlToOffscreen` placeholder auto-present for fragile embedding hosts. Move to
-  **Mode B present** from `docs/proposals/active/client_display_backend.md`: the worker draws
+  **Mode B present** from `docs/proposals/completed/client_display_backend.md`: the worker draws
   to an `ImageBitmap` and `postMessage`/transfers it to the **main thread**, which draws it to
   a normal main-thread 2D canvas on a `requestAnimationFrame` loop. That sidesteps the
   worker-owned placeholder entirely and is inherently resilient to host reparenting. **The

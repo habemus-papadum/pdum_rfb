@@ -1,7 +1,7 @@
 // WebGPU display backend (Mode A: managed present). Uploads the last decoded frame into a
 // persistent RGBA GPU texture (copyExternalImageToTexture — handles both ImageBitmap and
 // VideoFrame uniformly) and presents a `{src,dst}` region of it as a sampled quad. See
-// displaySurface.ts and docs/proposals/active/client_display_backend.md.
+// displaySurface.ts and docs/proposals/completed/client_display_backend.md.
 //
 // Design notes:
 //   - Canvas format is forced to "rgba8unorm" so readPixels() gets RGBA with no swizzle.
@@ -195,7 +195,7 @@ export class WebgpuSurface implements DisplaySurface {
   // --- Opt-in GPU render-pass timing (benchmark-only) --------------------------------------
   // The normal present()/readPixels() path never allocates or touches these; they exist so the
   // draw-path benchmark (widgets/demo/bench-harness.ts) can measure real GPU time for Mode A,
-  // not just wall-clock submission. See docs/proposals/active/client_display_backend.md §15.
+  // not just wall-clock submission. See docs/proposals/completed/client_display_backend.md §15.
   private gpuQuerySet: GPUQuerySet | null = null;
   private gpuResolveBuf: GPUBuffer | null = null;
   private gpuReadBuf: GPUBuffer | null = null;

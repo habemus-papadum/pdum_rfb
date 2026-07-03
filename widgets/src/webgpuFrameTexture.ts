@@ -4,7 +4,7 @@
 //     sample AND retain — works for every source type.
 //   - importCurrentFrame(): a transient GPUExternalTexture sampled with NO copy — the true
 //     zero-copy path, but only for VideoFrame sources and only valid within the current task.
-// See docs/proposals/active/client_display_backend.md §5–6.
+// See docs/proposals/completed/client_display_backend.md §5–6.
 
 const FMT: GPUTextureFormat = "rgba8unorm";
 

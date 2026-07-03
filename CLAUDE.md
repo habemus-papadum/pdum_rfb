@@ -159,7 +159,7 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
     worker/renderer.ts        Mode A present coordinator over a DisplaySurface
     worker/displaySurface.ts + {canvas2d,webgl,webgpu}Surface.ts + surfaceFactory.ts  pluggable draw path (surface: 2d|webgl|webgpu|auto)
     worker/transferSink.ts    Mode B sink: transfers decoded frames to the main thread
-    #  Display backends + Mode B: docs/proposals/active/client_display_backend.md
+    #  Display backends + Mode B: docs/proposals/completed/client_display_backend.md
   anywidget/{entry,chrome}.ts vanilla-DOM anywidget front-end (2nd Vite build via
                               vite.anywidget.config.ts -> src/pdum/rfb/static/widget.js, NOT an npm pkg)
   packages/                   framework wrappers (separate npm packages, workspace members)

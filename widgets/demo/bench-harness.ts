@@ -1,6 +1,6 @@
 // Draw-path benchmark harness (main-thread, server-free). Measures the per-frame present
 // cost of the display-backend draw paths so the "Canvas2D is the default, GPU is opt-in"
-// hunch in docs/proposals/active/client_display_backend.md can be MEASURED, not guessed.
+// hunch in docs/proposals/completed/client_display_backend.md can be MEASURED, not guessed.
 //
 // It answers two questions:
 //   1. Mode A (managed present): how much does setFrame()+present() cost per frame on each of

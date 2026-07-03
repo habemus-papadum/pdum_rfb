@@ -1,7 +1,7 @@
 // Mode B (frame-as-texture), WebGL2. Keeps the current decoded frame uploaded into a texture
 // in the CALLER's WebGL2 context — the caller then samples `.texture` in its own scene
 // (minimap, overlay, blends). This is the "own the present texture" model, the useful cousin
-// of "decode into my memory" (see docs/proposals/active/client_display_backend.md §5–6).
+// of "decode into my memory" (see docs/proposals/completed/client_display_backend.md §5–6).
 //
 // Orientation contract: the texture's UV origin (0,0) is the frame's TOP-LEFT pixel and v
 // increases toward the frame bottom (`texImage2D` with FLIP_Y off puts frame-row-0 at t=0 for

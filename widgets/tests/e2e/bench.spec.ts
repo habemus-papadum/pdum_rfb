@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 // Draw-path benchmark, driven by the server-free harness (bench-harness.html). Times the
 // per-frame present cost of the display backends so the "Canvas2D default, GPU opt-in" hunch in
-// docs/proposals/active/client_display_backend.md is MEASURED. This project (chromium /
+// docs/proposals/completed/client_display_backend.md is MEASURED. This project (chromium /
 // SwiftShader) covers Mode A {2d, webgl} and Mode B {webgl}; the WebGPU paths run in the
 // dedicated chromium-webgpu project (bench-webgpu.spec.ts).
 //

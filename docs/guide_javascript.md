@@ -68,7 +68,7 @@ view silently falls back, and the **active** backend is reported on `stats.surfa
 output, verified against a controlled test frame (including zoom/pan) — so the GPU paths
 exist for client-side compositing, not different pixels. Switch it **live** with
 `view.setSurface(kind)` (see [Viewport](#viewport-crop--zoom--pan)). See the
-[display backend design](proposals/active/client_display_backend.md).
+[display backend design](proposals/completed/client_display_backend.md).
 
 **Which backend pays?** Measured (see the benchmark in that proposal's *Measurements*
 section): at 1280×720 the **per-frame main-thread present cost is negligible for all three**
@@ -174,7 +174,7 @@ drawScene(gl, feed.texture, feed.frameW, feed.frameH);  // sample it like any te
 
 You own the compositing and the cadence; decode and present are naturally decoupled (the
 worker decodes, your loop renders). See the
-[display backend design](proposals/active/client_display_backend.md) (§6) for the full model.
+[display backend design](proposals/completed/client_display_backend.md) (§6) for the full model.
 
 ### Authentication
 

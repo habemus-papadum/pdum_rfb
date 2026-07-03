@@ -1,5 +1,5 @@
 // Picks a display backend for a canvas, honoring the caller's preference with graceful
-// fallback to the Canvas2D floor. See docs/proposals/active/client_display_backend.md §7.
+// fallback to the Canvas2D floor. See docs/proposals/completed/client_display_backend.md §7.
 //
 // IMPORTANT: getContext is one-shot — once a canvas yields a "webgl2"/"webgpu" context it can
 // never yield "2d". So a GPU tier only calls getContext AFTER it knows it can succeed

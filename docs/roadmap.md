@@ -14,7 +14,7 @@ in the linked docs, not here:
 
 - **Client display backend** — a pluggable draw path (Canvas2D / WebGL2 / WebGPU) in
   both Mode A (managed present) and Mode B (frame-as-texture, `FrameTextureFeed`).
-  → [proposal](proposals/active/client_display_backend.md).
+  → [proposal](proposals/completed/client_display_backend.md).
 - **Core viewport UI** — general crop/zoom/pan transform, named presets (`fit`/`cover`/
   `fill`/`1:1`/center), gestures, event inverse-mapping — plus a **batteries backend-switch
   chrome** (live `2d`/`webgl`/`webgpu` selector + zoom controls in the anywidget and
