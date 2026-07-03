@@ -101,7 +101,10 @@ class RfbCanvas(anywidget.AnyWidget):
     """Bare tier: just the framebuffer canvas filling the cell — you supply the chrome/CSS.
 
     Connection traits (``url``/``host``/``base_path``/``port``/``stream``/``token``/
-    ``image_only``) are connect-time: mutating one rebuilds the view. ``height`` sizes the
+    ``image_only``/``main_thread_present``) are connect-time: mutating one rebuilds the view.
+    ``main_thread_present`` (default ``True``) draws frames on the main thread so the widget
+    survives host reparenting (marimo); set ``False`` for the OffscreenCanvas transfer path.
+    ``height`` sizes the
     output (a notebook output ``<div>`` is 0-height by default, so the canvas would fall
     back to 320×240 without it). ``state``/``stats``/``last_error`` are read back from JS.
     """
@@ -117,6 +120,11 @@ class RfbCanvas(anywidget.AnyWidget):
     stream = traitlets.Unicode("default").tag(sync=True)
     token = traitlets.Unicode("").tag(sync=True)
     image_only = traitlets.Bool(False).tag(sync=True)
+    # Present path. True (default): draw each frame on the MAIN THREAD (a normal <canvas> the
+    # framework may freely reparent) — robust in every embedding host, including marimo, which
+    # reparents the widget subtree and blanks the OffscreenCanvas-transfer path. False: transfer
+    # an OffscreenCanvas to the worker (slightly lower overhead) where the host won't reparent.
+    main_thread_present = traitlets.Bool(True).tag(sync=True)
     # Fit mode when the frame AR differs from the canvas AR ("contain" | "cover" | "fill";
     # default "contain" client-side); background is the letterbox fill for "contain".
     fit = traitlets.Unicode("").tag(sync=True)

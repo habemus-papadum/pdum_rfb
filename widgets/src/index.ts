@@ -6,6 +6,12 @@ export const version = "0.1.0-alpha";
 export { RemoteFramebufferView } from "./RemoteFramebufferView";
 export type { RfbViewOptions } from "./RemoteFramebufferView";
 
+// Managed present on the MAIN THREAD (feed-mode worker + main-thread drawImage). Same surface
+// as RemoteFramebufferView, but no OffscreenCanvas transfer — resilient to embedding hosts that
+// reparent the widget subtree (marimo). See docs/proposals/active/marimo_rendering_fix.md.
+export { MainThreadPresentView } from "./MainThreadPresentView";
+export type { MainThreadPresentOptions } from "./MainThreadPresentView";
+
 // Mode B (frame-as-texture): stream into the caller's own WebGL2/WebGPU context.
 export { FrameTextureFeed } from "./FrameTextureFeed";
 export type { FrameTextureFeedOptions } from "./FrameTextureFeed";

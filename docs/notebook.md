@@ -240,6 +240,30 @@ viewer = mo.ui.anywidget(RfbViewer(port=display.port, stream="default"))
 viewer
 ```
 
+## How frames reach the canvas (present path)
+
+By default the widget draws each frame on the **main thread**: a plain `<canvas>` the
+decode worker feeds frames to (it transfers each decoded `VideoFrame`/`ImageBitmap` back and
+the main thread draws it with `drawImage`). This is deliberately robust to embedding hosts
+that **reparent or re-render the widget subtree after it mounts** — notably marimo, which
+renders the anywidget inside a shadow root and re-runs the output cell on state changes. The
+alternative (transferring an `OffscreenCanvas` to the worker) is a hair cheaper, but under
+that reparenting the transferred placeholder can be severed from the compositor, leaving a
+**black canvas even though the worker is decoding frames correctly**. The main-thread canvas
+has no transferred placeholder to sever, so the picture follows the element wherever the
+framework moves it.
+
+Flip the path with the `main_thread_present` trait (connect-time — mutating it rebuilds the
+view):
+
+```python
+display.widget(main_thread_present=False)   # OffscreenCanvas transfer path (Mode A)
+```
+
+`main_thread_present=True` (the default) is recommended everywhere; set it `False` only in a
+host you know never reparents the widget and where you want the marginally lower main-thread
+draw cost. At notebook cadence the difference is negligible.
+
 ## CSP and mixed content
 
 - **Mixed content:** under `https://`, always use the same-origin `base_path` path (§
@@ -261,6 +285,12 @@ The notebook path is covered headlessly:
 - `widgets/tests/e2e/anywidget.spec.ts` — Playwright drives the **real** front-end
   `render()` against the booted Python test server through a stubbed anywidget `model`,
   asserting it connects, decodes, displays, and reads `stats` back into the model.
+- `widgets/tests/e2e/anywidget-present.spec.ts` — the present-path regression guard: reads the
+  **on-screen main-thread canvas** back (not the worker surface) to prove it actually shows the
+  streamed pattern, that it keeps showing it after the widget subtree is **reparented** (the
+  marimo failure mode), and that the `present=offscreen` path is transferred to the worker
+  (unreadable from the main thread — which is why the older readback-only e2e was blind to the
+  compositing failure).
 - `docs/demos/anywidget.ipynb` runs under `./scripts/test_notebooks.sh` in CI (via
   nbconvert, which runs the Python only — never the widget's JS). The bundle
   `src/pdum/rfb/static/widget.{js,css}` is a git-ignored, on-demand build artifact: CI proves
