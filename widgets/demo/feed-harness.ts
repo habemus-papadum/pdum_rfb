@@ -164,4 +164,19 @@ async function runWebgpu(): Promise<void> {
   expose({ kind: "webgpu", width: W, height: H, data: Array.from(out) });
 }
 
-void (feedKind === "webgpu" ? runWebgpu() : runWebgl());
+// Always publish __feed so the WebGPU feed spec can gate-and-skip instead of failing on a 10s
+// waitForFunction timeout: on a headless runner without a usable WebGPU adapter, requestAdapter()
+// / requestDevice() can hang or throw and never settle, which would otherwise leave __feed unset.
+// The watchdog is scoped to the WebGPU path (the WebGL/streaming path publishes on its first
+// frame and must not be spuriously marked unavailable); the catch covers a throw on either path.
+const feedTarget = globalThis as unknown as { __feed?: unknown };
+function publishFeedNone(reason: string): void {
+  if (!feedTarget.__feed) {
+    feedTarget.__feed = { kind: "none", reason, width: 0, height: 0, data: [] };
+  }
+}
+if (feedKind === "webgpu") {
+  const WEBGPU_WATCHDOG_MS = 6000; // < the spec's 10s waitForFunction, > any real feed init
+  setTimeout(() => publishFeedNone("timed out acquiring WebGPU (no usable adapter?)"), WEBGPU_WATCHDOG_MS);
+}
+void (feedKind === "webgpu" ? runWebgpu() : runWebgl()).catch((err: unknown) => publishFeedNone(String(err)));

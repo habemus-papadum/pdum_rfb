@@ -65,4 +65,19 @@ async function run(): Promise<void> {
   };
 }
 
-void run();
+// Always publish __surface so the WebGPU conformance specs can gate-and-skip
+// (`test.skip(kind !== "webgpu")`) instead of failing on a 10s waitForFunction timeout. On a
+// headless runner with the WebGPU flags on but no usable Vulkan driver, requestAdapter() /
+// requestDevice() (and any subsequent GPU work) can hang or throw and never settle — a plain
+// `void run()` would then leave __surface unset. A watchdog + catch guarantee a
+// `kind:"unavailable"` sentinel lands first, which the spec reads and skips on. The 2D/WebGL
+// paths publish in well under this deadline, so it only ever bites a stuck GPU tier.
+const surfaceTarget = globalThis as unknown as { __surface?: unknown };
+function publishSurfaceUnavailable(reason: string): void {
+  if (!surfaceTarget.__surface) {
+    surfaceTarget.__surface = { kind: "unavailable", requested, reason, width: 0, height: 0, data: [] };
+  }
+}
+const WEBGPU_WATCHDOG_MS = 6000; // < the spec's 10s waitForFunction, > any real surface init
+setTimeout(() => publishSurfaceUnavailable("timed out acquiring surface (no usable WebGPU adapter?)"), WEBGPU_WATCHDOG_MS);
+run().catch((err: unknown) => publishSurfaceUnavailable(String(err)));
