@@ -1,6 +1,6 @@
 [project]
 name = "habemus-papadum-rfb"
-version = "0.2.0+dev"
+version = "0.2.1"
 description = "Remote Frame Buffer"
 readme = "README.md"
 license = { file = "LICENSE" }
