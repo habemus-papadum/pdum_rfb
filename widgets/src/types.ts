@@ -6,6 +6,12 @@ import type { FitMode } from "./viewport";
 
 export type ConnectionState = "connecting" | "reconnecting" | "open" | "negotiated" | "closed" | "error";
 
+/** The client draw path (compositing backend). Canvas2D is the always-available floor. */
+export type SurfaceKind = "2d" | "webgl" | "webgpu";
+/** What a caller may request: a specific backend, or `"auto"` (prefer the GPU tiers, fall
+ *  back to Canvas2D). Default is `"2d"` — a GPU path is opt-in ("measure first"). */
+export type SurfacePreference = SurfaceKind | "auto";
+
 export interface WorkerInitOptions {
   maxInflight?: number;
   slowDownQueue?: number;
@@ -17,6 +23,9 @@ export interface WorkerInitOptions {
   fit?: FitMode;
   /** Letterbox fill for `contain` (any CSS color; default `"#000"`). */
   background?: string;
+  /** Compositing backend to use for the draw path (default `"2d"`; `"auto"` prefers the
+   *  GPU tiers). Falls back to Canvas2D if the requested context is unavailable. */
+  surface?: SurfacePreference;
   /** Verbose client-side console logging (per-frame decode play-by-play). Genuine errors and
    *  lifecycle notices surface either way; this adds the firehose. Default `false`. */
   debug?: boolean;
@@ -28,13 +37,17 @@ export interface WorkerInitOptions {
 export type MainToWorker =
   | {
       type: "init";
-      canvas: OffscreenCanvas;
       url: string;
-      devicePixelRatio: number;
-      backingWidth: number;
-      backingHeight: number;
-      cssWidth: number;
-      cssHeight: number;
+      /** `"present"` (default, Mode A: worker owns a canvas and draws) or `"feed"` (Mode B:
+       *  frames are transferred to the main thread for the caller to composite). */
+      mode?: "present" | "feed";
+      /** Present mode only — the transferred drawing surface. */
+      canvas?: OffscreenCanvas;
+      devicePixelRatio?: number;
+      backingWidth?: number;
+      backingHeight?: number;
+      cssWidth?: number;
+      cssHeight?: number;
       options: WorkerInitOptions;
     }
   | { type: "event"; event: NormalizedEvent }
@@ -56,6 +69,9 @@ export interface Stats {
   lastDisplayedSeq: number;
   decodeQueueSize: number;
   transport: "image" | "webcodecs" | "none";
+  /** Active client draw path (`"2d"` | `"webgl"` | `"webgpu"`), after any fallback. Set
+   *  once the worker builds the surface at init. */
+  surface?: SurfaceKind;
   /** Times the client auto-recovered a decode stall/error (rebuild + keyframe). Undefined
    *  until the first recovery; a nonzero value means the stream hit — and survived — a stall. */
   recoveries?: number;
@@ -83,6 +99,8 @@ export type WorkerToMain =
   | { type: "ready" }
   | { type: "state"; state: ConnectionState }
   | { type: "stats"; stats: Stats }
+  // Mode B (feed): a decoded frame transferred to the main thread for the caller to upload.
+  | { type: "frame"; frame: VideoFrame | ImageBitmap; frameW: number; frameH: number }
   | {
       type: "capture-result";
       id: number;

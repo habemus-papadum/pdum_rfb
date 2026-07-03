@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from pdum.rfb.demo_server import (
+    _demo_spa_stale_reason,
     available_backends,
     backend_catalog,
     build_demo_app,
@@ -193,3 +194,45 @@ def test_smoke_end_to_end():
     assert result.get("scene_switch") is True
     assert result.get("fanout") is True
     assert result.get("private_stream")
+
+
+# --- built-SPA staleness guard (the dev-checkout footgun) -------------------
+
+
+def _touch(p, mtime):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("x")
+    import os
+
+    os.utime(p, (mtime, mtime))
+
+
+def test_stale_reason_none_when_missing_build(tmp_path):
+    # No build dir → not stale (the placeholder path handles "missing").
+    src = tmp_path / "src"
+    _touch(src / "main.ts", 100.0)
+    assert _demo_spa_stale_reason(build_dir=tmp_path / "nope", src_roots=[src]) is None
+
+
+def test_stale_reason_none_when_no_src_tree(tmp_path):
+    # Installed wheel: build present, but no source tree to compare → never fires.
+    build = tmp_path / "demo"
+    _touch(build / "assets" / "index.js", 100.0)
+    assert _demo_spa_stale_reason(build_dir=build, src_roots=[tmp_path / "absent-src"]) is None
+
+
+def test_stale_reason_none_when_build_is_newer(tmp_path):
+    build = tmp_path / "demo"
+    src = tmp_path / "src"
+    _touch(src / "main.ts", 100.0)
+    _touch(build / "assets" / "index.js", 200.0)  # built after the source edit
+    assert _demo_spa_stale_reason(build_dir=build, src_roots=[src]) is None
+
+
+def test_stale_reason_flags_source_newer_than_build(tmp_path):
+    build = tmp_path / "demo"
+    src = tmp_path / "src"
+    _touch(build / "assets" / "index.js", 100.0)
+    _touch(src / "styles.css", 200.0)  # edited after the last build
+    reason = _demo_spa_stale_reason(build_dir=build, src_roots=[src])
+    assert reason is not None and "styles.css" in reason

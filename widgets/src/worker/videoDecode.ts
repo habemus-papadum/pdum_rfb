@@ -8,7 +8,7 @@
 import type { BackpressureController, KeyframeGate } from "../backpressure";
 import type { Logger } from "../debug";
 import type { VideoChunkHeader } from "../protocol";
-import type { Renderer } from "./renderer";
+import type { FrameSink } from "./frameSink";
 import { StallWatchdog } from "./stallWatchdog";
 
 const noLog: Logger = { enabled: false, log: () => {}, notice: () => {}, error: () => {} };
@@ -38,7 +38,7 @@ export class VideoPipeline {
   private hooks: Required<Omit<DecodeHooks, "stallMs" | "now">> & { now: () => number };
 
   constructor(
-    private renderer: Renderer,
+    private sink: FrameSink,
     private bp: BackpressureController,
     private gate: KeyframeGate,
     private onRequestKeyframe: (reason: string) => void,
@@ -75,13 +75,10 @@ export class VideoPipeline {
     this.codedHeight = header.height;
     const decoder = new VideoDecoder({
       output: (frame) => {
-        try {
-          // Use the frame's *display* size (the intended pixels), not its coded size
-          // (which is padded up to the codec's macroblock grid).
-          this.renderer.draw(frame, frame.displayWidth || frame.codedWidth, frame.displayHeight || frame.codedHeight);
-        } finally {
-          frame.close(); // VideoFrame holds GPU/decoder resources; close promptly
-        }
+        // The sink takes ownership of `frame` (copies+closes for present, transfers for feed).
+        // Use the frame's *display* size (the intended pixels), not its coded size (which is
+        // padded up to the codec's macroblock grid).
+        this.sink.draw(frame, frame.displayWidth || frame.codedWidth, frame.displayHeight || frame.codedHeight);
         this.watchdog.onDisplayed();
         const seq = this.bp.onDisplayed();
         if (seq !== undefined) this.onDisplayed(seq);

@@ -67,7 +67,7 @@ export class Canvas2dSurface implements DisplaySurface {
     }
   }
 
-  readPixels(): ImageData {
+  async readPixels(): Promise<ImageData> {
     return this.context().getImageData(0, 0, this.canvas.width, this.canvas.height, {
       colorSpace: this.colorSpace,
     });

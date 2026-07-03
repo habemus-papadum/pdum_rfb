@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pdum.rfb display-surface conformance harness</title>
+  </head>
+  <body>
+    <!-- Server-free backend conformance: renders a controlled asymmetric frame through the
+         chosen DisplaySurface backend and exposes the readback on window.__surface for the
+         e2e (tests/e2e/surface-conformance.spec.ts). No worker, no WebSocket. -->
+    <script type="module" src="/demo/surface-harness.ts"></script>
+  </body>
+</html>

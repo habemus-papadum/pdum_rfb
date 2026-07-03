@@ -19,10 +19,32 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // The WebGPU specs need extra flags + their own project (below); keep them out of here.
+      testIgnore: "**/*-webgpu.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: {
           args: ["--use-gl=angle", "--use-angle=swiftshader"],
+        },
+      },
+    },
+    {
+      // WebGPU backend conformance. The repo's `--use-angle=swiftshader` alone yields
+      // requestAdapter()===null; `--enable-unsafe-webgpu` re-enables WebGPU's own software
+      // adapter, and `--use-webgpu-adapter=swiftshader` pins it for determinism. The spec
+      // still gates at runtime and skips if no adapter (e.g. Linux CI without Vulkan).
+      name: "chromium-webgpu",
+      testMatch: "**/*-webgpu.spec.ts",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          args: [
+            "--use-gl=angle",
+            "--use-angle=swiftshader",
+            "--enable-unsafe-webgpu",
+            "--use-webgpu-adapter=swiftshader",
+            "--enable-features=Vulkan",
+          ],
         },
       },
     },

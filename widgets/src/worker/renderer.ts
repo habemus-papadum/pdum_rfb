@@ -5,11 +5,12 @@
 // geometry, so a click is always accurate under any fit. This class holds no pixels
 // itself — retention and the drawing target live in the surface.
 
+import type { SurfaceKind } from "../types";
 import { presentGeometry, type FitMode, type ViewportState } from "../viewport";
-import { Canvas2dSurface } from "./canvas2dSurface";
 import type { DisplaySurface } from "./displaySurface";
+import { closeFrame, type FrameSink } from "./frameSink";
 
-export class Renderer {
+export class Renderer implements FrameSink {
   /** Fit mode when the frame AR differs from the canvas AR (default letterbox). */
   fit: FitMode = "contain";
   /** Letterbox fill for `contain` (any CSS color; default black). */
@@ -18,10 +19,16 @@ export class Renderer {
   frameW = 0;
   frameH = 0;
 
-  private surface: DisplaySurface;
+  /** Construct with the canvas and the chosen display backend (built by the worker via
+   *  createDisplaySurface, so the fallback/selection policy stays in one place). */
+  constructor(
+    public canvas: OffscreenCanvas,
+    private surface: DisplaySurface,
+  ) {}
 
-  constructor(public canvas: OffscreenCanvas) {
-    this.surface = new Canvas2dSurface(canvas);
+  /** Which draw path is active (`"2d"` | `"webgl"` | `"webgpu"`) — surfaced in Stats. */
+  get surfaceKind(): SurfaceKind {
+    return this.surface.kind;
   }
 
   /** Choose the canvas color space (`"srgb"` | `"display-p3"`). Must be called before the
@@ -56,12 +63,17 @@ export class Renderer {
     };
   }
 
-  /** Draw a decoded frame of `frameW x frameH` device px, letterboxed/cropped per `fit`. */
+  /** Draw a decoded frame of `frameW x frameH` device px, letterboxed/cropped per `fit`.
+   *  Takes ownership of `src`: setFrame copies it synchronously, then we close it. */
   draw(src: CanvasImageSource, frameW: number, frameH: number): void {
-    this.frameW = frameW;
-    this.frameH = frameH;
-    this.surface.setFrame(src, frameW, frameH);
-    this.present();
+    try {
+      this.frameW = frameW;
+      this.frameH = frameH;
+      this.surface.setFrame(src, frameW, frameH);
+      this.present();
+    } finally {
+      closeFrame(src);
+    }
   }
 
   /** Present the retained frame with the current fit geometry + background. */
@@ -69,7 +81,7 @@ export class Renderer {
     this.surface.present(presentGeometry(this.viewportState()), this.background);
   }
 
-  readPixels(): ImageData {
+  readPixels(): Promise<ImageData> {
     return this.surface.readPixels();
   }
 

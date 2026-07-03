@@ -20,14 +20,18 @@ import type { NormalizedEvent } from "../eventTypes";
 import { applyServerStats, applySetQuality } from "../serverStats";
 import type { MainToWorker, Stats, WorkerInitOptions, WorkerToMain } from "../types";
 import { backingToFrame } from "../viewport";
+import type { FrameSink } from "./frameSink";
 import { decodeImageFrame } from "./imageDecode";
 import { Renderer } from "./renderer";
+import { createDisplaySurface } from "./surfaceFactory";
+import { TransferSink } from "./transferSink";
 import { VideoPipeline } from "./videoDecode";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 let ws: WebSocket | null = null;
-let renderer: Renderer | null = null;
+let renderer: Renderer | null = null; // Mode A only (present); null in feed mode
+let sink: FrameSink | null = null; // where decoded frames go (renderer, or a TransferSink)
 let video: VideoPipeline | null = null;
 let bp: BackpressureController | null = null;
 let cssWidth = 0;
@@ -155,7 +159,7 @@ async function handleBinary(buf: ArrayBuffer): Promise<void> {
     stats.transport = "image";
     dbg.log("frame", "image", { seq: h.seq, mime: h.mime, bytes: payload.byteLength });
     try {
-      await decodeImageFrame(renderer!, h, payload);
+      await decodeImageFrame(sink!, h, payload);
     } catch (e) {
       dbg.error("decode", "image decode failed", e);
       return;
@@ -252,7 +256,8 @@ function scheduleReconnect(): void {
 }
 
 function handleCapture(id: number, format: "imagedata" | "blob"): void {
-  const r = renderer!;
+  const r = renderer;
+  if (!r) return; // capture before the renderer is built (init still resolving)
   const base = {
     type: "capture-result" as const,
     id,
@@ -263,9 +268,73 @@ function handleCapture(id: number, format: "imagedata" | "blob"): void {
   if (format === "blob") {
     void r.toBlob("image/png").then((blob) => post({ ...base, blob }));
   } else {
-    const imageData = r.readPixels();
-    post({ ...base, imageData }, [imageData.data.buffer]);
+    void r.readPixels().then((imageData) => post({ ...base, imageData }, [imageData.data.buffer]));
   }
+}
+
+/** The async tail of `init`: build the frame sink (present: a Renderer over a chosen draw
+ *  path, async for WebGPU; feed: a TransferSink that ships frames to the main thread), then
+ *  wire backpressure, the video pipeline, and start the connection. Split out so the message
+ *  handler stays synchronous. */
+async function buildRenderer(msg: Extract<MainToWorker, { type: "init" }>): Promise<void> {
+  if (msg.mode === "feed") {
+    // Mode B: no canvas, no present — decoded frames are transferred to the caller's context.
+    sink = new TransferSink((m, transfer) => post(m, transfer));
+    stats.transport = "none";
+    dbg.log("mode", "feed (frame-as-texture)");
+  } else {
+    // Mode A: pick the draw path (Canvas2D floor / WebGL2 / WebGPU). Falls back to 2D if the
+    // requested GPU context is unavailable; report what we got.
+    const surface = await createDisplaySurface(msg.canvas!, initOptions.surface);
+    if (disposed) {
+      surface.dispose(); // disposed while we were awaiting the device — don't wire anything up
+      return;
+    }
+    renderer = new Renderer(msg.canvas!, surface);
+    sink = renderer;
+    stats.surface = surface.kind;
+    if (surface.kind !== (initOptions.surface ?? "2d") && initOptions.surface && initOptions.surface !== "auto") {
+      dbg.notice("surface", `requested ${initOptions.surface}, using ${surface.kind} (fallback)`);
+    } else {
+      dbg.log("surface", "backend", surface.kind);
+    }
+    if (initOptions.fit) renderer.fit = initOptions.fit;
+    if (initOptions.background) renderer.background = initOptions.background;
+    renderer.resize(msg.backingWidth ?? 0, msg.backingHeight ?? 0);
+  }
+  if (disposed) {
+    sink.dispose();
+    return;
+  }
+  bp = new BackpressureController({
+    maxInflight: initOptions.maxInflight,
+    slowDownQueue: initOptions.slowDownQueue,
+    keyframeOnDropQueue: initOptions.keyframeOnDropQueue,
+  });
+  video = new VideoPipeline(
+    sink,
+    bp,
+    new KeyframeGate(),
+    requestKeyframe,
+    (seq) => onDisplayed(seq, video!.decodeQueueSize),
+    dbg,
+    {
+      onDecoderReset: () => {
+        dbg.notice("recover", "decoder reset — asking server to clear inflight");
+        send({ type: "decoder_reset" });
+      },
+      onRecovered: () => {
+        stats.recoveries = (stats.recoveries ?? 0) + 1;
+        post({ type: "stats", stats: { ...stats } });
+      },
+      onFatal: (message) => post({ type: "error", error: message }),
+    },
+  );
+  // Stall watchdog: a decoder that stops emitting output must not brick the viewer.
+  watchdogTimer = self.setInterval(() => video?.checkStall(), 500);
+  post({ type: "ready" });
+  post({ type: "stats", stats: { ...stats } }); // surface the chosen backend immediately
+  void startConnection(msg.url);
 }
 
 self.onmessage = (ev: MessageEvent<MainToWorker>) => {
@@ -275,47 +344,19 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       initOptions = msg.options ?? {};
       dbg = makeLogger(!!initOptions.debug, "worker", initOptions.notice ?? true);
       dbg.log("init", { backing: [msg.backingWidth, msg.backingHeight], dpr: msg.devicePixelRatio });
-      cssWidth = msg.cssWidth;
-      cssHeight = msg.cssHeight;
-      backingWidth = msg.backingWidth;
-      backingHeight = msg.backingHeight;
-      pixelRatio = msg.devicePixelRatio;
-      renderer = new Renderer(msg.canvas);
-      if (initOptions.fit) renderer.fit = initOptions.fit;
-      if (initOptions.background) renderer.background = initOptions.background;
-      renderer.resize(msg.backingWidth, msg.backingHeight);
-      bp = new BackpressureController({
-        maxInflight: initOptions.maxInflight,
-        slowDownQueue: initOptions.slowDownQueue,
-        keyframeOnDropQueue: initOptions.keyframeOnDropQueue,
-      });
-      video = new VideoPipeline(
-        renderer,
-        bp,
-        new KeyframeGate(),
-        requestKeyframe,
-        (seq) => onDisplayed(seq, video!.decodeQueueSize),
-        dbg,
-        {
-          onDecoderReset: () => {
-            dbg.notice("recover", "decoder reset — asking server to clear inflight");
-            send({ type: "decoder_reset" });
-          },
-          onRecovered: () => {
-            stats.recoveries = (stats.recoveries ?? 0) + 1;
-            post({ type: "stats", stats: { ...stats } });
-          },
-          onFatal: (message) => post({ type: "error", error: message }),
-        },
-      );
-      // Stall watchdog: a decoder that stops emitting output must not brick the viewer.
-      watchdogTimer = self.setInterval(() => video?.checkStall(), 500);
-      post({ type: "ready" });
-      void startConnection(msg.url);
+      cssWidth = msg.cssWidth ?? 0;
+      cssHeight = msg.cssHeight ?? 0;
+      backingWidth = msg.backingWidth ?? 0;
+      backingHeight = msg.backingHeight ?? 0;
+      pixelRatio = msg.devicePixelRatio ?? 1;
+      // Building the surface is async (WebGPU device acquisition), so the rest of init runs
+      // after it resolves. Messages arriving in that (tiny) gap are guarded against a null
+      // renderer below.
+      void buildRenderer(msg);
       break;
     }
     case "event":
-      send({ type: "event", event: mapEvent(msg.event) });
+      if (renderer) send({ type: "event", event: mapEvent(msg.event) });
       break;
     case "set_fit":
       if (renderer) {
@@ -360,7 +401,9 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
         watchdogTimer = null;
       }
       video?.close();
-      renderer?.dispose();
+      sink?.dispose();
+      renderer = null;
+      sink = null;
       try {
         ws?.close();
       } catch {

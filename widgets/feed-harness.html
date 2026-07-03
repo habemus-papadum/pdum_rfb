@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pdum.rfb Mode B (frame-as-texture) harness</title>
+  </head>
+  <body>
+    <!-- Mode B conformance: acts as the CALLER — owns a WebGL2/WebGPU context, receives the
+         frame as a texture (from a controlled input, or streamed via FrameTextureFeed), and
+         composites it, then exposes the readback on window.__feed for the e2e
+         (tests/e2e/feed-*.spec.ts). -->
+    <script type="module" src="/demo/feed-harness.ts"></script>
+  </body>
+</html>

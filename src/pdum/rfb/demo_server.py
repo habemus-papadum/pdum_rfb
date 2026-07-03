@@ -894,12 +894,91 @@ def make_dev_app() -> Any:
     )
 
 
+#: Files whose mtime we compare for SPA staleness — build outputs (.js/.css/.html) and TS/CSS/
+#: Svelte source. A superset that works for both the build dir and the source trees.
+_SPA_SRC_EXTS = frozenset({".ts", ".tsx", ".svelte", ".css", ".html", ".js"})
+
+
+def _newest_mtime(roots: list[Path]) -> tuple[float, Path | None]:
+    """Newest mtime (and its file) among ``_SPA_SRC_EXTS`` files under ``roots`` (recursive)."""
+    latest, newest_file = 0.0, None
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for p in root.rglob("*"):
+            if p.suffix in _SPA_SRC_EXTS and p.is_file():
+                m = p.stat().st_mtime
+                if m > latest:
+                    latest, newest_file = m, p
+    return latest, newest_file
+
+
+def _demo_spa_stale_reason(build_dir: Path | None = None, src_roots: list[Path] | None = None) -> str | None:
+    """In a dev checkout, is the built SPA (``build_dir``) older than its TS/CSS source?
+
+    Returns a human-readable reason when stale, else ``None``. **Only meaningful in a dev
+    checkout** — an installed wheel has no ``widgets/`` source tree, so ``src_roots`` won't exist
+    and this returns ``None`` (the check never fires for end users). It compares the newest
+    build-artifact mtime against the newest source mtime across the demo-app, the core widgets it
+    bundles, and the shared rfb-ui CSS: a source edit after the last build means the served bytes
+    no longer match the source (exactly the trap that ships a stale UI). ``git pull``/``checkout``
+    only bump a source file's mtime when its content actually changed, so this rarely false-fires.
+    """
+    build_dir = build_dir or STATIC_DEMO_DIR
+    if not build_dir.is_dir():
+        return None  # missing (not stale) — handled by the placeholder path
+    if src_roots is None:
+        rr = _repo_root()
+        src_roots = [
+            rr / "widgets" / "packages" / "demo-app" / "src",
+            rr / "widgets" / "src",
+            rr / "widgets" / "packages" / "rfb-ui" / "src",
+        ]
+    if not any(r.is_dir() for r in src_roots):
+        return None  # not a dev checkout (installed wheel) — nothing to compare against
+
+    build_mtime, _ = _newest_mtime([build_dir])
+    src_mtime, src_file = _newest_mtime(src_roots)
+    if src_file is None or src_mtime <= build_mtime:
+        return None
+
+    from datetime import datetime
+
+    rel = src_file
+    with contextlib.suppress(ValueError):
+        rel = src_file.relative_to(_repo_root())
+    return (
+        f"{rel} (modified {datetime.fromtimestamp(src_mtime):%H:%M:%S}) is newer than the "
+        f"built SPA (built {datetime.fromtimestamp(build_mtime):%H:%M:%S})"
+    )
+
+
 def _run_static(host: str, port: int, w: int, h: int, fps: int, bitrate: int | str, open_browser: bool) -> None:
     """The default path: serve the prebuilt SPA + REST + WS from one uvicorn process (blocking)."""
+    import os
+
     import uvicorn
 
-    app = build_demo_app(width=w, height=h, fps=fps, bitrate=bitrate)
     built = STATIC_DEMO_DIR.is_dir()
+    if built:
+        # Guard against the stale-build trap: in a dev checkout, refuse to serve a built SPA that
+        # predates its source (it silently shows an old UI — the exact footgun that wasted a debug
+        # session). Only fires in a dev checkout (installed wheels have no source tree to compare).
+        reason = _demo_spa_stale_reason()
+        if reason:
+            hint = (
+                f"demo SPA is STALE — the served build predates your source changes ({reason}).\n"
+                "  Rebuild:                              pnpm -C widgets build && pnpm -C widgets build:demo\n"
+                "  Or live-reload dev (no build needed): pdum-rfb demo --dev\n"
+                "  (Dev-checkout only; installed wheels are never affected.)"
+            )
+            if os.environ.get("PDUM_RFB_ALLOW_STALE_DEMO") == "1":
+                log.warning("%s\n  Continuing anyway (PDUM_RFB_ALLOW_STALE_DEMO=1).", hint)
+            else:
+                log.error("%s\n  Refusing to serve stale bytes. Set PDUM_RFB_ALLOW_STALE_DEMO=1 to override.", hint)
+                raise SystemExit(1)
+
+    app = build_demo_app(width=w, height=h, fps=fps, bitrate=bitrate)
     url = f"http://{host}:{port}/"
     if not built:
         log.warning(

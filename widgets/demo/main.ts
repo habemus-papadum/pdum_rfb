@@ -1,4 +1,10 @@
-import { RemoteFramebufferView, type ConnectionState, type FitMode, type Stats } from "../src/index";
+import {
+  RemoteFramebufferView,
+  type ConnectionState,
+  type FitMode,
+  type Stats,
+  type SurfacePreference,
+} from "../src/index";
 // The shipped, self-contained worker asset (the `@habemus-papadum/rfb-widgets/worker`
 // subpath export). `?url` makes Vite emit it as a real, cacheable file and hand us its
 // URL — the strict-CSP path (`worker-src 'self'`, no `blob:`). `?worker=external`
@@ -10,6 +16,9 @@ const params = new URLSearchParams(location.search);
 const wsUrl = params.get("ws") ?? `ws://${location.hostname}:8765`;
 const transport = params.get("transport") ?? "auto";
 const fit = (params.get("fit") as FitMode | null) ?? undefined;
+// ?surface=2d|webgl|webgpu|auto selects the compositing backend (default 2d); the e2e
+// conformance spec drives this to prove each backend produces the same pixels.
+const surface = (params.get("surface") as SurfacePreference | null) ?? undefined;
 const debug = params.get("debug") === "1";
 // `?worker=external` → construct the worker from the packaged `dist/worker.js` URL
 // (a non-`blob:` module worker) instead of the default inlined `blob:` worker.
@@ -58,6 +67,7 @@ const view = new RemoteFramebufferView(stage, {
   url: wsUrl,
   imageOnly: transport === "image",
   fit,
+  surface,
   debug,
   workerFactory: externalWorker ? () => new Worker(packagedWorkerUrl, { type: "module" }) : undefined,
   onStats: renderHud,

@@ -40,6 +40,7 @@ interface RfbViewOptions {
   maxInflight?: number;              // client-side decode backpressure ceiling
   fit?: "contain" | "cover" | "fill"; // frame-vs-canvas AR handling (default "contain")
   background?: string;               // letterbox fill for "contain" (CSS color; default "#000")
+  surface?: "2d" | "webgl" | "webgpu" | "auto"; // compositing backend (default "2d"; "auto" prefers GPU)
   token?: string;                    // auth credential sent in `hello` (e.g. a Google ID token)
   debug?: boolean;                   // verbose client-side console logging (default false)
   onState?: (s: ConnectionState) => void;
@@ -51,6 +52,17 @@ interface RfbViewOptions {
 **Fit modes.** When the stream's aspect ratio differs from the canvas, `fit` decides:
 `"contain"` (default) letterboxes with `background`, `"cover"` crops, `"fill"` stretches
 each axis (the pre-fit-modes behavior). Change it live with `view.setFit(fit, background?)`.
+
+**Display backend (`surface`).** How the decoded frame is drawn to the canvas is
+pluggable across three backends: `"2d"` (default) composites with Canvas2D `drawImage` —
+the always-available floor, and already fast for a hardware `VideoFrame`; `"webgl"` and
+`"webgpu"` upload each frame to a GPU texture and sample it; `"auto"` prefers the GPU tier
+(WebGPU → WebGL2) and falls back to Canvas2D. If a requested GPU context is unavailable the
+view silently falls back, and the **active** backend is reported on `stats.surface`
+(`"2d" | "webgl" | "webgpu"`). All three are pixel-equivalent — same fit geometry, same
+output, verified against a controlled test frame — so the GPU paths exist for client-side
+compositing and (later) zoom/pan, not different pixels. See the
+[display backend design](proposals/active/client_display_backend.md).
 
 **Debug logging.** `debug: true` turns on a tagged console play-by-play from the main
 thread and the decode worker — `[rfb:worker] ws / config / keyframe / frame` and
@@ -67,13 +79,45 @@ publisher receives coordinates that index its frame directly, correct under any 
 
 `ConnectionState` is `connecting | open | negotiated | closed | error`. `Stats`
 reports the local decode side — `framesDisplayed`, `framesDropped`,
-`lastDisplayedSeq`, `decodeQueueSize`, and `transport` (`image | webcodecs | none`).
+`lastDisplayedSeq`, `decodeQueueSize`, `transport` (`image | webcodecs | none`), and
+`surface` (the active draw path, `2d | webgl | webgpu`).
 When the server is started with `stats_interval` (and/or `adaptive`), it also pushes
 authoritative server-truth metrics that `Stats` surfaces as optional fields:
 `serverRttMs`, `serverFpsSent`, `serverBitrateBps`, `serverEncodeMs`,
 `serverDropped`, and the adaptive `targetBitrate` / `targetFps` (undefined until the
 server sends them). For the full loop and a worked stats-HUD example, see
 [Metrics & adaptive quality](metrics_adaptive.md).
+
+### Frame-as-texture (Mode B): composite the stream into your own scene
+
+`RemoteFramebufferView` owns a canvas and *presents* the frame for you (Mode A). When you
+instead want the decoded frame as a **GPU texture in your own WebGL2/WebGPU context** — to
+composite it into a hardware scene (a windowed frame + a corner minimap + a client-drawn GUI
+overlay, custom blends) — use **`FrameTextureFeed`**. A decode worker owns the WebSocket +
+decoder and transfers each decoded frame to your thread; the feed uploads it into a texture;
+you drive your own render loop and sample it.
+
+```ts
+import { FrameTextureFeed } from "@habemus-papadum/rfb-widgets";
+
+const gl = myCanvas.getContext("webgl2")!;              // YOUR context and render loop
+const feed = new FrameTextureFeed({ url: "wss://…", gl,
+  onFrame: () => scheduleRender(),                      // a new frame is in feed.texture
+});
+// in your rAF loop:
+drawScene(gl, feed.texture, feed.frameW, feed.frameH);  // sample it like any texture
+```
+
+- **WebGL2:** `feed.texture` is the live `WebGLTexture`. Its UV origin `(0,0)` is the frame's
+  **top-left**; `v` increases toward the bottom.
+- **WebGPU:** pass `device` instead of `gl`. `feed.currentTexture()` is a persistent RGBA
+  `GPUTexture` you can sample and retain; `feed.importCurrentFrame()` is a **zero-copy**
+  `GPUExternalTexture` for the current VideoFrame — call it *inside* the render pass that
+  samples it (it expires at task end).
+
+You own the compositing and the cadence; decode and present are naturally decoupled (the
+worker decodes, your loop renders). See the
+[display backend design](proposals/active/client_display_backend.md) (§6) for the full model.
 
 ### Authentication
 

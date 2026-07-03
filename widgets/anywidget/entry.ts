@@ -82,6 +82,7 @@ export default {
         imageOnly: !!model.get("image_only"),
         fit: model.get("fit") || undefined,
         background: model.get("background") || undefined,
+        debug: true, // TEMP-DEBUG
         onState: (s: ConnectionState) => {
           el.dataset.state = s;
           model.set("state", s);
@@ -91,6 +92,7 @@ export default {
         onStats: (s: Stats) => {
           chrome.setStats(s);
           pushStats(s);
+          (window as any).__rfbStats = s; // TEMP-DEBUG
         },
         onError: (e: Error) => {
           model.set("last_error", e.message);
@@ -111,6 +113,8 @@ export default {
     model.on("change:show_stats", onChrome);
 
     build();
+    (window as any).__rfbView = () => view; // TEMP-DEBUG
+    (window as any).__rfbCapture = (fmt: "imagedata" | "blob") => controls.capture(fmt); // TEMP-DEBUG
 
     // anywidget cleanup: tear down the view/worker/socket and detach everything.
     return () => {

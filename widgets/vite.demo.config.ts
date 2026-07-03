@@ -8,10 +8,12 @@ export default defineConfig({
     outDir: "dist/demo",
     emptyOutDir: true,
     rollupOptions: {
-      // Multi-page: the demo + the anywidget e2e harness.
+      // Multi-page: the demo + the anywidget e2e harness + the display-surface conformance harness.
       input: {
         index: "index.html",
         anywidget: "anywidget-harness.html",
+        surfaceHarness: "surface-harness.html",
+        feedHarness: "feed-harness.html",
       },
     },
   },

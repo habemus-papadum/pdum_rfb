@@ -141,16 +141,25 @@ src/pdum/rfb/
                   DemoStreamManager owns per-stream _DemoState + render loop; shared 'default'
                   (fan-out) + reaped private streams. Browser holds the controls; Python logs +
                   serves. build_demo_app()/run_demo()/smoke() (in-process TestClient CI proof).
-                  (Replaced the retired Textual demo_tui.py/demo_app.py.)
+                  Dev-checkout guard: _run_static aborts if the built static/demo/ is older than
+                  its TS/CSS source (_demo_spa_stale_reason; PDUM_RFB_ALLOW_STALE_DEMO=1 overrides)
+                  — never fires for an installed wheel. (Replaced the retired Textual demo_tui.py.)
 
 widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-widgets (importer ".")
   src/
     index.ts                  public exports
-    RemoteFramebufferView.ts  main-thread controller (canvas, events, resize, capture, setFit)
-    viewport.ts               pure frame<->canvas geometry (frameDestRect/backingToFrame; fit modes)
+    RemoteFramebufferView.ts  Mode A controller: we own a canvas and PRESENT (events, resize, capture, setFit)
+    FrameTextureFeed.ts       Mode B controller: stream into the CALLER's WebGL2/WebGPU context as a texture
+    webglFrameTexture.ts webgpuFrameTexture.ts  Mode B uploaders (caller's context; .texture / currentTexture / importCurrentFrame)
+    viewport.ts               pure frame<->canvas geometry (frameDestRect/backingToFrame; fit modes; presentGeometry {src,dst})
     protocol.ts events.ts eventTypes.ts capabilities.ts backpressure.ts types.ts
     workerFactory.ts          inline worker (?worker&inline)
-    worker/{entry,renderer,imageDecode,videoDecode}.ts
+    worker/entry.ts           dual-mode worker (present | feed); owns WS + decode
+    worker/{imageDecode,videoDecode}.ts  decoders -> a FrameSink (frameSink.ts)
+    worker/renderer.ts        Mode A present coordinator over a DisplaySurface
+    worker/displaySurface.ts + {canvas2d,webgl,webgpu}Surface.ts + surfaceFactory.ts  pluggable draw path (surface: 2d|webgl|webgpu|auto)
+    worker/transferSink.ts    Mode B sink: transfers decoded frames to the main thread
+    #  Display backends + Mode B: docs/proposals/active/client_display_backend.md
   anywidget/{entry,chrome}.ts vanilla-DOM anywidget front-end (2nd Vite build via
                               vite.anywidget.config.ts -> src/pdum/rfb/static/widget.js, NOT an npm pkg)
   packages/                   framework wrappers (separate npm packages, workspace members)

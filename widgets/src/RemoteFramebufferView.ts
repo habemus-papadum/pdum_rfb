@@ -11,7 +11,7 @@ import {
 } from "./events";
 import { makeLogger, type Logger } from "./debug";
 import { computeStatus, createStatusOverlay, type StatusOverlayHandle, type StatusRenderer } from "./statusOverlay";
-import type { ConnectionState, MainToWorker, Stats, WorkerToMain } from "./types";
+import type { ConnectionState, MainToWorker, Stats, SurfacePreference, WorkerToMain } from "./types";
 import type { FitMode } from "./viewport";
 import { createInlineWorker } from "./workerFactory";
 
@@ -30,6 +30,10 @@ export interface RfbViewOptions {
   fit?: FitMode;
   /** Letterbox fill color for `"contain"` (any CSS color; default `"#000"`). */
   background?: string;
+  /** Compositing backend for the draw path: `"2d"` (default, always available), `"webgl"`,
+   *  or `"auto"` (prefer the GPU tiers). Falls back to Canvas2D if the requested context is
+   *  unavailable; the active backend is reported on `stats.surface`. */
+  surface?: SurfacePreference;
   /** Auth credential (e.g. a Google OAuth ID token) sent to the server in `hello`. */
   token?: string;
   /** Verbose client-side console logging (per-frame decode play-by-play). Genuine errors and
@@ -118,6 +122,7 @@ export class RemoteFramebufferView {
         token: options.token,
         fit: options.fit,
         background: options.background,
+        surface: options.surface,
         debug: options.debug,
         notice: options.notice,
       },

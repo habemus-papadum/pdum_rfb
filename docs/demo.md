@@ -98,5 +98,14 @@ pnpm -C widgets build:demo     # -> src/pdum/rfb/static/demo/ (build artifact, s
 pnpm -C widgets e2e:demo       # Playwright e2e that boots `pdum-rfb demo` and drives the UI
 ```
 
+Because the served SPA is a build artifact, editing its source without rebuilding leaves
+`pdum-rfb demo` serving stale bytes (an old UI that silently doesn't match your code). To
+prevent that footgun, **in a dev checkout** the default (non-`--dev`) path refuses to start
+when `static/demo/` is older than its TS/CSS source, printing the rebuild command and
+aborting. Rebuild (`pnpm -C widgets build:demo`) or use `--dev` (Vite HMR, no build artifact
+in the loop). The check compares mtimes across the demo-app, core widgets, and rfb-ui source;
+it **never fires for an installed wheel** (no source tree to compare). Override with
+`PDUM_RFB_ALLOW_STALE_DEMO=1` if you really mean to serve the old build.
+
 The far simpler **two-process dev demo** (`python -m pdum.rfb.server` + `pnpm dev`) is a
 contributor tool, documented in [the development guide](development.md).

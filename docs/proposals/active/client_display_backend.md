@@ -1,15 +1,44 @@
 # Client display backend: a pluggable draw path (Canvas2D / WebGL / WebGPU)
 
-> **Status: proposal / design.** Splits roadmap item 1 (formerly "client-side
-> viewport: crop, zoom, pan") into two layers: **(1)** this low-level *display
-> backend* — the thing that turns a decoded frame into pixels, with the draw path
-> (`drawImage` / WebGL / WebGPU) chosen by capability and no presentation policy of
-> its own; and **(2)** the *core viewport UI* (crop/zoom/pan) built on top of it.
-> This doc fleshes out layer 1 and defines the seam layer 2 plugs into. Two things
-> shape the design that emerged in review: the browser's **decode memory model**
-> (§5 — you cannot decode into memory you own) and the need to let a client
-> **composite the frame into its own hardware scene**, not just present it (the Mode
-> A / Mode B split, §6). See [roadmap](../../roadmap.md) items 1 and 2.
+> **Status: in progress.** Splits roadmap item 1 (formerly "client-side viewport:
+> crop, zoom, pan") into two layers: **(1)** this low-level *display backend* — the
+> thing that turns a decoded frame into pixels, with the draw path (`drawImage` /
+> WebGL / WebGPU) chosen by capability and no presentation policy of its own; and
+> **(2)** the *core viewport UI* (crop/zoom/pan) built on top of it. This doc fleshes
+> out layer 1 and defines the seam layer 2 plugs into. Two things shape the design
+> that emerged in review: the browser's **decode memory model** (§5 — you cannot
+> decode into memory you own) and the need to let a client **composite the frame into
+> its own hardware scene**, not just present it (the Mode A / Mode B split, §6). See
+> [roadmap](../../roadmap.md) items 1 and 2.
+>
+> **Progress against §13:** **P1 ✅ landed** — the `DisplaySurface` seam
+> (`widgets/src/worker/displaySurface.ts`), the Canvas2D backend
+> (`canvas2dSurface.ts`), and `viewport.ts`'s `{src,dst}` `presentGeometry`; `Renderer`
+> is now a thin coordinator; pure refactor, all tests green. **P2 ✅ landed** — the
+> WebGL2 backend (`webglSurface.ts`) + `createDisplaySurface` selection
+> (`surfaceFactory.ts`) + the `surface` option (`"2d"` default, `"auto"`/`"webgl"`/
+> `"webgpu"` opt-in) reported on `stats.surface`. **WebGPU Mode A ✅ landed** (the
+> `DisplaySurface` half of P5) — `webgpuSurface.ts` + the async factory + a gated
+> `chromium-webgpu` Playwright project. All three backends are verified pixel-equal to
+> Canvas2D by a server-free controlled-input harness across **both real source types**
+> (ImageBitmap + VideoFrame — see the orientation findings in §7.1), plus the real
+> decode→WebGL streaming path. **P3+P4+P5(Mode B) ✅ landed** — the **topology handoff**
+> (dual-mode worker: `present` | `feed`; a `FrameSink` seam; frames transferred to the
+> main thread) and **Mode B** frame-as-texture: `FrameTextureFeed` (public) binding to
+> the caller's WebGL2/WebGPU context, with `WebglFrameTexture` (`.texture`) and
+> `WebgpuFrameTexture` (`currentTexture()` + zero-copy `importCurrentFrame()`). Verified
+> by a Mode B conformance harness (the caller composites the frame texture, both source
+> types, WebGL + WebGPU) and a `FrameTextureFeed` streaming e2e.
+>
+> **The whole of roadmap item 1 (both modes, all three backends) is now landed and
+> verified** (29 e2e across two projects + 69 unit). The remaining `docs/roadmap.md`
+> item-1 follow-ups are polish, listed in §13 "Future".
+>
+> **Plan adaptations (recorded):** (1) Web Workers have **no `requestAnimationFrame`**,
+> and Mode A present runs in the worker — so P3's "rAF present loop" is really the
+> *caller's* loop in Mode B (the caller owns rendering; we keep the texture current and
+> fire `onFrame`), which is why P3 shipped folded into Mode B. (2) WebGPU Mode A was
+> pulled ahead of Mode B to complete the three-backend headline first.
 
 This is a **client** concern only. It is unrelated to the server-side
 [`wgpu` → NVENC/VideoToolbox zero-copy](wgpu_nvenc_zerocopy.md) work (that couples a
@@ -351,6 +380,34 @@ decode path keeps closing the `VideoFrame` right after `setFrame` — the
 preserved. (`importExternalTexture`, being a live view, is the exception — it is a
 Mode-B-only, in-pass call; Mode A always copies.)
 
+### 7.1 Orientation is source-type-dependent (a real gotcha the harness caught)
+
+The three real frame types — **ImageBitmap** (image path), **VideoFrame** (video path),
+and OffscreenCanvas (internal/test) — do **not** share upload orientation semantics, and
+Canvas2D is the only backend where it's a non-issue (`drawImage` is upright for all). The
+GPU backends needed care, and the streaming quadrant test can't catch a flip (a vertical
+flip aliases to a palette rotation — §11), so this was verified with an **asymmetric
+controlled frame across every source type**:
+
+- **WebGL: `UNPACK_FLIP_Y_WEBGL` is unreliable.** It is honored for a VideoFrame/canvas
+  but **ignored for an ImageBitmap** (whose orientation is fixed at creation). So no
+  single `FLIP_Y` value orients all types. The fix: **never use `UNPACK_FLIP_Y`** (all
+  sources upload frame-row-0 at `t=0`) and **flip V in the present shader** — one mapping,
+  correct for every type. (This also fixed a *latent P2 bug*: with `FLIP_Y=true` the real
+  ImageBitmap image path rendered upside-down, hidden because the first harness used an
+  OffscreenCanvas source and the streaming test uses flip-blind `matchedRotation`.)
+- **WebGPU: `copyExternalImageToTexture` only reads a VideoFrame on software adapters.**
+  On Dawn/SwiftShader it silently copies **black** from an ImageBitmap or canvas (works
+  from a VideoFrame). The fix: **normalize non-VideoFrame sources through a
+  `new VideoFrame(src)`** before the copy (cheap; the image path is low-rate). WebGPU's
+  texture origin is top-left and `copyExternalImageToTexture` keeps the source upright, so
+  no shader flip is needed there.
+- **readback** flips too: `gl.readPixels` is bottom-up (rows reversed into top-down
+  `ImageData`); WebGPU `copyTextureToBuffer` needs 256-byte row padding un-packed.
+
+The lesson encoded in the tests: **conformance must exercise the real source types**
+(ImageBitmap *and* VideoFrame), not a stand-in, or orientation bugs hide.
+
 ---
 
 ## 8. Resize resilience across backends — and the WebGPU carve-out
@@ -365,30 +422,27 @@ it, so resize is uniformly *"`resize()` the backing store, recompute geometry,
 (set `width/height` vs `context.configure()`), and the **loss mode** (`webglcontextlost`
 / `device.lost` — the retained GPU texture is gone until the next frame).
 
-**The deliberate carve-out (new decision): WebGPU Mode A need not match Canvas2D/WebGL
-retention robustness.** Holding a persistent RGBA `GPUTexture` and re-sampling it across
-a swapchain `configure()` (and across `device.lost`) is real complexity and per-frame
-copy cost (§6.3), all to smooth an event — a display resize — that is **rare and
-self-heals on the very next decoded frame** (typically <1 frame-time later; a resize
-already forces a keyframe on the match-client path). That trade is not worth paying on
-the WebGPU path. Instead:
+**The carve-out, refined by what the implementation actually needed.** The maintainer
+granted permission to make WebGPU Mode A *less* robust across resize (accept a transient +
+use the status overlay) rather than pay complexity. In implementation it turned out
+retention is **cheap on WebGPU too**: Mode A already uploads each frame into a persistent
+RGBA `GPUTexture` via `copyExternalImageToTexture` (the reliable cross-implementation
+path, §7.1), and that texture **survives a swapchain `configure()`** — so resize
+re-presents from it cleanly, exactly like WebGL, with no per-frame cost beyond the upload
+Mode A does anyway. So:
 
-- **Canvas2D & WebGL2**: full retention, as today (cheap there — a canvas copy / a
-  texture that already survives resize). No regression.
-- **WebGPU (Mode A)**: retention is **best-effort**. If the retained frame isn't cheaply
-  available across the reconfigure, the surface may briefly show the `background` (or a
-  hold of the prior swapchain image) rather than a re-sampled frame, and it signals a
-  **transient state** the existing status overlay renders — a brief indicator instead of
-  a mysterious flash. Concretely: add a `"transient"` (or reuse a busy) `StatusKind` in
-  `statusOverlay.ts::computeStatus` that a surface can raise for the sub-frame gap, so
-  `RemoteFramebufferView` shows the same lightweight scrim it already uses for connect/
-  reconnect. No new machinery — the overlay, `computeStatus`, and the state plumbing all
-  exist; the surface just gets a way to raise "recovering, one moment."
+- **Canvas2D, WebGL2, and WebGPU Mode A all keep full retention** — resize stays smooth on
+  every backend; no blank gap, no overlay needed for the routine case. The carve-out's
+  permission wasn't needed for resize because the cheap-and-robust path exists.
+- **The genuinely unrecoverable case is `device.lost`** — the retained `GPUTexture` is
+  gone until the next decoded frame. Policy (a) from §7 applies (blank until the next
+  frame; rare). The **transient-overlay** mechanism (a `"transient"` `StatusKind` in
+  `statusOverlay.ts::computeStatus`, reusing the existing scrim) is reserved for polishing
+  *that* case and is **not built now** — a documented future refinement, not a blocker.
 
-This keeps the WebGPU backend lean (its reason to exist is Mode B zero-copy
-compositing, not Mode A polish) and moves the cost of a rare event from *every frame's
-code path* to *an occasional overlay blink*. Documented as an explicit, intended
-difference between backends, not a bug.
+Net: the intended simplification (don't over-engineer WebGPU resize) holds, but the
+outcome is *better* than the original carve-out — WebGPU resize matches the other backends
+for free, and the overlay is reserved for the truly rare device-loss transient.
 
 ---
 
@@ -458,10 +512,23 @@ real GPU context) reuses the existing harness:
    vs `expectedQuadrantColor`. Parameterize that spec over `surface ∈ {2d, webgl}` and
    assert all backends produce the same quadrant colors within tolerance. **WebGL2 is
    available headless today** — no new infra.
-3. **WebGPU, gated.** Headless WebGPU (Dawn/SwiftShader) needs flags
-   (`--enable-unsafe-webgpu`, `--use-webgpu-adapter=swiftshader`) and may be absent; gate
-   the WebGPU spec on `navigator.gpu?.requestAdapter()` exactly like the H.264 spec gates
-   on `isConfigSupported`, and **skip** where unavailable.
+3. **WebGPU, gated (verified feasible headless).** An empirical probe of the repo's
+   Playwright Chromium confirmed WebGPU **does** run headless here, with caveats that
+   shape the P5 spec:
+   - The repo's existing GL args (`--use-gl=angle --use-angle=swiftshader`) alone yield
+     `requestAdapter() === null` — pinning GL to SwiftShader suppresses the adapter. Add
+     **`--enable-unsafe-webgpu`** (and `--use-webgpu-adapter=swiftshader` for a
+     deterministic software adapter across dev/CI) in a **dedicated Playwright project**
+     so the existing GL project is untouched. Linux CI likely also needs
+     `--enable-features=Vulkan` (verify on the runner).
+   - `navigator.gpu` is only exposed in a **secure context** — `about:blank`/`data:` URLs
+     report it absent. The e2e must `page.goto` the localhost app first (its `baseURL`
+     is `http://127.0.0.1:…`, a trustworthy origin), *then* probe.
+   - `importExternalTexture`, `copyExternalImageToTexture`, and OffscreenCanvas
+     `getContext("webgpu")` + `configure()` are all present on a working device.
+   - Still **gate + skip** at runtime like the H.264 spec, so it runs where an adapter
+     materializes and skips-with-log otherwise:
+     `test.skip(!(await page.evaluate(async () => { const g = (navigator as any).gpu; try { return !!g && !!(await g.requestAdapter()); } catch { return false; } })), "no WebGPU adapter")`.
 4. **Mode B.** A minimal WebGL2 harness that creates a `FrameTextureSource` against a
    test context, feeds one synthetic frame, samples `texture` into a target, and reads
    back the expected quadrant colors — proving the frame reaches a caller-owned texture.
@@ -489,25 +556,41 @@ that small.
 
 Each phase is independently shippable and leaves the tree green.
 
-- **P1 — Extract the seam (pure refactor, Canvas2D only).** Define `DisplaySurface`;
-  make today's 2D `Renderer` implement it (retention → `setFrame`, paint → `present`).
-  Generalize `viewport.ts` to `presentGeometry(): {src,dst}` with `backingToFrame` as
-  its inverse; the whole-frame case reproduces today's letterbox exactly. No behavior
-  change; existing tests stay green. Delivers the seam that unblocks item 2.
-- **P2 — WebGL2 Mode A + selection + conformance.** WebGL2 `DisplaySurface`;
-  `probeSurface()` + the `surface` option (`drawImage` stays the floor); the backend-
-  parameterized readback e2e (§11.2) and the resize-resilience e2e (§11.5). A real GPU
-  draw path, proven pixel-equal to 2D.
-- **P3 — Topology + present loop.** The optional rAF present loop and the present-owner
-  handoff (transfer `VideoFrame`/`ImageBitmap`). Decoupled present cadence — the
-  prerequisite for smooth item-2 gestures — no wire change.
-- **P4 — WebGL2 Mode B (frame-as-texture).** `FrameTextureSource` against a caller's
-  context; the Mode B harness (§11.4); the minimap+overlay example. Delivers client-side
-  compositing on the broadly-supported backend.
-- **P5 — WebGPU (both modes) + the §8 carve-out.** WebGPU `DisplaySurface` (Mode A,
-  best-effort retention + the transient overlay state) and `WebgpuFrameTextureSource`
-  (Mode B, `importExternalTexture` zero-copy sample); gated conformance (§11.3). Delivers
-  the true zero-copy compositing path where the platform supports it.
+- **P1 ✅ — Extract the seam (pure refactor, Canvas2D only).** Defined `DisplaySurface`
+  (`worker/displaySurface.ts`); today's 2D path is `Canvas2dSurface` (retention →
+  `setFrame`, paint → `present`). `viewport.ts` gained `presentGeometry(): {src,dst}`
+  with `backingToFrame` as its inverse; the whole-frame case reproduces today's letterbox
+  exactly. `Renderer` is a thin coordinator. Pure refactor; all tests green.
+- **P2 ✅ — WebGL2 Mode A + selection + conformance.** `WebglSurface`
+  (`worker/webglSurface.ts`) + `createDisplaySurface` (`worker/surfaceFactory.ts`) + the
+  `RfbViewOptions.surface` option (`"2d"` default, `"webgl"`/`"auto"` opt-in, graceful
+  fallback) reported on `stats.surface`. Verified by a server-free controlled-input
+  conformance harness (`surface-harness.html` + `tests/e2e/surface-conformance.spec.ts`:
+  orientation via an asymmetric frame — the streaming quadrant test can't catch a flip —
+  letterbox fill, and WebGL-vs-Canvas2D pixel-parity at 1:1) plus the real decode→WebGL
+  streaming path (`surface-streaming.spec.ts`). A real GPU draw path, proven pixel-equal
+  to 2D against headless SwiftShader WebGL2.
+- **WebGPU Mode A ✅ — the third backend (pulled ahead of Mode B).** `WebgpuSurface`
+  (`worker/webgpuSurface.ts`), an **async** `createDisplaySurface` (WebGPU device
+  acquisition is async; the init handler guards the brief null-renderer gap), `rgba8unorm`
+  for clean readback, full retention via a persistent texture (§8), the `chromium-webgpu`
+  Playwright project (`--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader`, gated +
+  skipped where no adapter), and `readPixels()` made async across the interface. Verified
+  upright + pixel-equal to Canvas2D for ImageBitmap and VideoFrame. Added `@webgpu/types`.
+- **P3+P4+P5(Mode B) ✅ — topology + frame-as-texture (shipped together).** A **dual-mode
+  worker** (`mode: "present" | "feed"`) behind a `FrameSink` seam (`worker/frameSink.ts`):
+  present mode drives a `Renderer`; feed mode uses a `TransferSink` that **transfers each
+  decoded frame to the main thread** (frame ownership moves with the transfer; the decode
+  pipeline no longer closes frames — the sink does). Public **`FrameTextureFeed`** binds to
+  the caller's `gl` (WebGL2) or `device` (WebGPU) and uploads each frame into a texture:
+  `WebglFrameTexture` exposes `.texture`; `WebgpuFrameTexture` exposes a persistent
+  `currentTexture()` **and** a zero-copy `importCurrentFrame()` (`importExternalTexture`,
+  holding the live VideoFrame). The caller drives its own rAF loop and composites the
+  texture (the present-loop, on the caller's side — workers have no rAF). Verified by a
+  Mode B conformance harness (caller composites the frame texture upright; ImageBitmap +
+  VideoFrame; WebGL + WebGPU) and a `FrameTextureFeed` **streaming** e2e (worker→transfer→
+  upload→sample). Orientation contract: the frame texture's UV origin is the frame
+  top-left (§7.1).
 - **(Roadmap item 2) — viewport UI.** Zoom/pan/crop `{src,dst}`, presets, gestures,
   event inverse-map — all on top of P1–P3, no new draw code.
 - **Future** — batteries backend-switch (§12); decode-straight-to-GPU-texture ingest if

@@ -6,6 +6,12 @@ export const version = "0.1.0-alpha";
 export { RemoteFramebufferView } from "./RemoteFramebufferView";
 export type { RfbViewOptions } from "./RemoteFramebufferView";
 
+// Mode B (frame-as-texture): stream into the caller's own WebGL2/WebGPU context.
+export { FrameTextureFeed } from "./FrameTextureFeed";
+export type { FrameTextureFeedOptions } from "./FrameTextureFeed";
+export { WebglFrameTexture } from "./webglFrameTexture";
+export { WebgpuFrameTexture } from "./webgpuFrameTexture";
+
 export { unpackBinaryMessage, packBinaryMessage } from "./protocol";
 export type {
   BinaryHeader,
@@ -53,7 +59,7 @@ export type {
   Modifier,
 } from "./eventTypes";
 
-export type { ConnectionState, Stats } from "./types";
+export type { ConnectionState, Stats, SurfaceKind, SurfacePreference } from "./types";
 
 export { computeStatus } from "./statusOverlay";
 export type { StatusKind, StatusRenderer, ViewStatus } from "./statusOverlay";

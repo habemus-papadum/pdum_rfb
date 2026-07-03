@@ -9,8 +9,9 @@
 // same geometry, so a click stays accurate under any fit.
 
 import type { PresentGeometry } from "../viewport";
+import type { SurfaceKind } from "../types";
 
-export type SurfaceKind = "2d" | "webgl" | "webgpu";
+export type { SurfaceKind };
 
 export interface DisplaySurface {
   readonly kind: SurfaceKind;
@@ -32,8 +33,10 @@ export interface DisplaySurface {
    *  just clears to `background`. */
   present(geom: PresentGeometry, background: string): void;
 
-  /** Read back the backing store (batteries capture() / e2e pixel readback). */
-  readPixels(): ImageData;
+  /** Read back the backing store (batteries capture() / e2e pixel readback). Async because
+   *  GPU→CPU readback is inherently asynchronous (WebGPU); the 2D/WebGL backends resolve
+   *  immediately. */
+  readPixels(): Promise<ImageData>;
   toBlob(type?: string): Promise<Blob>;
 
   /** Release backend-native resources (retained frame, GPU handles). */

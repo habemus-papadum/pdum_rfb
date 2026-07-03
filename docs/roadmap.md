@@ -16,13 +16,21 @@ to help triage.
 _benefit: high · difficulty: high_
 
 The low-level layer *under* the viewport: the thing that turns a decoded frame into
-pixels on the canvas, with **no presentation opinion of its own**. Today that draw path
-is hard-coded — the worker composites a decoded `VideoFrame` with `drawImage` onto the
-transferred `OffscreenCanvas` (`widgets/src/worker/renderer.ts`). The work is to make
-the draw path **pluggable**: a small `DisplaySurface` seam with three interchangeable
-backends — Canvas2D (today's floor), WebGL2, and WebGPU — selected by capability, each
+pixels on the canvas, with **no presentation opinion of its own**. The draw path is a
+`DisplaySurface` seam with three interchangeable backends — Canvas2D (the floor), WebGL2,
+and WebGPU — selected by capability (`surface: "2d" | "webgl" | "webgpu" | "auto"`), each
 just "sample this source region of the current frame into that destination region of
 the canvas." No fit, no zoom, no pan at this layer; those are item 2.
+
+> **Status: landed (both modes, all three backends).** **Mode A** (managed present):
+> all three backends ship, verified pixel-equal to Canvas2D against a controlled
+> asymmetric frame across both real source types (ImageBitmap + VideoFrame);
+> `stats.surface` reports the active one. **Mode B** (frame-as-texture): `FrameTextureFeed`
+> hands the decoded frame to the caller as a GPU texture in their own WebGL2/WebGPU
+> context (a decode worker transfers frames to the main thread), so they composite it
+> into their own hardware scene — minimap, overlay, blends. Verified end-to-end (29 e2e
+> across two projects). Remaining follow-ups (batteries backend-switch UI, decode-straight-
+> to-GPU-texture) are polish; see the proposal's phase tracker.
 
 Why its own item: a compositing flow is useful for more than zoom/pan — the real
 payoff of a GPU draw path is that the frame becomes a **first-class input to a
