@@ -253,16 +253,23 @@ that reparenting the transferred placeholder can be severed from the compositor,
 has no transferred placeholder to sever, so the picture follows the element wherever the
 framework moves it.
 
-Flip the path with the `main_thread_present` trait (connect-time — mutating it rebuilds the
-view):
+The path is chosen by a **host-aware default**: `main_thread_present` is `True` only when the
+widget is created inside a live marimo notebook (detected via `marimo.running_in_notebook()`),
+and `False` everywhere else — Jupyter and JupyterLab don't reparent, so they take the
+lower-overhead OffscreenCanvas transfer path (Mode A), which is also the path that carries the
+backend-switch / zoom chrome. Only marimo pays for the main-thread draw.
+
+Override it explicitly (connect-time — mutating it rebuilds the view) if you hit a different
+reparenting host, or to force a path for measurement:
 
 ```python
-display.widget(main_thread_present=False)   # OffscreenCanvas transfer path (Mode A)
+display.widget(main_thread_present=True)    # force the reparent-safe main-thread draw
+display.widget(main_thread_present=False)   # force the OffscreenCanvas transfer path (Mode A)
 ```
 
-`main_thread_present=True` (the default) is recommended everywhere; set it `False` only in a
-host you know never reparents the widget and where you want the marginally lower main-thread
-draw cost. At notebook cadence the difference is negligible.
+At notebook cadence the cost difference is negligible; the reason to prefer Mode A off-marimo
+is that the live backend-switch and zoom/pan chrome are Mode A features (the main-thread
+present path is a limited presenter — capture and fit, but not live backend switching).
 
 ## CSP and mixed content
 

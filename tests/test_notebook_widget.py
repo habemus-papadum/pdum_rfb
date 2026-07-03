@@ -53,9 +53,24 @@ def test_widget_tiers_default_chrome() -> None:
     assert canvas.show_toolbar is False
     assert canvas.show_stats is False
     assert canvas.height == 480  # avoids the 0-height cell -> 320x240 fallback
-    # Present path defaults to the reparent-safe main-thread draw (works in marimo); both tiers.
-    assert canvas.main_thread_present is True
-    assert viewer.main_thread_present is True
+
+
+def test_main_thread_present_default_is_host_aware(monkeypatch) -> None:
+    # Outside marimo (the test env), the default is the lower-overhead OffscreenCanvas path,
+    # which also carries the backend-switch/zoom chrome — Jupyter shouldn't pay the marimo cost.
+    assert RfbCanvas().main_thread_present is False
+    assert RfbViewer().main_thread_present is False
+
+    # Under marimo, the default flips to the reparent-safe main-thread draw.
+    monkeypatch.setattr(notebook, "_running_in_marimo", lambda: True)
+    assert RfbCanvas().main_thread_present is True
+    assert RfbViewer().main_thread_present is True
+
+    # An explicit value always wins over the host-aware default.
+    monkeypatch.setattr(notebook, "_running_in_marimo", lambda: False)
+    assert RfbCanvas(main_thread_present=True).main_thread_present is True
+    monkeypatch.setattr(notebook, "_running_in_marimo", lambda: True)
+    assert RfbCanvas(main_thread_present=False).main_thread_present is False
 
 
 async def test_ws_url_and_widget_factory() -> None:

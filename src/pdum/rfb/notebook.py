@@ -97,14 +97,30 @@ else:
     _CSS = ""
 
 
+def _running_in_marimo() -> bool:
+    """True only when this widget is being created inside a live marimo notebook.
+
+    marimo reparents the widget subtree after mount, which blanks the OffscreenCanvas-transfer
+    present path (see ``docs/proposals/active/marimo_rendering_fix.md``); the main-thread present
+    path is the workaround, but it is unnecessary elsewhere (Jupyter/JupyterLab don't reparent),
+    so we only pay for it under marimo. Any failure (marimo absent, API drift) → ``False``.
+    """
+    try:
+        import marimo
+
+        return bool(marimo.running_in_notebook())
+    except Exception:
+        return False
+
+
 class RfbCanvas(anywidget.AnyWidget):
     """Bare tier: just the framebuffer canvas filling the cell — you supply the chrome/CSS.
 
     Connection traits (``url``/``host``/``base_path``/``port``/``stream``/``token``/
     ``image_only``/``main_thread_present``) are connect-time: mutating one rebuilds the view.
-    ``main_thread_present`` (default ``True``) draws frames on the main thread so the widget
-    survives host reparenting (marimo); set ``False`` for the OffscreenCanvas transfer path.
-    ``height`` sizes the
+    ``main_thread_present`` defaults host-aware — ``True`` only under marimo (draws on the main
+    thread so the widget survives marimo's reparenting), ``False`` elsewhere (the lower-overhead
+    OffscreenCanvas path that also carries the backend-switch/zoom chrome). ``height`` sizes the
     output (a notebook output ``<div>`` is 0-height by default, so the canvas would fall
     back to 320×240 without it). ``state``/``stats``/``last_error`` are read back from JS.
     """
@@ -120,11 +136,18 @@ class RfbCanvas(anywidget.AnyWidget):
     stream = traitlets.Unicode("default").tag(sync=True)
     token = traitlets.Unicode("").tag(sync=True)
     image_only = traitlets.Bool(False).tag(sync=True)
-    # Present path. True (default): draw each frame on the MAIN THREAD (a normal <canvas> the
-    # framework may freely reparent) — robust in every embedding host, including marimo, which
-    # reparents the widget subtree and blanks the OffscreenCanvas-transfer path. False: transfer
-    # an OffscreenCanvas to the worker (slightly lower overhead) where the host won't reparent.
-    main_thread_present = traitlets.Bool(True).tag(sync=True)
+    # Present path. True: draw each frame on the MAIN THREAD (a normal <canvas> the framework may
+    # freely reparent) — robust under marimo, which reparents the widget subtree and blanks the
+    # OffscreenCanvas-transfer path. False: transfer an OffscreenCanvas to the worker (lower
+    # overhead, and the path that carries the backend-switch/zoom chrome). The default is
+    # host-aware — True only under marimo, False everywhere else (Jupyter/JupyterLab don't
+    # reparent) — so only marimo pays the cost; override explicitly for any other reparenting host.
+    main_thread_present = traitlets.Bool().tag(sync=True)
+
+    @traitlets.default("main_thread_present")
+    def _default_main_thread_present(self) -> bool:
+        return _running_in_marimo()
+
     # Fit mode when the frame AR differs from the canvas AR ("contain" | "cover" | "fill";
     # default "contain" client-side); background is the letterbox fill for "contain".
     fit = traitlets.Unicode("").tag(sync=True)
