@@ -127,5 +127,8 @@ test("debug toggle lights up the console play-by-play", async ({ page }) => {
   await expect(page.locator(".pill")).toHaveText("live", { timeout: 20_000 });
 
   await page.locator("[data-testid=debug]").check(); // remounts the viewer with debug on
-  await expect.poll(() => logs.some((l) => l.includes("[rfb:worker] config")), { timeout: 15_000 }).toBe(true);
+  // `hello` is a debug-tier worker line (suppressed until debug is on), emitted on every
+  // connect and forwarded to the main-thread console by the observability bridge — so its
+  // appearance proves the debug toggle lit up the worker play-by-play.
+  await expect.poll(() => logs.some((l) => l.includes("[rfb:worker] hello")), { timeout: 15_000 }).toBe(true);
 });
