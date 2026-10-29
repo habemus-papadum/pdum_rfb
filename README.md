@@ -4,7 +4,7 @@
 
 | Name                                      |    Stmts |     Miss |   Cover |   Missing |
 |------------------------------------------ | -------: | -------: | ------: | --------: |
-| src/pdum/rfb/\_\_init\_\_.py              |       33 |        8 |     76% |115-117, 119-121, 123-125, 131-133 |
+| src/pdum/rfb/\_\_init\_\_.py              |       34 |        8 |     76% |116-118, 120-122, 124-126, 132-134 |
 | src/pdum/rfb/adaptive.py                  |       58 |        1 |     98% |       109 |
 | src/pdum/rfb/asgi.py                      |       71 |        8 |     89% |83-85, 103-107, 113-114 |
 | src/pdum/rfb/auth.py                      |       16 |        0 |    100% |           |
@@ -33,7 +33,7 @@
 | src/pdum/rfb/sources.py                   |       81 |        8 |     90% |102-105, 128-129, 132, 177 |
 | src/pdum/rfb/transport.py                 |       16 |        0 |    100% |           |
 | src/pdum/rfb/types.py                     |       68 |        0 |    100% |           |
-| **TOTAL**                                 | **3703** | **1194** | **68%** |           |
+| **TOTAL**                                 | **3704** | **1194** | **68%** |           |
 
 
 ## Setup coverage badge
