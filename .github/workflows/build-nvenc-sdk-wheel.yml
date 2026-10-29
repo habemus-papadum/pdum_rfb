@@ -1,11 +1,15 @@
 # Build the NVENC SDK wheel (packages/nvenc -> habemus-papadum-nvenc) across CPython
-# versions and upload them as an artifact.
+# versions and upload them as an artifact; on a release tag, publish them.
 #
-# Two entry points:
-#   * workflow_dispatch — build-only validation (rarely needed; expensive).
-#   * workflow_call     — reused by release.yml, which downloads the `nvenc-sdk-wheels`
-#                         artifact and publishes it to PyPI via trusted publishing.
-# This workflow itself never publishes.
+# habemus-papadum-nvenc is `build = false` for ship (pyproject.toml [tool.ship.packages]):
+# `ship release habemus-papadum-nvenc` writes the version, tests, commits, tags
+# `habemus-papadum-nvenc-v<version>`, pushes and creates the GitHub release, and this
+# workflow builds the manylinux wheels from that tag and publishes them. Entry points:
+#   * push of a `habemus-papadum-nvenc-v*` tag (a tag pushed from a developer machine);
+#   * workflow_dispatch with `ref` = that tag (what release.yml's `build-wheels` job does,
+#     because a tag pushed with the workflow token fires no `push:` trigger);
+#   * workflow_dispatch / workflow_call with any other ref — build-only validation.
+# The `publish` job runs only when the ref being built is a habemus-papadum-nvenc-v* tag.
 #
 # No GPU is needed to BUILD (we link the CUDA driver stub; libnvidia-encode is
 # dlopen'd at runtime). The wheel can't be self-tested here (no GPU on GitHub
@@ -14,6 +18,8 @@
 name: build-nvenc-sdk-wheel
 
 on:
+  push:
+    tags: ["habemus-papadum-nvenc-v*"]
   workflow_dispatch:
     inputs:
       python_versions:
@@ -42,6 +48,9 @@ on:
         type: string
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -59,16 +68,52 @@ jobs:
         with:
           enable-cache: true
 
-      # `inputs` is populated for BOTH workflow_dispatch and workflow_call (unified context).
+      # `inputs` is populated for BOTH workflow_dispatch and workflow_call (unified context);
+      # on a tag push it is empty, so the full matrix is the fallback.
       - name: Build wheel(s)
         working-directory: packages/nvenc
         run: |
           ARGS=""
           [ "${{ inputs.use_nvtx }}" = "true" ] && ARGS="--nvtx"
-          PYTHON_VERSIONS="${{ inputs.python_versions }}" ./build-wheel.sh $ARGS
+          PYTHON_VERSIONS="${{ inputs.python_versions || '3.12 3.13 3.14' }}" ./build-wheel.sh $ARGS
 
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v6
         with:
           name: nvenc-sdk-wheels
           path: packages/nvenc/dist/*.whl
+
+  publish:
+    name: publish to PyPI and attach to the GitHub release
+    needs: [build]
+    # The ref being built is a release tag: either the pushed tag or the `ref` input.
+    if: ${{ startsWith(github.ref, 'refs/tags/habemus-papadum-nvenc-v') || startsWith(inputs.ref, 'habemus-papadum-nvenc-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release upload
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.ref || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: nvenc-sdk-wheels
+          path: dist
+
+      - name: Publish to PyPI
+        # --check-url makes a re-run of this workflow for the same tag skip files PyPI already
+        # has (a failed build is re-run for the tag; the release is not cut again).
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish --check-url https://pypi.org/simple/ dist/*.whl
+
+      - name: Attach the wheels to the GitHub release ship created
+        run: gh release upload "$TAG" dist/*.whl --clobber

@@ -1,8 +1,6 @@
 // Public API surface. Worker internals (src/worker/*) are intentionally not
 // exported.
 
-export const version = "0.1.0-alpha";
-
 export { RemoteFramebufferView } from "./RemoteFramebufferView";
 export type { RfbViewOptions } from "./RemoteFramebufferView";
 

@@ -50,8 +50,9 @@ PYTHON_VERSIONS="3.12 3.13 3.14" ./build-wheel.sh
 ```
 
 The wheel bundles its C/C++ runtime deps but **not** `libcuda` / `libnvidia-encode`
-— those come from the host NVIDIA driver, as they must. **Publishing to PyPI is done
-by [`scripts/publish.sh`](../../scripts/publish.sh)** (which calls this), not from CI.
+— those come from the host NVIDIA driver, as they must. **Publishing to PyPI is done by
+[`build-nvenc-sdk-wheel.yml`](../../.github/workflows/build-nvenc-sdk-wheel.yml)** (which
+calls this) from the `habemus-papadum-nvenc-v<version>` tag that `ship release` creates.
 
 ## Usage
 

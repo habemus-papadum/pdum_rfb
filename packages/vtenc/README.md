@@ -77,7 +77,8 @@ PYTHON_VERSIONS="3.12 3.13 3.14" ./build-wheel.sh
 Requires only **Xcode Command Line Tools** (clang + the macOS SDK frameworks); the full
 Metal toolchain is not needed for v1. The wheel bundles nothing beyond the extension —
 the frameworks come from macOS, as they must. **Publishing to PyPI is done by
-[`scripts/publish.sh`](../../scripts/publish.sh)**, not from CI.
+[`build-vtenc-wheel.yml`](../../.github/workflows/build-vtenc-wheel.yml)** (which calls
+this) from the `habemus-papadum-vtenc-v<version>` tag that `ship release` creates.
 
 ## Scope / caveats
 

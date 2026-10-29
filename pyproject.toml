@@ -70,7 +70,7 @@ gpu-cuda12 = [
 # GPU-frame path. Markered to Linux/x86_64 so it is a no-op elsewhere (runtime probe:
 # nvenc_gpu_pdum_available()). See docs/nvenc_sdk_evaluation.md.
 gpu-nvenc-sdk = [
-    "habemus-papadum-nvenc~=0.3.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "habemus-papadum-nvenc>=0.3.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",  # a floor; the == is the marker's
 ]
 # `pdum-rfb doctor` / `pdum-rfb benchmark` diagnostics CLI.
 cli = [
@@ -102,7 +102,7 @@ asgi = [
 # frameworks are system-provided). The natural GPU frame producer is MLX (see the mac-dev
 # group). See docs/mlx_metal_videotoolbox_encoder_design.md.
 mac-vt = [
-    "habemus-papadum-vtenc~=0.3.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "habemus-papadum-vtenc>=0.3.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",  # a floor; the == is the marker's
 ]
 # `pdum-rfb demo` — a self-contained web app. One Python process serves the prebuilt SPA
 # (built under src/pdum/rfb/static/demo/ via `pnpm -C widgets build:demo`; a git-ignored
@@ -149,15 +149,18 @@ packages = ["src/pdum"]
 
 # NEITHER the anywidget bundle (src/pdum/rfb/static/widget.{js,css}) NOR the `pdum-rfb demo` SPA
 # (src/pdum/rfb/static/demo/) is committed — both are git-ignored build artifacts, produced on
-# demand (`pnpm -C widgets build:anywidget` / `build:demo`, which the release workflow runs
-# before building the wheel from source). A plain force-include would hard-fail EVERY build
-# (including editable installs / `uv sync`) whenever an artifact is absent, so hatch_build.py
-# force-includes each CONDITIONALLY — only when present. Scoped to the WHEEL target: the sdist
-# stays pure source, and the release builds the wheel directly from source (not wheel-from-sdist)
-# so the artifacts land in it. Absent → the widget renders its fallback cell and `pdum-rfb demo`
-# serves its "build me" placeholder. The release workflow re-checks the built wheel for both.
-[tool.hatch.build.targets.wheel.hooks.custom]
-path = "hatch_build.py"
+# demand (`pnpm -C widgets build:anywidget` / `build:demo`; ship runs both as this package's
+# `before-build` commands, see [tool.ship.packages] below). `artifacts` un-ignores them for hatch,
+# so they ride in the sdist and the wheel when present and are simply absent otherwise (a
+# force-include would fail every build, including `uv sync`, whenever one is missing). ship builds
+# with `uv build`, which builds the wheel FROM the sdist, so the sdist must carry them too. Absent →
+# the widget renders its fallback cell and `pdum-rfb demo` serves its "build me" placeholder.
+[tool.hatch.build]
+artifacts = [
+    "src/pdum/rfb/static/widget.js",
+    "src/pdum/rfb/static/widget.css",
+    "src/pdum/rfb/static/demo/",
+]
 
 [tool.uv]
 # Groups installed automatically by a bare `uv sync` (including `--frozen`). `viz` pulls
@@ -176,7 +179,6 @@ habemus-papadum-vtenc = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "hatch>=1.14.2",
     "pytest>=8.0.0",
     "pytest-cov>=7.0.0",
     "ruff>=0.13.3",
@@ -187,7 +189,6 @@ dev = [
     "mkdocs-jupyter>=0.25.1",
     "jupyter>=1.1.1",
     "rich>=13.7.1",
-    "inquirerpy>=0.3.4",
     "pre-commit>=3.7.0",
     "watchdog>=3.0.0",
     "av>=17.1.0",
@@ -197,6 +198,7 @@ dev = [
     "starlette>=0.37",  # the [asgi] adapter + the `pdum-rfb demo` control plane (TestClient in tests)
     "uvicorn>=0.30",  # serves the `pdum-rfb demo` web app
     "marimo>=0.23.13",
+    "habemus-papadum-ship>=0.8.0",
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",
@@ -239,3 +241,26 @@ omit = [
     "*/tests/*",
     "*/testing.py",
 ]
+
+# ship releases this package: one version per package, the tag is the truth,
+# the manifest carries <last release>+dev between releases. See the README.
+[tool.ship]
+ours = ["habemus-papadum-*", "@habemus-papadum/*"]
+shared-paths = [".github/workflows/**", "widgets/pnpm-workspace.yaml"]
+# The old pipeline's post-release commit ("back to dev (0.3.0+dev)") is not a change.
+ignore-subjects = ["back to dev"]
+# The pnpm workspace is nested: widgets/package.json is @habemus-papadum/rfb-widgets and
+# widgets/pnpm-workspace.yaml lists the wrappers.
+pnpm-root = "widgets"
+
+# The wheel packs the anywidget bundle and the demo SPA, built from the pnpm workspace.
+[tool.ship.packages."habemus-papadum-rfb"]
+before-build = ["pnpm -C widgets build:anywidget", "pnpm -C widgets build:demo"]
+
+# Platform wheels the release runner cannot build: ship versions, tests, tags and pushes;
+# build-nvenc-sdk-wheel.yml / build-vtenc-wheel.yml build and publish from the tag.
+[tool.ship.packages."habemus-papadum-nvenc"]
+build = false
+
+[tool.ship.packages."habemus-papadum-vtenc"]
+build = false

@@ -10,31 +10,29 @@ The project uses a modern Python toolchain with UV for dependency management.
 
 ## Important Rules
 
-### Version Management
-**NEVER modify the version number in any file.** Version numbers are managed exclusively by humans. Do not change:
-- `pyproject.toml` version field
-- `src/pdum/rfb/__init__.py` `__version__` variable
-- Any version references in documentation
+### Versions and releases
+`ship` (habemus-papadum-ship) releases this repository's packages: the PyPI distributions
+`habemus-papadum-rfb` (root), `habemus-papadum-nvenc` and `habemus-papadum-vtenc`
+(`packages/*`), and the npm packages `@habemus-papadum/rfb-widgets` (`widgets/`),
+`rfb-react`, `rfb-svelte` and `rfb-solid` (`widgets/packages/*`). Each package has its own
+version and tag series (`<package>-v<version>`, the unscoped name for npm:
+`rfb-react-v0.3.1`); between releases the manifest says `<last release>+dev`. Never edit a
+version field by hand. `pdum.rfb.__version__` reads the installed metadata.
 
-If you think a version change is needed, inform the user but do not make the change yourself.
+To release, ask the operator; when they agree, run the release workflow
+(`gh workflow run release.yml -f package=<name> -f bump=minor -f dry_run=false`, after a
+`dry_run=true` to see the plan; npm packages by their scoped name). Do not publish from this
+machine. `habemus-papadum-nvenc` and `-vtenc` are `build = false`: ship tags them and the
+`build-nvenc-sdk-wheel.yml` / `build-vtenc-wheel.yml` workflows build and publish the
+platform wheels from the tag; never trigger those on a release tag by hand unless a build
+failed and is being re-run (recovery: `docs/release_recovery.md`).
 
-### Release Management
-**NEVER TRIGGER A RELEASE, AND NEVER PUBLISH.** Releasing is a single GitHub Actions workflow —
-`.github/workflows/release.yml`, a `workflow_dispatch` — run by a HUMAN from the Actions UI (or
-`gh workflow run release.yml`). Triggering it (with `dry_run=false`) bumps the version, tags
-`vX.Y.Z`, builds the wheel matrix, and publishes to PyPI + npm. There is no local release script.
-- `./scripts/publish.sh` is a token-based manual break-glass fallback (publishes to PyPI directly
-  from `.env`).
-- `scripts/_versioning.py` is the shared version library the workflow calls; do not hand-run its
-  `set` command to change committed versions.
-
-**These should ONLY be run by a human who fully understands the consequences.** Do not:
-- Dispatch the release workflow or run `publish.sh` under any circumstances (a real publish)
-- Suggest triggering a release unless the user explicitly asks about the release process
-- Include release/publish in automated workflows or scripts
-
-If the user needs to make a release, explain the process (`docs/development.md` → *Releasing*;
-recovery in `docs/release_recovery.md`) but let them run the scripts themselves.
+Do not update repositories that consume a package you changed; their scheduled refresh does
+that. The one exception: if your change needs a newer release of another of our packages,
+raise that package's floor here. Do not pin a `habemus-papadum-*` or `@habemus-papadum/*`
+package to an exact version without a reason on the same line or in `[tool.ship.pins]`.
+Never commit a `path` or `editable` entry in `[tool.uv.sources]`, or a `link:`/`file:`
+dependency (`pnpm link` writes one). Run `uv run ship deps check` before you finish.
 
 ## Development Commands
 
@@ -45,7 +43,7 @@ recovery in `docs/release_recovery.md`) but let them run the scripts themselves.
 ```
 
 **Important for Development**:
-- Use `uv sync --frozen` to ensure the lockfile is used without modification, maintaining reproducible builds
+- Plain `uv sync` and `uv run` keep the locked versions; the lockfile changes only when a command is asked to change it (`uv add`, `uv remove`, `ship deps refresh`). CI uses `--locked`.
 - Re-run `./scripts/setup.sh` whenever dependencies change
 
 ### Testing
@@ -90,10 +88,14 @@ uv run mkdocs build
 
 **Important**: After making any changes to demo notebooks (files in `docs/demos/*.ipynb`), you MUST run `./scripts/test_notebooks.sh` to verify the notebook executes without errors. Do not consider notebook changes complete until this test passes.
 
-### Publishing
+### Releasing
 ```bash
-# Build and publish to PyPI (requires credentials)
-./scripts/publish.sh
+# Plan a release (operators run the real one through the release workflow)
+uv run ship release habemus-papadum-rfb --bump minor --dry-run
+uv run ship release @habemus-papadum/rfb-react --bump patch --dry-run
+
+# Check the release policy: development links, lockfiles, pins, version markers
+uv run ship deps check
 ```
 
 
@@ -112,7 +114,7 @@ uv run mkdocs build
 ### Key Constraints
 - **Python Version**: Requires Python 3.12+
 - **Dependency Management**: Uses UV exclusively; uv.lock is committed
-- **Build System**: Uses Hatch/Hatchling for building distributions
+- **Build System**: Hatchling builds `habemus-papadum-rfb` (scikit-build-core builds the native members); `ship` runs the build at release time
 - **Documentation Style**: NumPy docstring style (see mkdocs.yml)
 
 ### Code Standards
@@ -163,24 +165,24 @@ The project uses GitHub Actions for CI (`.github/workflows/ci.yml`):
 
 
 ### Documentation Deployment
-Documentation is deployed to GitHub Pages (`.github/workflows/docs.yml`):
-- Triggered when a GitHub release is published
-- Can also be triggered manually via workflow_dispatch
-- Uses `./scripts/setup.sh` to ensure widgets are built before running `mkdocs build`
+Documentation is deployed to GitHub Pages (`.github/workflows/docs.yml`) on every push to
+`main`, or by hand via workflow_dispatch. It uses `./scripts/setup.sh` so the widgets are
+built before `mkdocs build`.
 
 ### Release Process
-Releasing is a single CI workflow — `.github/workflows/release.yml`, a `workflow_dispatch` a
-HUMAN runs from the Actions UI (inputs: `bump` = patch/minor/major, `skip_ci_check`, `dry_run`). It
-does **not** re-run tests — it trusts CI. In one run it:
-1. Requires the commit's `ci.yml` run (Linux tests + widgets) to be green — waiting out an
-   in-progress run; `skip_ci_check` overrides the gate
-2. Computes the release version = `bump(last vX.Y.Z tag, bump)` — the size is decided **at
-   release**, against the last real release (tag-as-truth), never guessed a release ahead
-3. Writes the version across every file, commits, tags `vX.Y.Z`, pushes
-4. Builds the wheel matrix (rfb + native nvenc/vtenc) from the tag
-5. Publishes npm then PyPI (token secrets — see the trusted-publishing migration proposal)
-6. Cuts the GitHub release and returns `main` to the `X.Y.Z+dev` working marker
+Releases run from the `release` workflow (`.github/workflows/release.yml`), which calls the
+reusable workflow in `habemus-papadum/pdum_ship`. It waits for `ci.yml` to pass on the same
+commit, then runs `ship release <package>`:
+1. Reads the package's last tag `<package>-v<version>` and applies the requested bump
+2. Writes the release version into that package's manifest (and re-locks for a Python package)
+3. Runs the package's `before-build` commands (for `habemus-papadum-rfb`: the anywidget bundle
+   and the demo SPA), builds, runs the tests, publishes with `PYPI_API_TOKEN` / `NPM_TOKEN`
+4. Commits, tags `<package>-v<version>`, pushes commit and tag together
+5. Creates the GitHub release
+6. Writes `<version>+dev` back and pushes
 
-Between releases the working tree carries `X.Y.Z+dev` (last release + a WIP flag; a PEP 440 local
-version PyPI refuses to upload). `dry_run` computes the version and shows the diff without
-committing or publishing. Full detail: docs/development.md.
+`habemus-papadum-nvenc` and `habemus-papadum-vtenc` are `build = false`: steps 3 and 5
+upload nothing, and `release.yml`'s `build-wheels` job dispatches the package's wheel
+workflow for the new tag, which builds the platform wheels, publishes them to PyPI and
+attaches them to the release. Versions follow `X.Y.Z+dev` → `X.Y.Z` (tagged) → `X.Y.Z+dev`.
+Full detail: docs/development.md; recovery: docs/release_recovery.md.

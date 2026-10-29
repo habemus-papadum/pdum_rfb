@@ -34,8 +34,8 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@habemus-papadum/rfb-widgets": "workspace:^",
-    "svelte": "^5.0.0"
+    "@habemus-papadum/rfb-widgets": "workspace:>=0.3.0",
+    "svelte": ">=5.0.0"
   },
   "devDependencies": {
     "@habemus-papadum/rfb-widgets": "workspace:*",

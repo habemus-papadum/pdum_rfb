@@ -109,7 +109,7 @@ hub's `websockets` listener is never started, so everything shares one origin. T
 surface: `GET /demo/capabilities` + `/demo/state`; `POST /demo/streams` (+ `DELETE
 /demo/streams/{name}`); `POST /demo/streams/{name}/{scene,backend,quality,params}`. The SPA
 is a small Vite project (`widgets/packages/demo-app/`) built to a **git-ignored** artifact
-(force-included into the wheel by `hatch_build.py`; the release CI builds it first):
+(hatch's `artifacts` list lets it into the wheel; ship builds it first, as a `before-build` command):
 
 ```bash
 pnpm -C widgets build:demo     # -> src/pdum/rfb/static/demo/ (build artifact, ships in the wheel)

@@ -26,7 +26,7 @@ pdum_rfb/
 │   ├── tests/                Vitest unit tests + Playwright e2e
 │   └── pnpm-lock.yaml        the widgets lockfile (committed)
 ├── docs/                     this MkDocs site
-├── scripts/                  setup / build / test / publish / release automation
+├── scripts/                  setup / build / test automation (releases: ship, see below)
 └── .github/workflows/        CI (see below)
 ```
 
@@ -60,7 +60,7 @@ The project uses **uv exclusively**. Key rules:
 
   | Group | Pulls | For |
   | --- | --- | --- |
-  | `dev` (default) | pytest, ruff, mkdocs(+plugins), hatch, av, pre-commit, … | everyday dev |
+  | `dev` (default) | pytest, ruff, mkdocs(+plugins), av, pre-commit, ship, … | everyday dev |
   | `viz` (default) | rendercanvas, wgpu, pygfx | exercise the rendercanvas backend / `examples/rendercanvas_pygfx.py` |
   | `gpu-dev` | CuPy | GPU tests/benchmarks on a machine with a device |
 
@@ -78,9 +78,9 @@ The project uses **uv exclusively**. Key rules:
   env var (`auto` default / `force` / `0`) controls it.
 - **Lint/format:** ruff, `target-version = py314`, line length 120, rules `E/F/W/I`.
   Docstrings are **NumPy style** (mkdocstrings renders the API reference from them).
-- **Versions are human-managed.** Never hand-edit version numbers; the `release` workflow
-  bumps them in lockstep (via `scripts/_versioning.py`). Between releases the tree carries an
-  `X.Y.Z+dev` marker (see [Releasing](#releasing-the-pipeline)).
+- **Versions belong to ship.** Never hand-edit a version field; `ship release` writes it on the
+  release commit, one package at a time. Between releases each manifest carries
+  `<last release>+dev` (see [Releasing](#releasing)).
 
 ## Browser client: pnpm conventions
 
@@ -108,9 +108,9 @@ pnpm e2e:demo     # Playwright e2e that boots `pdum-rfb demo` and drives the web
 * **User-facing:** `pdum-rfb demo` is a single self-contained web app (see
   [the demo page](demo.md)); end users run it with `uvx` — no clone, no Node. Its SPA
   lives in `widgets/packages/demo-app/`. Its built SPA is **not committed** — it's a
-  git-ignored build artifact (`pnpm build:demo`) force-included into the wheel by
-  `hatch_build.py` when present. The release CI builds it before packaging, and
-  `scripts/setup.sh` builds it for dev; a checkout without it serves a "build me"
+  git-ignored build artifact (`pnpm build:demo`) that the hatch `artifacts` list lets into
+  the wheel when present. ship builds it before packaging the wheel (the package's
+  `before-build` commands), and `scripts/setup.sh` builds it for dev; a checkout without it serves a "build me"
   placeholder (or use `pdum-rfb demo --dev` for live reload). No need to rebuild + commit.
 * **Contributor-only:** the simple **two-process** demo — `python -m pdum.rfb.server`
   (streams a deterministic pattern on a bare WebSocket) plus `pnpm dev` (a minimal Vite
@@ -135,19 +135,20 @@ package works with any bundler — or none. The protocol packer (Python) and unp
 | --- | --- |
 | `scripts/setup.sh` | Idempotent bootstrap: `uv sync --frozen` (auto-adds the `gpu-nvenc-sdk` extra on Linux+GPU+CUDA; `RFB_GPU=auto`/`force`/`0`), `pnpm install` + Playwright Chromium, pre-commit hooks. Detects but never installs uv/Node/pnpm. Rerun after pulling dependency changes. |
 | `scripts/build.sh` | `uv sync` + build the widget bundle. |
-| `scripts/pre-release.sh` | Clean-tree check, ruff, pytest, `mkdocs build` (a local pre-flight; the release itself is CI-only). |
-| `scripts/_versioning.py` | Shared, stdlib-only version logic (discover/read/bump/write + extras repin + tag-as-truth + `+dev`). The `release` workflow drives it via its CLI (`compute-release` / `set` / `latest-tag`); **not** a local release script. |
 | `scripts/test_notebooks.sh` | Execute demo notebooks (`docs/demos/*.ipynb`). Run after editing any notebook. |
 | `scripts/install-gpu.sh` | Build/install PyAV 18 (CUDA/NVENC) for the zero-copy path until PyAV 18 ships on PyPI. |
 | `scripts/build-cuda-av-wheel.sh` | Build a self-contained PyAV-18 (CUDA) wheel. |
-| `packages/nvenc/build-wheel.sh` · `packages/vtenc/build-wheel.sh` | Build the native `habemus-papadum-nvenc` (auditwheel) / `habemus-papadum-vtenc` (delocate) wheel(s). |
-| `scripts/publish.sh` | **Break-glass fallback**: token-based publish of the three PyPI packages from a maintainer box. Not the primary path — the `release` workflow is. |
+| `packages/nvenc/build-wheel.sh` · `packages/vtenc/build-wheel.sh` | Build the native `habemus-papadum-nvenc` (auditwheel) / `habemus-papadum-vtenc` (delocate) wheel(s); the `build-*-wheel.yml` workflows call them. |
+
+There is no release or publish script: `ship` (installed in the dev group) releases, and the
+`release` workflow runs it.
 
 ## GitHub CI
 
 Workflows live in `.github/workflows/`. Releasing is **entirely CI** — the `release.yml`
-`workflow_dispatch` (below) is the single publish path; there is no local release script and no
-tag trigger. The `build-*` workflows also run standalone as build-only validation artifacts.
+`workflow_dispatch` (below) is the publish path for every package; nothing publishes from a
+developer machine. The `build-*-wheel` workflows build the two native packages from their
+release tags and otherwise run standalone as build-only validation.
 
 > **⚠️ Temporary (2026):** PyPI + npm publish with **token secrets** (`PYPI_API_TOKEN`,
 > `NPM_TOKEN`), not trusted publishing (OIDC) — the maintainer is locked out of the PyPI account
@@ -156,98 +157,82 @@ tag trigger. The `build-*` workflows also run standalone as build-only validatio
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | push / PR to `main` (+ manual) | **The per-commit gate the release requires green.** **test** (Python 3.14): `setup.sh`, ruff, pytest + coverage (incl. the lavapipe `rendercanvas` render test), `mkdocs build`, demo notebooks. **pytest-versions**: re-runs pytest on 3.12 + 3.13 (enforces `requires-python`). **widgets**: pnpm typecheck, Vitest, Playwright e2e. |
-| `release.yml` | **manual** (`workflow_dispatch`: `bump`/`skip_ci_check`/`dry_run`) | The whole release pipeline: **require the commit's `ci.yml` green (gate)** → compute version from the last tag → bump+tag+push → build the wheel matrix (`build-rfb` + reusable nvenc/vtenc) from the tag → publish npm (provenance) then PyPI (token, `skip-existing`) → GitHub Release → return `main` to `+dev`. Run by a human; no tag trigger. |
-| `docs.yml` | on release published / push `main` / manual | Build the MkDocs site and deploy to GitHub Pages. |
+| `ci.yml` | push / PR to `main` (+ manual) | **The per-commit gate the release requires green.** **test** (Python 3.14): `setup.sh`, ruff, pytest + coverage (incl. the lavapipe `rendercanvas` render test), `mkdocs build`, demo notebooks. **pytest-versions**: re-runs pytest on 3.12 + 3.13 (enforces `requires-python`). **widgets**: `ship deps check`, pnpm typecheck, Vitest, Playwright e2e. |
+| `release.yml` | **manual** (`workflow_dispatch`: `package`/`bump`/`dry_run`/`skip_ci_check`/`skip_tests`) | Calls ship's reusable workflow: **require the commit's `ci.yml` green** → `ship release <package>` (version from the package's last tag + bump → `before-build` → build → tests → publish → commit + tag `<package>-v<version>` + push → GitHub Release → `<version>+dev` back). For `habemus-papadum-nvenc`/`-vtenc` a second job dispatches the package's `build-*-wheel` workflow for the new tag. |
+| `docs.yml` | push `main` / manual | Build the MkDocs site and deploy to GitHub Pages. |
 | `gpu-tests.yml` | weekly (Mon) / manual | The **only** place GPU paths run in CI. Needs a self-hosted runner labelled `gpu`; runs `tests/test_gpu.py`, `pdum-rfb doctor`, and the benchmark. Stays queued if no such runner exists. |
 | `macos-probe.yml` | weekly (Mon) / manual | Informational, non-blocking macOS **VideoToolbox** capability probe (arm64 runner) — off the per-push path (macOS minutes bill 10×). The MLX/Metal tests were dropped: hosted runners don't expose a working Metal GPU, so those only ever stalled. |
-| `build-nvenc-sdk-wheel.yml` · `build-vtenc-wheel.yml` | manual / `workflow_call` | Build the native `habemus-papadum-nvenc` (manylinux_2_28 + CUDA container) / `habemus-papadum-vtenc` (macOS arm64) wheels across CPython versions. Reused by `release.yml`; standalone runs are build-only (no GPU/Mac-runtime needed to *build*). |
+| `build-nvenc-sdk-wheel.yml` · `build-vtenc-wheel.yml` | tag `habemus-papadum-nvenc-v*` / `habemus-papadum-vtenc-v*`, manual (`ref`), `workflow_call` | Build the native `habemus-papadum-nvenc` (manylinux_2_28 + CUDA container) / `habemus-papadum-vtenc` (macOS arm64) wheels across CPython versions. When the ref is the package's release tag, a `publish` job uploads them to PyPI (`uv publish`, `PYPI_API_TOKEN`) and attaches them to the GitHub release ship created. Other runs are build-only (no GPU/Mac-runtime needed to *build*). |
 | `build-pyav-cuda-wheel.yml` | manual / tag `gpu-av18-*` | Build the self-contained PyAV-18 (CUDA/NVENC) wheel; on a tag it attaches the wheels to a GitHub Release (LGPL ffmpeg — kept off PyPI). |
 
 Normal CI runs **GPU-less**. The native wheel builds are expensive and **not** triggered
 on pushes to `main`.
 
-## Releasing (the pipeline)
+## Releasing
 
-Releasing is a **single CI workflow** — `release.yml`, a `workflow_dispatch` a maintainer runs
-from the GitHub Actions UI (**Actions → release → Run workflow**) or `gh workflow run
-release.yml -f bump=minor`. There is no local release script and no `v*` tag trigger, so the old
-"local publish *and* CI publish the same version" double-publish is impossible.
+Releases run with [ship](https://github.com/habemus-papadum/pdum_ship) (`habemus-papadum-ship`,
+installed in the dev group) from the `release` workflow — `gh workflow run release.yml
+-f package=<name> -f bump=minor -f dry_run=true`, then the same with `dry_run=false`, or
+**Actions → release → Run workflow**. Nothing publishes from a developer machine.
 
-This solves the cross-platform reality — no single machine can build all three PyPI wheels
-(`habemus-papadum-rfb` is pure Python; `-nvenc` is Linux+CUDA only; `-vtenc` is macOS/arm64
-only) — by having CI build the matrix. Inputs:
+ship's model, in short:
 
-- **`bump`** = `patch` / `minor` / `major` — the release **size relative to the last release**.
-- **`skip_ci_check`** (default false) — override the gate and release even if the commit's CI
-  isn't green (or hasn't run). Normally leave it off.
-- **`dry_run`** (default false) — compute the version and print the file diff, then **stop**
-  (no commit, tag, build, or publish). A rehearsal.
+- **One version per package.** This repository publishes seven packages, each with its own
+  version in its own manifest and its own tag series `<package>-v<version>`: the PyPI
+  distributions `habemus-papadum-rfb` (`pyproject.toml`), `habemus-papadum-nvenc` and
+  `habemus-papadum-vtenc` (`packages/*/pyproject.toml`), and the npm packages
+  `@habemus-papadum/rfb-widgets` (`widgets/package.json`), `rfb-react`, `rfb-svelte` and
+  `rfb-solid` (`widgets/packages/*/package.json`; tags use the unscoped name, `rfb-react-v0.3.1`).
+  The private workspace members (`rfb-ui`, `worker-observability`, `demo-app`) carry `0.0.0` and
+  are never released.
+- **The tag is the truth.** The next version is the package's last tag plus the `bump` you
+  choose at release time; the manifest is never trusted for this.
+- **`<last release>+dev` between releases.** A PEP 440 local version / semver build metadata
+  that PyPI refuses and ship refuses to publish, so a development build cannot ship by accident.
+- **Floors on our own packages.** `habemus-papadum-rfb`'s native extras declare
+  `habemus-papadum-nvenc>=0.3.0` / `habemus-papadum-vtenc>=0.3.0`; the wrappers declare the
+  core as a peer, `workspace:>=0.3.0`, published as `>=0.3.0`. An exact pin needs a reason on
+  the same line or in `[tool.ship.pins]`.
 
-The release **does not re-run tests** — it trusts CI. One dispatch runs, in order:
+Inputs: **`package`** (npm packages by their scoped name), **`bump`** = `patch` / `minor` /
+`major`, **`dry_run`** (default **true**: plan and print, write nothing), **`skip_ci_check`**
+and **`skip_tests`** (normally off). One dispatch:
 
-1. **`gate`** (unless `skip_ci_check`) — require the commit's `ci.yml` run (Linux `test` +
-   `pytest-versions` + `widgets`) to be green; **waits out** an in-progress run (up to 30 min),
-   so dispatching right after a push is fine. A red or missing CI run blocks the release.
-2. **`prepare`** — `version = bump(last vX.Y.Z tag, bump)` (tag-as-truth), writes it across all
-   10 version files + repins the native extras (lockstep, `scripts/_versioning.py`), `uv lock`,
-   commits, tags `vX.Y.Z`, and pushes the commit + tag to `main`.
-3. **`build-rfb` / `build-nvenc` / `build-vtenc`** — build `rfb` (sdist+wheel), `nvenc`
-   (manylinux), `vtenc` (macOS arm64) **from the freshly-pushed tag**, in parallel.
-4. **`npm-publish`** — core + wrappers, with provenance — *first*, so a failure never
-   half-publishes the immutable PyPI.
-5. **`pypi-publish`** — all three, one call, `skip-existing` (idempotent).
-6. **`github-release`** (→ `docs.yml` redeploys Pages) and **`finalize`** — set `main` back to
-   the `X.Y.Z+dev` working marker.
+1. waits for the commit's `ci.yml` run to succeed (`skip_ci_check` overrides);
+2. `ship release <package> --bump <bump>`: reads the package's last tag, writes the release
+   version (`uv version --package` for Python, so `uv.lock` follows; `package.json` in place for
+   npm), runs the package's `before-build` commands — for `habemus-papadum-rfb` the anywidget
+   bundle and the demo SPA, which hatch packs into the wheel — builds, runs the
+   tests, publishes (`uv publish` / `pnpm publish --provenance` with `PYPI_API_TOKEN` /
+   `NPM_TOKEN`), commits, tags `<package>-v<version>`, pushes commit and tag together, creates
+   the GitHub release, then writes `<version>+dev` back and pushes;
+3. for `habemus-papadum-nvenc` / `-vtenc` (`build = false` in `[tool.ship.packages]`, because
+   the Linux release runner cannot build a CUDA or a VideoToolbox wheel) step 2 builds and
+   uploads nothing, and a `build-wheels` job dispatches `build-nvenc-sdk-wheel.yml` /
+   `build-vtenc-wheel.yml` with `ref=<the new tag>`; that workflow builds the wheels, publishes
+   them to PyPI and attaches them to the GitHub release.
 
-If a step fails, see **[Release recovery](release_recovery.md)** — publishing is idempotent
-(`skip-existing`); fix and re-dispatch, or finish the remaining pieces by hand.
+Locally, `uv run ship release habemus-papadum-rfb --bump minor --dry-run` prints the plan;
+`uv run ship packages` lists the packages with their manifest versions and last tags;
+`uv run ship changed` lists the packages with commits since their last tag; `uv run ship deps
+check` reports development links, stale lockfiles, unreasoned pins and manifests that do not
+say `<last tag>+dev` (CI runs it in the `widgets` job, the `ship-check` pre-commit hook runs
+its fast subset). Configuration is `[tool.ship]` in `pyproject.toml`: `ours`, `shared-paths`,
+`ignore-subjects`, `pnpm-root = "widgets"` (the pnpm workspace is nested), and the per-package
+`before-build` / `build = false` tables.
 
-### Versioning model — tag-as-truth + `+dev`
-
-The **last release** is the highest `vX.Y.Z` git tag. The `bump` (patch/minor/major) is applied
-**at release time** against that tag — so you decide the size of a release *when you cut it*,
-relative to what actually shipped, never pre-committing a version a release ahead. Between
-releases the working tree carries an **`X.Y.Z+dev`** marker (the last release + a WIP flag): a
-PEP 440 *local* version that sorts after `X.Y.Z`, that pnpm accepts, and that **PyPI refuses to
-upload** — an accidental-publish guard. The release writes the clean `X.Y.Z` before building
-(artifacts are never `+dev`), then `finalize` returns `main` to `<new>+dev`.
-
-- **Lockstep** — every published package shares one version; `_versioning.py` enforces
-  agreement across all 10 files.
-- **npm `wrapper → core`** stays a `^` **peer** range (correct for adapter peer deps;
-  exact-pinned peers cause "unmet peer" conflicts).
-- **Python native extras** (`rfb[gpu-nvenc-sdk] → nvenc`, `rfb[mac-vt] → vtenc`) track the
-  shared minor as **`~=X.Y.0`**, rewritten on every version write (marker-preserving), so
-  `rfb X.Y.*` resolves a matching native `X.Y.*` while patches float.
-- **Revisit at 1.0**: when native-package churn or diverging cadences bite, consider *grouped*
-  (core+client lockstep; nvenc/vtenc independent) and/or a tool like Changesets / release-please.
+If a step fails, see **[Release recovery](release_recovery.md)**.
 
 ### Publishing auth (token secrets, temporary)
 
 CI publishes with two repository secrets — **`PYPI_API_TOKEN`** and **`NPM_TOKEN`** — while the
-maintainer is locked out of PyPI 2FA. The `npm-publish` job keeps `id-token: write` for
+maintainer is locked out of PyPI 2FA. The release caller grants `id-token: write` for
 **provenance** only (independent of the token auth); the four published `package.json`s carry a
 `repository` field, required for provenance. The intended end state is OIDC **trusted
-publishing** (no long-lived tokens) — the full migration runbook (register PyPI publishers, the
+publishing** (no long-lived tokens) — the migration runbook (register PyPI publishers, the
 `pypi` environment, `npm trust`, rotate/revoke) is
-[`proposals/active/trusted_publishing_migration.md`](proposals/active/trusted_publishing_migration.md).
+[`proposals/active/trusted_publishing_migration.md`](proposals/active/trusted_publishing_migration.md);
+its `release.yml` job names predate ship.
 
-### Break-glass fallback (`scripts/publish.sh` + `.env`)
-
-`scripts/publish.sh` publishes from a maintainer box with tokens in a **git-ignored `.env`** —
-use only for out-of-band publishing (a hotfix wheel, a platform CI can't cover, or CI down). Off-
-platform native packages auto-skip; stitch in CI-built wheels via `NVENC_WHEEL_DIR` /
-`VTENC_WHEEL_DIR`, or `SKIP_NVENC=1` / `SKIP_VTENC=1`.
-
-```bash
-# .env  (git-ignored — never commit)
-HATCH_INDEX_USER=__token__
-HATCH_INDEX_AUTH=pypi-…        # PyPI token; hatch does NOT read ~/.pypirc
-UV_PUBLISH_TOKEN=pypi-…        # optional, for `uv publish`
-NPM_TOKEN=npm_…                # npm token (materialized into a transient npmrc at publish)
-```
-
-> **Maintainers only.** Dispatching `release.yml` publishes to PyPI/npm and creates a public
-> GitHub release; `publish.sh` publishes directly. Version numbers are human-managed — don't
-> hand-edit them; the release workflow bumps them.
+> **Maintainers only.** Dispatching `release.yml` with `dry_run=false` publishes to PyPI/npm
+> and creates a public GitHub release. Never hand-edit a version field; ship writes it.

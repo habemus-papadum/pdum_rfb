@@ -1,16 +1,17 @@
 # habemus-papadum-nvenc (import: pdum.nvenc) — GPU NV12 -> H.264/HEVC Annex B via
 # NVIDIA's Video Codec SDK encoder, no PyAV. A workspace member of pdum_rfb.
 #
-# Build/publish via scripts/publish.sh (which runs build-wheel.sh + auditwheel). A
-# build needs the CUDA toolkit; the wheel needs only the host NVIDIA driver.
+# Built and published by .github/workflows/build-nvenc-sdk-wheel.yml (build-wheel.sh +
+# auditwheel) from the tag ship creates. A build needs the CUDA toolkit; the wheel needs
+# only the host NVIDIA driver.
 [build-system]
 requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "habemus-papadum-nvenc"
-# Kept in lockstep with habemus-papadum-rfb by the release workflow (scripts/_versioning.py);
-# between releases the version carries a "+dev" marker. Do not hand-edit.
+# Released by ship on its own tag series (habemus-papadum-nvenc-v<version>); between
+# releases the version carries a "+dev" marker. Do not hand-edit.
 version = "0.3.0+dev"
 description = "Zero-PyAV GPU H.264/HEVC encode (NVIDIA Video Codec SDK / NVENC) for pdum.rfb"
 readme = "README.md"

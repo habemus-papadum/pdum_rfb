@@ -200,30 +200,38 @@ pnpm -C widgets dev                    #                 demo at http://localhos
 ## Releasing
 
 > **Maintainers only.** Releasing publishes to PyPI/npm, pushes tags, and creates
-> public GitHub releases. Version numbers are human-managed — don't hand-edit them.
+> public GitHub releases. Never hand-edit a version field.
 
-Releasing is a **single CI workflow** — `release` (`.github/workflows/release.yml`), a
-`workflow_dispatch` a maintainer runs from the GitHub Actions UI (or `gh workflow run
-release.yml -f bump=minor`). There is no local release script. In one run it:
+Releases run from the `release` GitHub Actions workflow, which calls
+[ship](https://github.com/habemus-papadum/pdum_ship). Each package is released on its
+own: the three PyPI distributions (`habemus-papadum-rfb`, `-nvenc`, `-vtenc`) and the
+four npm packages (`@habemus-papadum/rfb-widgets`, `rfb-react`, `rfb-svelte`, `rfb-solid`).
 
-1. requires the commit's CI (`ci.yml`: Linux tests + widgets) to be green — waiting out an
-   in-progress run; `skip_ci_check` overrides;
-2. computes the version = `bump(last vX.Y.Z tag, bump)` — the size (patch/minor/major) is
-   decided **at release**, against the last real release (tag-as-truth), not guessed ahead;
-3. writes it across **every** version file in lockstep (`pyproject.toml`,
-   `src/pdum/rfb/__init__.py`, `packages/*/pyproject.toml`, all `widgets` `package.json`s),
-   commits, tags `vX.Y.Z`, and builds the wheel matrix from that tag;
-4. publishes **all packages** — `habemus-papadum-rfb` + native `-nvenc`/`-vtenc` to **PyPI**
-   and `@habemus-papadum/rfb-widgets` + the framework wrappers to **npm** (with provenance);
-5. cuts a **GitHub Release** (which redeploys the docs) and returns `main` to the `X.Y.Z+dev`
-   working marker.
+```bash
+# Plan first (the default), then release for real; npm packages by their scoped name
+gh workflow run release.yml -f package=habemus-papadum-rfb -f bump=minor -f dry_run=true
+gh workflow run release.yml -f package=habemus-papadum-rfb -f bump=minor -f dry_run=false
+gh workflow run release.yml -f package=@habemus-papadum/rfb-react -f bump=patch -f dry_run=false
+```
 
-Between releases the working tree carries an `X.Y.Z+dev` marker (last release + a WIP flag).
-`dry_run` computes the version and shows the diff without committing or publishing. Publishing
-uses repository secrets (`PYPI_API_TOKEN`, `NPM_TOKEN`) — see
-[Repository & Development](https://habemus-papadum.github.io/pdum_rfb/development/#releasing-the-pipeline).
-`scripts/publish.sh` (reading a git-ignored `.env`) remains a token-based manual break-glass
-fallback for out-of-band publishing.
+Each release is tagged `<package>-v<version>` (`habemus-papadum-rfb-v0.4.0`,
+`rfb-react-v0.3.1`) on the commit it was built from; between releases the manifest
+carries `<last release>+dev`. ship writes the release version, builds (for
+`habemus-papadum-rfb` it first builds the anywidget bundle and the demo SPA that ride in
+the wheel), tests, publishes, tags, creates the GitHub release and restores the
+development marker. `habemus-papadum-nvenc` and `-vtenc` are platform wheels the release
+runner cannot build: ship versions and tags them, and `build-nvenc-sdk-wheel.yml` /
+`build-vtenc-wheel.yml` build and publish the wheels from the tag. To see a plan locally:
+
+```bash
+uv run ship release habemus-papadum-rfb --bump minor --dry-run
+```
+
+Publishing uses the repository secrets `PYPI_API_TOKEN` and `NPM_TOKEN`. Details:
+[Repository & Development](https://habemus-papadum.github.io/pdum_rfb/development/#releasing)
+and [Release recovery](https://habemus-papadum.github.io/pdum_rfb/release_recovery/).
+The `ship-check` pre-commit hook runs `ship deps check --hook` from the locked
+environment; `./scripts/setup.sh` installs the hooks with `uv run pre-commit install`.
 
 ## License
 

@@ -1,80 +1,56 @@
 # Release recovery
 
-What to do when a release goes wrong — a CI build fails, a publish half-completes, a tag needs
-re-running. Companion to [Releasing](development.md#releasing-the-pipeline).
+What to do when a release goes wrong — a publish fails, a wheel build fails, a step after the
+publish fails. Companion to [Releasing](development.md#releasing).
 
 ## The one rule
 
 **Published versions are immutable.** Once a file exists on PyPI or a version exists on npm,
 you can *never* overwrite it. So every recovery is one of two moves:
 
-- **Retry the same version** — safe, and only *fills gaps*. Requires the artifacts to be
-  byte-identical (they are: same tag → same commit → same build). This is what `skip-existing`
-  on PyPI and re-pushing the tag are for.
-- **Bump to a new version** — required whenever the *content* must change. You cannot "fix and
-  re-publish `0.3.0`"; you publish `0.3.1`.
+- **Finish the same version** — fill the gaps for a version whose tag exists.
+- **Release a new version** — required whenever the *content* must change. You cannot "fix and
+  re-publish `0.3.1`"; you release `0.3.2`.
 
-## Retrying: re-run vs re-dispatch
+## What ship does on failure
 
-The tag is cut **by CI** (the `prepare` job), not pushed by hand — so recovery is about the
-*run*, not the tag:
+`ship release` runs, in order: write the version → `before-build` → build → tests → publish →
+commit + tag + push → GitHub release → `<version>+dev` back. **Any failure before the publish is
+reverted**: the working tree is restored, nothing was pushed, no tag exists. Fix the cause and
+dispatch again; ship computes the same version from the unchanged last tag.
 
-- **Retry the same version → "Re-run failed jobs"** on the failed run (Actions → the run →
-  *Re-run failed jobs*). Same tag → same commit → byte-identical artifacts; PyPI `skip-existing`
-  fills whatever didn't upload and the GitHub Release step is idempotent. This is the move for a
-  **transient** failure (a flaky network, a secret you just added).
-- **A fresh dispatch always cuts a NEW version.** `prepare` computes `bump(last tag, bump)`, and
-  the failed run already pushed `vX.Y.Z`, so re-dispatching yields `vX.Y.(Z+1)` (or higher) — it
-  will **not** retry `X.Y.Z`. Use a fresh dispatch only when you need to **change shipped
-  content** (immutability rule): you cannot fix and re-publish `0.3.0`; you release `0.3.1`.
+**A failure after the publish is not reverted** (the registry already has the version). ship
+prints the remaining commands — the commit, the tag, the push, the release — so they can be run
+by hand from a checkout of `main`. Because the publish happens *before* the tag is pushed, the
+tag lagging the registry is the one state to watch for: `ship deps check` and the next release
+both read tags, so finish the tag and push before anything else.
 
-> A `git push` can't re-trigger anything (there is no tag trigger) — everything is a
-> `workflow_dispatch` or a job **re-run** from the Actions UI. If `prepare` failed *before*
-> tagging, nothing was pushed: just fix and dispatch again (it computes the same version).
-
-## Why the pipeline is recoverable by design
-
-- **npm publishes *before* PyPI.** In `release.yml`, `pypi-publish` `needs` `npm-publish`, so an
-  npm failure aborts the run *before* any immutable PyPI version is burned. (npm runs in
-  parallel with the slow wheel builds, so this costs almost no wall-clock.)
-- **PyPI uses `skip-existing: true`** — re-runs never error on already-uploaded files.
-- **Build jobs gate the publish jobs** — a build break can never half-publish.
-- **The GitHub Release is gated on both publishes** — the "release" only appears once the
-  packages are actually out.
-- **The `+dev` finalize is gated on both publishes** — `main` returns to the dev marker only
-  after a real publish; if *only* `finalize` fails, the release itself already succeeded.
+Before a release, ship asks the registry that the next version does not exist yet. If it does
+(a half-finished release), finish that version rather than releasing again.
 
 ## Failure playbook
 
 | Where it failed | State | Do this |
 | --- | --- | --- |
-| **`gate`** (CI not green / not run / timed out) | Nothing done | This is a pre-flight — the commit's `ci.yml` isn't green. Fix CI and re-dispatch, wait for CI then re-dispatch, or (if you accept the risk) re-dispatch with `skip_ci_check=true`. |
-| **A build job** (`build-rfb`/`nvenc`/`vtenc`) | Nothing published | Fix the cause, then **Re-run failed jobs** (transient), or dispatch a fresh release (a code fix needs a new version). Safe — no artifacts are out. |
-| **`npm-publish`** | Maybe some npm packages out | Re-run failed jobs. Already-published packages error (npm has no `skip-existing`) — publish only the missing ones by hand: `pnpm --dir widgets --filter "@habemus-papadum/rfb-<pkg>" publish --provenance --no-git-checks`. PyPI hasn't run yet (it's gated on npm), so nothing to undo there. |
-| **`pypi-publish`** (e.g. rfb ok, nvenc failed) | Some PyPI files out (immutable) | **Re-run failed jobs.** `skip-existing` skips the uploaded files and completes the rest. **Never** rebuild-and-overwrite an existing file. |
-| **`github-release`** | Packages published, no Release | Re-run the job, or locally: `gh release create vX.Y.Z --generate-notes` (or `gh release edit vX.Y.Z` if a draft exists). |
-| **`finalize`** (the `+dev` bump) | Release is fine | Re-run the `finalize` job, or locally: `python3 scripts/_versioning.py set X.Y.Z+dev` (X.Y.Z = the release just cut) → `uv lock` → commit + push `main`. |
-| **Need to change shipped content** | Version burned | **Dispatch a fresh release** (pick the bump); `prepare` computes the next version from the last tag. Do not attempt to overwrite. Avoid `npm unpublish` (72-hour window, discouraged, breaks anyone who installed it). |
+| **CI gate** (the commit's `ci.yml` is red, missing, or timed out) | Nothing done | Fix CI and dispatch again, or dispatch with `skip_ci_check=true` if you accept the risk. |
+| **`before-build`, build, or tests** | Nothing published; tree restored | Fix the cause, dispatch again (same version). |
+| **publish** (PyPI or npm rejected the upload) | Possibly partial | A PyPI 403: `PYPI_API_TOKEN` is missing, revoked or not scoped to that project (`gh secret list`). An npm error: `NPM_TOKEN` needs write on the whole `@habemus-papadum` scope; provenance needs a public repository and `id-token: write`, which the caller grants. If nothing landed, dispatch again. If files landed, treat it as "after the publish". |
+| **after the publish** (commit, tag, push, GitHub release, `+dev` write-back) | Registry has the version; tag or release missing | Run the commands ship printed from a clean checkout of `main`; at minimum commit the version, tag `<package>-v<version>`, push commit and tag together, `gh release create <tag> --generate-notes`, then write `<version>+dev` back and push. |
+| **`build-nvenc-sdk-wheel.yml` / `build-vtenc-wheel.yml`** (a `build = false` package: ship tagged and released, the wheel build or its publish failed) | Tag and GitHub release exist; wheels missing | Fix the cause if it is the runner's, then re-run the workflow for the tag: `gh workflow run build-nvenc-sdk-wheel.yml -f ref=habemus-papadum-nvenc-v<version>` (or re-run the failed run). `uv publish --check-url` skips files PyPI already has and `gh release upload --clobber` is idempotent. **Do not release again** for a build failure; the version is cut. |
+| **`build-wheels` dispatch job in `release.yml`** did not run or failed | Tag and release exist; no wheel run | Dispatch the wheel workflow by hand with `ref=<tag>` as above. |
+| **Need to change shipped content** | Version burned | Release a new version (pick the bump). Do not attempt to overwrite. Avoid `npm unpublish` (72-hour window, discouraged, breaks anyone who installed it). |
 
-## Auth gotchas (token publishing)
+## Checking state
+
+```bash
+uv run ship packages          # manifest version and last tag per package
+uv run ship deps check        # every manifest must say <last tag>+dev
+git ls-remote --tags origin 'habemus-papadum-rfb-v*'
+gh release view habemus-papadum-nvenc-v<version>
+```
+
+## Auth notes (token publishing)
 
 CI currently publishes with **token secrets** (not OIDC — the maintainer is locked out of PyPI
-2FA; see the [migration proposal](proposals/active/trusted_publishing_migration.md)).
-
-If `pypi-publish` fails with a **403 / auth** error, the `PYPI_API_TOKEN` secret is missing,
-revoked, or not scoped to that project — check `gh secret list` and that the token covers all
-three projects. (Once trusted publishing is restored, an **OIDC** error there instead means the
-publisher isn't registered — add it per the migration proposal, then re-run.)
-
-If `npm-publish` fails on **provenance** (`missing "repository" field` or an OIDC error): the
-published `package.json`s must carry a `repository` field, the repo must be public, and the job
-must have `permissions: id-token: write` — all already set; a failure here usually means a
-missing/incorrectly-scoped `NPM_TOKEN` secret (needs write on the whole `@habemus-papadum`
-scope).
-
-## Break-glass fallback
-
-If CI is unavailable, publish out-of-band from a maintainer box with `scripts/publish.sh` (see
-[Break-glass fallback](development.md#break-glass-fallback-scriptspublishsh-env)). The same
-immutability rule applies: `SKIP_*` / `*_WHEEL_DIR` to complete a partial release; bump the
-version to change content.
+2FA; see the [migration proposal](proposals/active/trusted_publishing_migration.md)). The same
+secrets serve the wheel workflows' `publish` jobs. There is no local publish path.

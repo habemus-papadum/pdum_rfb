@@ -2,8 +2,8 @@
 #
 # build-wheel.sh — build habemus-papadum-nvenc (import: pdum.nvenc) into
 # self-contained, repaired manylinux wheels. Build mechanism only; publishing to
-# PyPI is done by scripts/publish.sh (which calls this). Also used by CI to produce
-# build artifacts.
+# PyPI is done by .github/workflows/build-nvenc-sdk-wheel.yml (which calls this) from
+# the release tag ship creates. Standalone runs produce build artifacts only.
 #
 # How it works:
 #   1. scikit-build-core drives CMake (FetchContent pulls pybind11 v3.0.4, and NVTX
@@ -55,4 +55,4 @@ done
 echo
 say "wheels written to: $OUT"
 ls -la "$OUT"/*.whl 2>/dev/null || true
-say "publish with: scripts/publish.sh   (do not publish wheels straight from CI)"
+say "published by the build-*-wheel workflow from a release tag (ship release <package>)"

@@ -16,6 +16,7 @@ The PyAV-dependent H.264 symbols (``H264CpuEncoder``, ``NvencCpuEncoder``,
 
 from __future__ import annotations
 
+from importlib.metadata import version as _dist_version
 from typing import TYPE_CHECKING
 
 from . import gpu, metal
@@ -46,7 +47,7 @@ from .types import (
     RawFrame,
 )
 
-__version__ = "0.3.0+dev"
+__version__ = _dist_version("habemus-papadum-rfb")
 
 __all__ = [
     "__version__",

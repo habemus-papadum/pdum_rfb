@@ -122,9 +122,9 @@ src/pdum/rfb/
                   widgets/anywidget/ via `pnpm -C widgets build:anywidget`) NOR demo/ (the
                   `pdum-rfb demo` SPA, built from widgets/packages/demo-app/ via
                   `pnpm -C widgets build:demo`) is committed — both are git-ignored build
-                  artifacts force-included into the wheel by hatch_build.py (each only when
-                  present); the release CI builds both first (and re-inspects the wheel for
-                  them), and setup.sh builds both for dev. Both ship in the wheel; .map
+                  artifacts the hatch `artifacts` list lets into the sdist and wheel (each only
+                  when present); ship builds both first (the package's `before-build` commands)
+                  and setup.sh builds both for dev. Both ship in the wheel; .map
                   gitignored. Missing widget.js → the widget renders its fallback cell
                   (notebook._MISSING_BUNDLE_ESM); missing demo/ → `pdum-rfb demo` serves a placeholder
   testing.py      SyntheticFrameSource, FakeWebSocket/FakeEncoder, NAL/decode helpers,
@@ -175,7 +175,8 @@ widgets/                    pnpm workspace root = core pkg @habemus-papadum/rfb-
                               artifact, force-included into the wheel; not committed). Not published.
   # Two tiers per wrapper: headless primitive (no CSS) + batteries <RemoteFramebuffer>
   # (opt-in styles.css, themeable via CSS vars + slots/render-props). Each peer-deps the
-  # core; build externalizes framework+core; the release workflow version-syncs all 4 npm packages.
+  # core (peer, `workspace:>=<floor>`); build externalizes framework+core; each of the 4 public
+  # npm packages has its own version and tag series (ship).
 
 packages/nvenc/             habemus-papadum-nvenc (import pdum.nvenc) — uv workspace member
   src/cpp/nvenc_ext.cpp     OURS: thin pybind11 binding over NVIDIA NvEncoderCuda (+ NVTX)
@@ -190,10 +191,11 @@ package), members = `packages/*`. `pdum` is a **PEP 420 namespace** (no
 `pdum.rfb` and `habemus-papadum-nvenc` contributes `pdum.nvenc` without conflict. The
 nvenc package is **native** (scikit-build-core + auditwheel, needs a CUDA toolkit to
 build) and is only built when its `gpu-nvenc-sdk` extra is requested — default
-`uv sync` (incl. CI) never builds it. Publishing runs **from CI**
-(`.github/workflows/release.yml`, triggered by a `vX.Y.Z` tag); `scripts/publish.sh`
-(rfb via hatch; nvenc via auditwheel'd wheels through the same `hatch publish`) is the
-manual break-glass fallback.
+`uv sync` (incl. CI) never builds it. Releases run **from CI** through ship
+(`.github/workflows/release.yml`, one package per run, tagged `<package>-v<version>`);
+the native members are `build = false`, so ship tags them and
+`build-nvenc-sdk-wheel.yml` / `build-vtenc-wheel.yml` build and publish the wheels from
+the tag. There is no local publish script.
 
 ### Wire protocol
 
@@ -318,19 +320,21 @@ resolution as an adaptive lever, and AV1/HEVC.
 
 ## Hard rules (from AGENTS.md — do not violate)
 
-- **NEVER modify version numbers** — humans manage them. Between releases the working tree
-  carries an `X.Y.Z+dev` marker (last release + WIP flag); the release workflow rewrites all
-  version files + the `~=X.Y.0` native-extra pins via `scripts/_versioning.py`. Don't hand-edit
-  versions or hand-run `_versioning.py set`. Flag if you think a release is needed.
-- **NEVER trigger a release, and never publish** — releasing is one `workflow_dispatch`,
-  `.github/workflows/release.yml` (bump chosen at release vs. the last `vX.Y.Z` tag; builds +
-  publishes to PyPI+npm from CI with token secrets). `./scripts/publish.sh` is a token-based
-  manual break-glass fallback. Humans only. Recovery when a release fails:
-  `docs/release_recovery.md`.
+- **Versions and releases belong to ship** (habemus-papadum-ship). Each package has its own
+  version and tag series (`<package>-v<version>`); between releases the manifest says
+  `<last release>+dev`. Never edit a version field by hand; `__version__` reads the installed
+  metadata. To release, ask the operator; when they agree, run the release workflow
+  (`gh workflow run release.yml -f package=<name> -f bump=minor -f dry_run=false`, after a
+  `dry_run=true`; npm packages by their scoped name). Do not publish from this machine. Do not
+  update repositories that consume a package you changed; the one exception is raising another
+  of our packages' floor here when your change needs its newer release. No exact pin on a
+  `habemus-papadum-*` / `@habemus-papadum/*` package without a reason (same line or
+  `[tool.ship.pins]`); never commit a `path`/`editable` uv source or a `link:`/`file:` npm
+  dependency. Run `uv run ship deps check` before you finish. Recovery: `docs/release_recovery.md`.
 - After changing any demo notebook (`docs/demos/*.ipynb`), run
   `./scripts/test_notebooks.sh`.
-- Conventions: src-layout, UV exclusively (`uv.lock` committed; use
-  `uv sync --frozen`), Hatchling build, ruff (target 3.12, line length 120,
+- Conventions: src-layout, UV exclusively (`uv.lock` committed; plain `uv sync` keeps the
+  locked versions, CI uses `--locked`), Hatchling build, ruff (target 3.12, line length 120,
   rules E/F/W/I), NumPy-style docstrings.
 
 ## Docs map

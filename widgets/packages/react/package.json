@@ -31,7 +31,7 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@habemus-papadum/rfb-widgets": "workspace:^",
+    "@habemus-papadum/rfb-widgets": "workspace:>=0.3.0",
     "react": ">=18",
     "react-dom": ">=18"
   },

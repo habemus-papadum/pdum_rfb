@@ -107,6 +107,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0            # the version-marker check reads tags
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -115,12 +117,14 @@ jobs:
 
       - name: Install Python deps (for the e2e test server)
         # The e2e server doesn't render with wgpu/pygfx, so skip the heavy `viz` group.
-        run: uv sync --frozen --no-group viz
+        # --locked also asserts uv.lock is current (installs ship from the dev group).
+        run: uv sync --locked --no-group viz
 
       - name: Install pnpm
+        # The version comes from `packageManager` in widgets/package.json, the pnpm root.
         uses: pnpm/action-setup@v5
         with:
-          version: 11
+          package_json_file: widgets/package.json
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -131,6 +135,10 @@ jobs:
 
       - name: Install widget dependencies
         run: pnpm -C widgets install --frozen-lockfile
+
+      - name: Release policy check (development links, lockfiles, pins, version markers)
+        # Runs here rather than in `test` because it also checks widgets/pnpm-lock.yaml with pnpm.
+        run: uv run ship deps check
 
       - name: Build core package (framework wrappers typecheck/build against its dist)
         run: pnpm -C widgets build
@@ -150,8 +158,8 @@ jobs:
       - name: Anywidget bundle builds
         # The bundle (src/pdum/rfb/static/widget.{js,css}) is a git-ignored, on-demand build
         # artifact — NOT committed, so there's nothing to diff against. Just prove it compiles
-        # from widgets/anywidget/; the release workflow rebuilds + bundles it into the wheel and
-        # re-inspects the wheel for it.
+        # from widgets/anywidget/; ship rebuilds it (the package's `before-build` commands)
+        # before building the wheel at release.
         run: pnpm -C widgets run build:anywidget
 
       - name: Install Playwright browser

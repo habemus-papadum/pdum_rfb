@@ -2,17 +2,18 @@
 # VideoToolbox, no PyAV. The macOS counterpart of habemus-papadum-nvenc; a workspace
 # member of pdum_rfb.
 #
-# Build/publish via scripts/publish.sh (which runs build-wheel.sh + delocate). A build
-# needs only the Xcode Command Line Tools (clang + the macOS SDK frameworks); the wheel
-# needs nothing beyond macOS itself (all frameworks are system-provided).
+# Built and published by .github/workflows/build-vtenc-wheel.yml (build-wheel.sh +
+# delocate) from the tag ship creates. A build needs only the Xcode Command Line Tools
+# (clang + the macOS SDK frameworks); the wheel needs nothing beyond macOS itself (all
+# frameworks are system-provided).
 [build-system]
 requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "habemus-papadum-vtenc"
-# Kept in lockstep with habemus-papadum-rfb by the release workflow (scripts/_versioning.py);
-# between releases the version carries a "+dev" marker. Do not hand-edit.
+# Released by ship on its own tag series (habemus-papadum-vtenc-v<version>); between
+# releases the version carries a "+dev" marker. Do not hand-edit.
 version = "0.3.0+dev"
 description = "Zero-PyAV macOS H.264 encode (Apple VideoToolbox) for pdum.rfb"
 readme = "README.md"

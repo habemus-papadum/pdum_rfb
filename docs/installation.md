@@ -193,8 +193,8 @@ cheap. In the issue, paste:
 
 - **`habemus-papadum-nvenc` (SDK wheel) — on PyPI.** Its NVIDIA SDK source is MIT, so
   the wheel is clean to publish; the `[gpu-nvenc-sdk]` extra pulls it as a normal
-  dependency. Maintainers publish it (and the rfb package) with `scripts/publish.sh`;
-  CI only builds it as a validation artifact, never publishes.
+  dependency. It is released with ship (`ship release habemus-papadum-nvenc` tags it) and
+  `build-nvenc-sdk-wheel.yml` builds and publishes the wheels from that tag.
 - **PyAV 18 (`[gpu-cuda13]` route) — not on PyPI yet.** PyAV 18 itself is unreleased,
   and the CUDA-enabled build bundles **LGPL** ffmpeg, so it stays on this repo's
   **GitHub Releases**. Until PyAV 18.0 ships, use `scripts/install-gpu.sh` or a

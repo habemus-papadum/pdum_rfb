@@ -1,288 +1,82 @@
-# Release pipeline — the single, CI-driven way pdum.rfb is released (docs/development.md).
+# Releases run through ship (habemus-papadum-ship): this caller hands the inputs to the
+# reusable workflow, which waits for ci.yml on the commit, then runs `uv run ship release`.
+# Each package has its own version and tag series (`<package>-v<version>`); npm packages
+# are named by their scoped name (`@habemus-papadum/rfb-react`).
 #
-# Trigger it from the GitHub UI (Actions -> release -> Run workflow) or `gh workflow run
-# release.yml -f bump=minor`. There is NO local release script and NO tag trigger — this is the
-# only publish path, which is what makes the old local/CI double-publish impossible.
-#
-# Model (see scripts/_versioning.py):
-#   * TAG-AS-TRUTH: the last release is the highest vX.Y.Z tag. You pick `bump`
-#     (patch/minor/major) at trigger time; CI computes next = bump(last_tag, bump). The size of
-#     the release is decided against the last real release, when you release — never guessed ahead.
-#   * Between releases main carries an `X.Y.Z+dev` marker. A release writes the clean X.Y.Z,
-#     tags it, builds + publishes from that tag, then `finalize` sets main to `<new>+dev`.
-#   * PyPI + npm publish with TOKEN secrets (TEMPORARY — the maintainer is locked out of PyPI
-#     2FA; see docs/proposals/active/trusted_publishing_migration.md).
-#
-# Gate: the release does NOT re-run tests — it REQUIRES the commit's own `ci.yml` run (Linux
-# test + pytest-versions + widgets) to be green, waiting out an in-progress run. `skip_ci_check`
-# overrides it. Flow: CI-green gate -> bump+tag -> build rfb/nvenc/vtenc from the tag -> npm then
-# PyPI (npm first: fail fast on the immutable side) -> GitHub release + back-to-dev.
-# `dry_run` computes the version and prints the diff, then stops before committing/publishing.
+# habemus-papadum-nvenc and habemus-papadum-vtenc are `build = false` in [tool.ship]: ship
+# versions, tests, tags and pushes them, and build-nvenc-sdk-wheel.yml / build-vtenc-wheel.yml
+# build and publish the platform wheels from the tag. A tag pushed with the workflow token
+# does not fire another workflow's `push: tags:` trigger, so the `build-wheels` job below
+# dispatches the matching build workflow for the tag ship just created.
 name: release
-
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: Package to release (npm packages by their scoped name)
+        type: string
+        required: true
       bump:
-        description: "Release size relative to the last release tag"
+        description: patch, minor or major, applied to the last release tag
         type: choice
         options: [patch, minor, major]
         default: minor
-      skip_ci_check:
-        description: "Override: release even if the commit's CI isn't green (skip the gate)"
-        type: boolean
-        default: false
       dry_run:
-        description: "Compute the version + show the diff, but do NOT commit/tag/publish"
+        description: Plan and print; write nothing
+        type: boolean
+        default: true
+      skip_ci_check:
+        description: Release without waiting for the CI workflow
         type: boolean
         default: false
-
+      skip_tests:
+        description: Do not run the test commands before publishing
+        type: boolean
+        default: false
 permissions:
   contents: read
-
 jobs:
-  # --- gate: require the commit's CI (Linux tests + widgets) to be green ------
-  gate:
-    name: require CI green on this commit
-    if: ${{ !inputs.skip_ci_check }}
+  release:
+    uses: habemus-papadum/pdum_ship/.github/workflows/release.yml@main
+    with:
+      package: ${{ inputs.package }}
+      bump: ${{ inputs.bump }}
+      dry_run: ${{ inputs.dry_run }}
+      skip_ci_check: ${{ inputs.skip_ci_check }}
+      skip_tests: ${{ inputs.skip_tests }}
+    secrets:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    permissions:
+      contents: write
+      actions: read
+      id-token: write   # npm provenance attestations
+
+  build-wheels:
+    name: dispatch the platform wheel build for the new tag
+    needs: release
+    if: ${{ !inputs.dry_run && (inputs.package == 'habemus-papadum-nvenc' || inputs.package == 'habemus-papadum-vtenc') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # read ci.yml run status
-    steps:
-      - name: Wait for ci.yml and require success on ${{ github.sha }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          # ci.yml's per-push run is exactly {test, pytest-versions, widgets} (the macOS probe is a
-          # separate weekly workflow). None are continue-on-error, so a run-level `success` means
-          # all Linux tests + widgets are green. Wait out an in-progress run, then require success.
-          jq_row='if length>0 then (.[0] | [.status, (.conclusion // ""), .url] | @tsv) else "" end'
-          for i in $(seq 1 60); do # up to ~30 min (60 × 30s)
-            ROW=$(gh run list -w ci.yml -c "$SHA" -e push -L 1 --json status,conclusion,url --jq "$jq_row")
-            if [ -z "$ROW" ]; then echo "no ci.yml push run for $SHA yet… ($i/60)"; sleep 30; continue; fi
-            IFS=$'\t' read -r STATUS CONCL URL <<<"$ROW"
-            echo "ci.yml: status=$STATUS conclusion=${CONCL:-<pending>}  $URL"
-            if [ "$STATUS" = "completed" ]; then
-              if [ "$CONCL" = "success" ]; then echo "::notice::CI green on $SHA ✓"; exit 0; fi
-              echo "::error::ci.yml concluded '$CONCL' on $SHA — fix CI, or re-dispatch with skip_ci_check=true."
-              exit 1
-            fi
-            sleep 30
-          done
-          echo "::error::Timed out (30 min) waiting for ci.yml on $SHA. Re-dispatch when CI is green, or use skip_ci_check=true."
-          exit 1
-
-  # --- decide the version + cut the tag -------------------------------------
-  prepare:
-    name: bump + tag (last release + bump)
-    needs: [gate]
-    # Runs when the gate passed OR was skipped (skip_ci_check=true); blocks if CI wasn't green.
-    if: ${{ !cancelled() && needs.gate.result != 'failure' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # push the release commit + tag to main
-    outputs:
-      version: ${{ steps.ver.outputs.version }}
-      tag: ${{ steps.ver.outputs.tag }}
+      actions: write   # gh workflow run
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0 # need every tag for latest_release_tag()
-      - uses: astral-sh/setup-uv@v7
-      - name: Compute this release's version
-        id: ver
-        run: |
-          RELEASE=$(python3 scripts/_versioning.py compute-release "${{ inputs.bump }}")
-          LAST=$(python3 scripts/_versioning.py latest-tag)
-          echo "Last release: ${LAST:-<none>}  ->  this (${{ inputs.bump }}): $RELEASE"
-          echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
-          echo "tag=v$RELEASE" >> "$GITHUB_OUTPUT"
-      - name: Write the release version across every file
-        run: |
-          python3 scripts/_versioning.py set "${{ steps.ver.outputs.version }}"
-          uv lock
-          {
-            echo "### Release ${{ steps.ver.outputs.version }} — file changes"
-            echo '```'
-            git --no-pager diff --stat
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Dry run — stop here (no commit/tag/publish)
-        if: ${{ inputs.dry_run }}
-        run: echo "::notice::DRY RUN — computed ${{ steps.ver.outputs.version }}; nothing committed, tagged, or published."
-      - name: Commit, tag, push
-        if: ${{ !inputs.dry_run }}
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "${{ steps.ver.outputs.version }}"
-          git tag -a "${{ steps.ver.outputs.tag }}" -m "${{ steps.ver.outputs.version }}"
-          git push origin "HEAD:${GITHUB_REF_NAME}" "refs/tags/${{ steps.ver.outputs.tag }}"
-
-  # --- build the wheel matrix from the freshly-cut tag ----------------------
-  build-rfb:
-    name: build habemus-papadum-rfb (sdist + wheel)
-    needs: [prepare]
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      # Neither the anywidget bundle (widget.{js,css}) nor the `pdum-rfb demo` SPA is committed —
-      # both are on-demand build artifacts. Build them so hatch_build.py force-includes them into
-      # the wheel (a wheel built without this step ships neither).
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 11
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: widgets/pnpm-lock.yaml
-      - name: Build the JS artifacts (anywidget bundle + demo SPA)
-        run: |
-          pnpm -C widgets install --frozen-lockfile
-          pnpm -C widgets build            # core rfb-widgets dist (the demo-app imports it)
-          pnpm -C widgets build:anywidget  # -> src/pdum/rfb/static/widget.{js,css}
-          pnpm -C widgets build:demo       # -> src/pdum/rfb/static/demo/
-      - uses: astral-sh/setup-uv@v7
-      # Build the wheel DIRECTLY from source (not wheel-from-sdist): the JS artifacts are
-      # wheel-target build-hook artifacts that live in the source tree, not the sdist.
-      - run: |
-          uv build --package habemus-papadum-rfb --sdist
-          uv build --package habemus-papadum-rfb --wheel
-      # Completeness gate: the on-demand JS artifacts are NOT committed, so a build step that
-      # silently no-op'd would ship a wheel with a broken widget / demo and no committed
-      # fallback bytes. Fail the release loudly unless the built wheel actually contains them.
-      - name: Verify the wheel bundles the JS artifacts
-        run: |
-          python - <<'PY'
-          import glob, sys, zipfile
-          wheels = glob.glob("dist/*.whl")
-          assert len(wheels) == 1, f"expected exactly one wheel, found {wheels}"
-          required = [
-              "pdum/rfb/static/widget.js",
-              "pdum/rfb/static/widget.css",
-              "pdum/rfb/static/demo/index.html",
-          ]
-          names = set(zipfile.ZipFile(wheels[0]).namelist())
-          missing = [p for p in required if p not in names]
-          if missing:
-              sys.exit(f"::error::wheel {wheels[0]} is missing required JS artifacts: {missing}")
-          print(f"OK: {wheels[0]} contains all required JS artifacts")
-          PY
-      - uses: actions/upload-artifact@v6
-        with:
-          name: dist-rfb
-          path: dist/*
-
-  build-nvenc:
-    name: build habemus-papadum-nvenc (manylinux)
-    needs: [prepare]
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/build-nvenc-sdk-wheel.yml
-    with:
-      python_versions: "3.12 3.13 3.14"
-      ref: ${{ needs.prepare.outputs.tag }}
-
-  build-vtenc:
-    name: build habemus-papadum-vtenc (macOS arm64)
-    needs: [prepare]
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/build-vtenc-wheel.yml
-    with:
-      python_versions: "3.12 3.13 3.14"
-      ref: ${{ needs.prepare.outputs.tag }}
-
-  # --- publish (npm first: fail fast on the immutable registry) -------------
-  npm-publish:
-    name: publish npm (core + wrappers, provenance)
-    needs: [prepare]
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # provenance attestation (independent of the token publish)
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 11
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: widgets/pnpm-lock.yaml
-      - run: pnpm --dir widgets install --frozen-lockfile
-      - run: pnpm --dir widgets build
-      - run: pnpm --dir widgets -r --filter "./widgets/packages/*" run build
-      - name: Publish
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc-publish"
-          export NPM_CONFIG_USERCONFIG="$HOME/.npmrc-publish"
-          # ONE recursive publish: core (workspace root) + 3 wrappers, skipping private packages.
-          pnpm --dir widgets -r publish --provenance --no-git-checks
-          rm -f "$HOME/.npmrc-publish"
-
-  pypi-publish:
-    name: publish PyPI (rfb + nvenc + vtenc)
-    needs: [build-rfb, build-nvenc, build-vtenc, npm-publish]
-    runs-on: ubuntu-latest
-    # TEMPORARY token auth (PYPI_API_TOKEN) instead of OIDC trusted publishing — the maintainer
-    # is locked out of PyPI 2FA. Revert per docs/proposals/active/trusted_publishing_migration.md.
-    steps:
-      # Merge every wheel/sdist artifact into one dist/ (PyPI routes each file by package name).
-      - uses: actions/download-artifact@v7
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }} # user defaults to __token__
-          packages-dir: dist/
-          skip-existing: true # idempotent retries
-          attestations: false # PEP 740 attestations need id-token:write (OIDC); off for token auth
-
-  # --- finish: GitHub release + return main to the +dev marker --------------
-  github-release:
-    name: create GitHub Release
-    needs: [prepare, pypi-publish, npm-publish]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the release (fires docs.yml -> Pages)
-    steps:
-      - uses: actions/checkout@v5
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          generate_release_notes: true
-
-  finalize:
-    name: back to dev (<new>+dev)
-    needs: [prepare, pypi-publish, npm-publish]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # push the +dev marker commit to main
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.ref_name }} # main HEAD is the release commit we just pushed
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-      - name: Set the +dev marker and push
+      - name: Run the build workflow on the tag ship created
+        env:
+          PACKAGE: ${{ inputs.package }}
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python3 scripts/_versioning.py set "${{ needs.prepare.outputs.version }}+dev"
-          uv lock
-          git commit -am "back to dev (${{ needs.prepare.outputs.version }}+dev)"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git fetch --tags origin
+          tag=$(git tag --list "${PACKAGE}-v*" --sort=-v:refname | head -n 1)
+          [ -n "$tag" ] || { echo "::error::no ${PACKAGE}-v* tag found"; exit 1; }
+          case "$PACKAGE" in
+            habemus-papadum-nvenc) workflow=build-nvenc-sdk-wheel.yml ;;
+            habemus-papadum-vtenc) workflow=build-vtenc-wheel.yml ;;
+          esac
+          echo "dispatching $workflow for $tag"
+          gh workflow run "$workflow" --ref main -f ref="$tag"
