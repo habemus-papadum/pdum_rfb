@@ -253,3 +253,9 @@ packages/vtenc/_skbuild/
 .npmrc
 screenshot.png
 .DS_Store
+
+# Weekly refresh diagnostics are retained as workflow artifacts.
+.ship-refresh/
+
+# svelte-package regenerates its intermediate cache from src on every build.
+widgets/packages/svelte/.svelte-kit/

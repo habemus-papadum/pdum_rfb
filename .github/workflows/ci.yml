@@ -151,9 +151,9 @@ jobs:
 
       - name: Framework wrappers — typecheck, test, build
         run: |
-          pnpm -C widgets -r --filter './packages/*' run typecheck
-          pnpm -C widgets -r --filter './packages/*' run test
-          pnpm -C widgets -r --filter './packages/*' run build
+          pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run typecheck
+          pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run test
+          pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run build
 
       - name: Anywidget bundle builds
         # The bundle (src/pdum/rfb/static/widget.{js,css}) is a git-ignored, on-demand build

@@ -2,7 +2,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoteFramebuffer } from "../src";
 
-// The wrapper's job is lifecycle + reactivity; mock the core (happy-dom has no
+// The wrapper's job is lifecycle + reactivity; mock the core (jsdom has no
 // OffscreenCanvas/Worker) and record construct/dispose + expose the installed callbacks.
 vi.mock("@habemus-papadum/rfb-widgets", () => {
   const instances: FakeView[] = [];

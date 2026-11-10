@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [solid()],
   resolve: { conditions: ["development", "browser"] },
   test: {
-    environment: "happy-dom",
+    environment: "jsdom",
     include: ["tests/**/*.test.tsx"],
   },
 });

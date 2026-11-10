@@ -198,7 +198,7 @@ dev = [
     "starlette>=0.37",  # the [asgi] adapter + the `pdum-rfb demo` control plane (TestClient in tests)
     "uvicorn>=0.30",  # serves the `pdum-rfb demo` web app
     "marimo>=0.23.13",
-    "habemus-papadum-ship>=0.8.0",
+    "habemus-papadum-ship>=0.12.0",
 ]
 gpu-dev = [
     "cupy-cuda13x>=14",
@@ -245,6 +245,15 @@ omit = [
 # ship releases this package: one version per package, the tag is the truth,
 # the manifest carries <last release>+dev between releases. See the README.
 [tool.ship]
+refresh-test = [
+    "uv run --locked pytest -q",
+    "pnpm -C widgets build",
+    "pnpm -C widgets typecheck",
+    "pnpm -C widgets test",
+    "pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run typecheck",
+    "pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run test",
+    "pnpm -C widgets -r --filter @habemus-papadum/rfb-react --filter @habemus-papadum/rfb-svelte --filter @habemus-papadum/rfb-solid --fail-if-no-match run build",
+]
 ours = ["habemus-papadum-*", "@habemus-papadum/*"]
 shared-paths = [".github/workflows/**", "widgets/pnpm-workspace.yaml"]
 # The old pipeline's post-release commit ("back to dev (0.3.0+dev)") is not a change.

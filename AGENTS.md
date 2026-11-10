@@ -186,3 +186,12 @@ upload nothing, and `release.yml`'s `build-wheels` job dispatches the package's 
 workflow for the new tag, which builds the platform wheels, publishes them to PyPI and
 attaches them to the release. Versions follow `X.Y.Z+dev` → `X.Y.Z` (tagged) → `X.Y.Z+dev`.
 Full detail: docs/development.md; recovery: docs/release_recovery.md.
+
+## Weekly dependency maintenance
+
+The scheduled/manual `deps-refresh.yml` workflow uses Ship's shared refresh action.
+`[tool.ship] refresh-test` owns its explicit maintenance checks; release tests keep
+their existing scope. See [dependency maintenance](docs/dependency-maintenance.md)
+for commands, outcomes and verification limits. No package release or deployment
+is part of a dependency refresh. Keep generated reports out of Git and preserve
+human/agent edits on an existing repair PR.
