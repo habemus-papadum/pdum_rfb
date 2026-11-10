@@ -60,3 +60,11 @@ The Svelte package build also rewrote a previously tracked intermediate
 untracked; source files and the package's `dist` export contract are unchanged.
 This prevents ordinary verified builds from appearing as unapproved source edits
 to the lockfile updater.
+
+## Manual verification, November 10
+
+[Run 42863827783](https://github.com/habemus-papadum/pdum_rfb/actions/runs/42863827783) completed successfully. The retained integration report records `unchanged` at phase `complete`, after the configured baseline installation, policy and maintenance checks.
+
+The first-party resolution was already current, so the job made no empty commit and created no repair PR. Future candidate failures still use the shared draft-PR/report path; this run exercised the no-change path.
+
+The shared action's failed-candidate draft-PR path was separately exercised in its [integration smoke](https://github.com/habemus-papadum/pdum_ship/actions/runs/42859986953). Repository-level Actions PR creation is enabled; the default token permission remains read unless a workflow explicitly requests more.
